@@ -114,12 +114,12 @@ function compress(file) {
 /* ═══ STORAGE — auto-detects environment */
 var SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxzYpBaTI_1S0VepOi810zrzB-fyC4R2Flug0ZEOOxNzZ9F7CLiSWaKXEtk1C17sfsX/exec";
 
-/* Detect if running inside Claude sandbox (published artifact) */
+/* Detect if running inside Claude sandbox — strict check */
 var IS_CLAUDE_SANDBOX = (
   typeof window !== "undefined" && (
-    window.location.hostname.includes("claude") ||
-    window.location.hostname.includes("anthropic") ||
-    window.self !== window.top
+    window.location.hostname.endsWith("claude.ai") ||
+    window.location.hostname.endsWith("claude.site") ||
+    window.location.hostname.endsWith("anthropic.com")
   )
 );
 
@@ -290,14 +290,21 @@ async function saveConfigItem(key, value) {
     return;
   }
   var km={vendors:"vendors",props:"props",pin:"adminpin",company:"company",extcats:"extcats"};
-  await apiCall("saveConfig",{key:km[key]||key,value:value});
+  try {
+    await apiCall("saveConfig",{key:km[key]||key,value:value});
+  } catch(e) {
+    console.error("saveConfig failed for key "+key+":", e.message);
+    /* Fallback to localStorage so data isn't lost */
+    var ls_km2={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec"};
+    ls_set(ls_km2[key]||key,value);
+  }
 }
 
 /* ═══ DEFAULTS (fallback si Sheets aún no tiene config) */
 var DEF_V = [
-  {id:"v1",name:"Jorge Mantenimiento",primerNombre:"Jorge",segundoNombre:"",primerApellido:"Mantenimiento",segundoApellido:"",empresa:"",tipo:"interno",categoria:"EPI Mantenimiento",email:"jorge@spacioam.com",password:"jorge123",phone:"",active:true,tarifaLimpieza:75},
-  {id:"v2",name:"Luis Electricidad",  primerNombre:"Luis", segundoNombre:"",primerApellido:"Electricidad", segundoApellido:"",empresa:"",tipo:"interno",categoria:"EPI Mantenimiento",email:"luis@spacioam.com", password:"luis123", phone:"",active:true,tarifaLimpieza:100},
-  {id:"v3",name:"María Limpieza",     primerNombre:"María",segundoNombre:"",primerApellido:"Limpieza",     segundoApellido:"",empresa:"",tipo:"interno",categoria:"EPI Limpieza",    email:"maria@spacioam.com",password:"maria123",phone:"",active:true,tarifaLimpieza:75},
+  {id:"v1",name:"Jorge Mantenimiento",primerNombre:"Jorge",segundoNombre:"",primerApellido:"Mantenimiento",segundoApellido:"",empresa:"",tipo:"interno",categoria:"EPI Mantenimiento",email:"jorge@spacioam.com",password:"jorge123",phone:"",active:true,tarifaLimpieza:75,isAdmin:false},
+  {id:"v2",name:"Luis Electricidad",  primerNombre:"Luis", segundoNombre:"",primerApellido:"Electricidad", segundoApellido:"",empresa:"",tipo:"interno",categoria:"EPI Mantenimiento",email:"luis@spacioam.com", password:"luis123", phone:"",active:true,tarifaLimpieza:100,isAdmin:false},
+  {id:"v3",name:"María Limpieza",     primerNombre:"María",segundoNombre:"",primerApellido:"Limpieza",     segundoApellido:"",empresa:"",tipo:"interno",categoria:"EPI Limpieza",    email:"maria@spacioam.com",password:"maria123",phone:"",active:true,tarifaLimpieza:75,isAdmin:false},
 ];
 var DEF_P = [
   {id:"p1",name:"Narama – Apto 725",cuartos:1,banos:1},
@@ -321,6 +328,7 @@ export default function App() {
   const [ready,    setReady]    = useState(false);
   const [syncing,  setSyncing]  = useState(false);
   const [syncMsg,  setSyncMsg]  = useState("");
+  const [sheetsOk, setSheetsOk] = useState(null); /* null=checking, true=ok, false=failed */
 
   useEffect(function(){
     setSyncing(true); setSyncMsg("Conectando con Google Sheets…");
@@ -331,9 +339,11 @@ export default function App() {
       setPin(d.pin);
       setCompany(d.company);
       if(d.extcats) setExtCats(d.extcats);
+      setSheetsOk(!IS_CLAUDE_SANDBOX);
       setReady(true); setSyncing(false);
     }).catch(function(e){
       console.error("Load error:",e);
+      setSheetsOk(false);
       setReady(true); setSyncing(false);
     });
   },[]);
@@ -363,7 +373,7 @@ export default function App() {
   if (!sess)  return <Login vendors={vendors} adminPin={pin} onLogin={setSess}/>;
   if (sess.role==="vendor")
     return <VendorApp vendor={sess.vendor} allVendors={vendors} reps={reps.filter(function(r){return r.reportadoPor===sess.vendor.email;})} props={props} company={company} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onLogout={function(){setSess(null);}}/>;
-  return <AdminApp reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} syncing={syncing} syncMsg={syncMsg} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onLogout={function(){setSess(null);}}/>;
+  return <AdminApp reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onLogout={function(){setSess(null);}}/>;
 }
 
 /* ═══ LOGIN */
@@ -377,7 +387,7 @@ function Login({vendors, adminPin, onLogin}) {
   function loginAdmin() { if(pin===adminPin) onLogin({role:"admin"}); else setErr("PIN incorrecto."); }
   function loginVendor() {
     var v = vendors.find(function(x){ return x.email.toLowerCase()===email.toLowerCase()&&x.password===pass&&x.active; });
-    if (v) onLogin({role:"vendor",vendor:v}); else setErr("Correo o contraseña incorrectos.");
+    if (v) onLogin({role:v.isAdmin?"admin":"vendor",vendor:v}); else setErr("Correo o contraseña incorrectos.");
   }
 
   return (
@@ -415,7 +425,7 @@ function Login({vendors, adminPin, onLogin}) {
 }
 
 /* ═══ ADMIN */
-function AdminApp({reps,vendors,props,adminPin,company,extCats,syncing,syncMsg,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onLogout}) {
+function AdminApp({reps,vendors,props,adminPin,company,extCats,syncing,syncMsg,sheetsOk,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onLogout}) {
   const [tab,    setTab]    = useState("dash");
   const [detail, setDetail] = useState(null);
   const [cDel,   setCDel]   = useState(null);
@@ -433,9 +443,15 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,syncing,syncMsg,o
     <div style={{background:C.alabaster,minHeight:"100vh",fontFamily:"Montserrat,sans-serif"}}>
       <GS/>
       {syncing&&<SyncBanner msg={syncMsg}/>}
+      {sheetsOk===false&&(
+        <div style={{background:"#F5EDEC",borderBottom:"1px solid #DBC8C4",padding:"10px 20px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{fontSize:13,fontWeight:700,color:C.red}}>⚠ Sin conexión a Google Sheets</span>
+          <span style={{fontSize:12,color:C.earth}}>Los datos se guardan localmente en este dispositivo. Verifica la conexión al servidor.</span>
+        </div>
+      )}
       <ResponsiveHeader
         tab={tab} setTab={setTab}
-        alertCount={alerts.length} pendingQA={pendingQA}
+        alertCount={alerts.length} pendingQA={pendingQA} sheetsOk={sheetsOk} adminLabel={adminVendor?vendorDisplay(adminVendor):"Admin"}
         navItems={[["dash","Dashboard","◫"],["form","Formulario","✎"],["cfg","Config","⚙"]]}
         onLogout={onLogout}
         role="Admin"
@@ -2024,7 +2040,7 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats}) {
   function addVendor(){
     if(!newV.primerNombre||!newV.primerApellido||!newV.email||!newV.password)return;
     var name=[newV.primerNombre,newV.primerApellido].filter(Boolean).join(" ");
-    onSave(vendors.concat([Object.assign({},newV,{id:"v"+Date.now(),name:name,active:true,tarifaLimpieza:parseFloat(newV.tarifaLimpieza)||0})]));
+    onSave(vendors.concat([Object.assign({},newV,{id:"v"+Date.now(),name:name,active:true,isAdmin:false,tarifaLimpieza:parseFloat(newV.tarifaLimpieza)||0})]));
     setNewV(blankNew);
   }
 
@@ -2077,6 +2093,16 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats}) {
               {EditRow("phone",           "Tel.",     v.phone)}
               {EditRow("empresa",         "Empresa",  v.empresa)}
               {EditRow("tarifaLimpieza",  "Tarifa lim.", v.tarifaLimpieza||0, "number")}
+              {v.tipo==="interno"&&(
+                <div style={{display:"flex",alignItems:"center",gap:10,paddingTop:6,borderTop:"1px solid "+C.line}}>
+                  <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase",minWidth:72}}>Acceso Admin</span>
+                  <button onClick={function(){var u=vendors.map(function(x){if(x.id===v.id){var r=Object.assign({},x);r.isAdmin=!x.isAdmin;return r;}return x;});onSave(u);}} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 12px",borderRadius:6,border:"1px solid "+C.gray,background:v.isAdmin?"#1E1E1E":"#fff",color:v.isAdmin?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",transition:"all .2s"}}>
+                    <span style={{width:14,height:14,borderRadius:"50%",background:v.isAdmin?C.green:"#ccc",display:"inline-block",flexShrink:0}}/>
+                    {v.isAdmin?"Admin activo":"Sin acceso admin"}
+                  </button>
+                  {v.isAdmin&&<span style={{fontSize:10,color:C.earth}}>Puede iniciar sesión como administrador</span>}
+                </div>
+              )}
             </div>
           </div>
         );
@@ -2766,7 +2792,7 @@ function LogoText({color}) {
 
 
 /* ─── Responsive Header Component */
-function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogout, role}) {
+function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogout, role, sheetsOk, adminLabel}) {
   var sc = useScreen();
   var isMobile = sc.mobile;
 
@@ -2789,7 +2815,9 @@ function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogou
             </div>
           )}
           {!isMobile&&<div style={{width:1,height:20,background:C.line,margin:"0 6px"}}/>}
-          {!isMobile&&<span style={{fontSize:11,color:C.taupe,letterSpacing:".06em"}}>{role}</span>}
+          {!isMobile&&<span style={{fontSize:11,color:C.taupe,letterSpacing:".06em"}}>{adminLabel||role}</span>}
+          {sheetsOk===false&&!isMobile&&<span style={{fontSize:9,fontWeight:700,background:"#F5EDEC",color:C.red,padding:"2px 6px",borderRadius:4,letterSpacing:".06em"}}>SIN SHEETS</span>}
+          {sheetsOk===true&&!isMobile&&<span style={{fontSize:9,fontWeight:700,background:"#EDF5EF",color:C.green,padding:"2px 6px",borderRadius:4,letterSpacing:".06em"}}>● SHEETS</span>}
           {alertCount>0&&<span style={{background:C.red,color:"#fff",fontSize:9,fontWeight:700,borderRadius:100,padding:"2px 6px"}}>{alertCount}</span>}{pendingQA>0&&<span style={{background:"#4a5a7a",color:"#fff",fontSize:9,fontWeight:700,borderRadius:100,padding:"2px 6px",marginLeft:2}}>{"✓ "+pendingQA}</span>}
         </div>
 
