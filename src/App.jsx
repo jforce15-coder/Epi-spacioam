@@ -1576,7 +1576,7 @@ function DanosFormSolo({vendors,props,onSubmit,defaultVendor,onBack}) {
 
 /* ═══════════════ LIMPIEZA TRADICIONAL WIZARD ══════════════════════════ */
 function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack}) {
-  const STEPS = ["Bienvenida","País","Ciudad","Responsable","Propiedad","Habitaciones","Baños","Cocina","Sala e Insumos","Limpieza Detallada","Inventario","Daños","Confirmación"];
+  const STEPS = ["Bienvenida","País","Ciudad","Responsable","Propiedad","Habitaciones","Baños","Cocina","Sala e Insumos","Limpieza Detallada","Inventario","Daños","Foto uniforme","Confirmación"];
   const [step,setStep]   = useState(0);
   const [errMsg,setErrMsg] = useState("");
   const [form,setForm] = useState({
@@ -1589,7 +1589,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack}) {
     fotosTv:null, fotosSillon:null, fotosInsumos:null,
     fotosDebajoCama:null, fotosCloset:null,
     inventario:INV_DEFAULT.map(function(i){return Object.assign({},i,{cantidad:i.cantidad,estado:"ok",foto:null});}),
-    hayDanios:false, danios:[],
+    hayDanios:false, danios:[], fotoUniforme:null,
     comentarios:"",
   });
   const [done,setDone]=useState(false);
@@ -1847,8 +1847,26 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack}) {
           </WizStep>
         )}
 
-        {/* STEP 12: Confirmación */}
+        {/* STEP 12: Foto uniforme */}
         {step===12&&(
+          <WizStep title="Foto en uniforme" step={step} total={STEPS.length-2} onPrev={prev} onNext={next} canNext>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{background:C.surfaceWarm,borderRadius:8,padding:"12px 14px",border:"1px solid "+C.line,fontSize:13,color:C.earth,lineHeight:1.6}}>
+                📸 Tómate una selfie con tu uniforme de Spacio AM antes de salir del apartamento.
+              </div>
+              <SinglePhotoUp
+                foto={form.fotoUniforme}
+                accent={C.earth}
+                onAdd={function(f){compress(f).then(function(d){sf("fotoUniforme",d);});}}
+                onDel={function(){sf("fotoUniforme",null);}}
+              />
+              <div style={{fontSize:11,color:C.taupe,textAlign:"center"}}>La foto es opcional pero recomendada.</div>
+            </div>
+          </WizStep>
+        )}
+
+        {/* STEP 13: Confirmación */}
+        {step===13&&(
           <div>
             <div style={{textAlign:"center",marginBottom:28}}>
               <div style={{fontSize:48,marginBottom:12}}>📋</div>
@@ -1861,7 +1879,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack}) {
             {errMsg&&<div style={{padding:"12px 14px",borderRadius:8,background:"#F5EDEC",color:C.red,fontSize:13,fontWeight:600,border:"1px solid #DBC8C4"}}>{errMsg}</div>}
             <div style={{display:"flex",gap:10,flexDirection:"column"}}>
               <button onClick={prev} style={{padding:"12px",borderRadius:12,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:13,fontWeight:600,cursor:"pointer"}}>← Revisar</button>
-              <BigBtn onClick={submit} dis={busy}>{busy?"Subiendo… puede tardar unos segundos":"Enviar limpieza →"}</BigBtn>
+              <BigBtn onClick={submitTrad} dis={busy}>{busy?"Subiendo… puede tardar unos segundos":"Enviar limpieza →"}</BigBtn>
             </div>
           </div>
         )}
@@ -1873,7 +1891,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack}) {
 
 /* ═══════════════ LIMPIEZA PROFUNDA WIZARD ═════════════════════════════ */
 function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack}) {
-  const STEPS_P = ["Bienvenida","Propiedad","Regadera y Ducha","Ventanas","Cocina profunda","Gavetas y Detrás","Detalle extra","Inventario","Confirmación"];
+  const STEPS_P = ["Bienvenida","Propiedad","Regadera y Ducha","Ventanas","Cocina profunda","Gavetas y Detrás","Detalle extra","Inventario","Foto uniforme","Confirmación"];
   const [step,setStep]   = useState(0);
   const [errMsg,setErrMsg] = useState("");
   const [form,setForm] = useState({
@@ -2669,8 +2687,22 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA}
               <div><div style={{fontSize:10,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Categoría</div><span style={{padding:"5px 13px",borderRadius:100,fontSize:12,fontWeight:700,background:b.bg,color:b.tx}}>{rep.categoria}</span></div>
               <div><div style={{fontSize:10,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Trabajo realizado</div><div style={{fontSize:14,color:C.black,lineHeight:1.65,background:C.beige,padding:"13px 15px",borderRadius:10}}>{rep.descripcion}</div></div>
               {rep.comentarios&&<div><div style={{fontSize:10,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Notas / Comentarios</div><div style={{fontSize:13.5,color:C.earth,lineHeight:1.65,background:C.beige,padding:"11px 14px",borderRadius:10}}>{rep.comentarios}</div></div>}
-              {rep.fotoAntes&&rep.fotoAntes.length>0&&<PicsRow title="Fotos ANTES" photos={rep.fotoAntes}/>}
-              {rep.fotoDespues&&rep.fotoDespues.length>0&&<PicsRow title="Fotos DESPUÉS" photos={rep.fotoDespues} accent={C.peach}/>}
+              {/* ── Cleaning: full photo gallery organized by section */}
+              {isCleaning(rep.categoria)&&<CleaningPhotoGallery rep={rep}/>}
+              {/* ── Non-cleaning: simple before/after */}
+              {!isCleaning(rep.categoria)&&rep.fotoAntes&&rep.fotoAntes.length>0&&<PicsRow title="Fotos ANTES" photos={rep.fotoAntes}/>}
+              {!isCleaning(rep.categoria)&&rep.fotoDespues&&rep.fotoDespues.length>0&&<PicsRow title="Fotos DESPUÉS" photos={rep.fotoDespues} accent={C.peach}/>}
+              {/* ── Inventory summary */}
+              {isCleaning(rep.categoria)&&rep.inventario&&rep.inventario.length>0&&(
+                <InventorySummary inventario={rep.inventario}/>
+              )}
+              {/* ── Damage summary */}
+              {isCleaning(rep.categoria)&&rep.hayDanios&&rep.danios&&rep.danios.length>0&&(
+                <DamageSummary danios={rep.danios}/>
+              )}
+              {isCleaning(rep.categoria)&&!rep.hayDanios&&(
+                <div style={{padding:"10px 14px",borderRadius:8,background:"#EDF5EF",fontSize:13,color:C.green,fontWeight:600}}>✓ Sin daños reportados</div>
+              )}
               {rep.factura ? (
                 <div>
                   <div style={{fontSize:10,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>Factura adjunta</div>
@@ -3137,6 +3169,62 @@ function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogou
 
 
 
+
+/* ─── Inventory Summary — shown in detail view */
+function InventorySummary({inventario}) {
+  var issues = (inventario||[]).filter(function(x){return x.estado!=="ok";});
+  var ok     = (inventario||[]).filter(function(x){return x.estado==="ok";});
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>Inventario verificado</div>
+      {ok.length>0&&(
+        <div style={{padding:"10px 14px",borderRadius:8,background:"#EDF5EF",fontSize:12,color:C.green,fontWeight:600}}>
+          ✓ {ok.length} ítem{ok.length!==1?"s":""} en buen estado
+        </div>
+      )}
+      {issues.map(function(item,i){return (
+        <div key={i} style={{padding:"11px 14px",borderRadius:8,background:"#FEF0EC",border:"1px solid #e9c2a0",display:"flex",flexDirection:"column",gap:4}}>
+          <div style={{fontSize:13,fontWeight:600,color:"#b5622a"}}>✗ {item.name}</div>
+          {item.cantidad>0&&<div style={{fontSize:12,color:C.earth}}>Cantidad reportada: {item.cantidad}</div>}
+          {item.foto&&(item.foto.startsWith("http")||item.foto.startsWith("data:"))&&(
+            <a href={item.foto} target="_blank" rel="noopener noreferrer">
+              <img src={item.foto} alt={item.name} style={{width:80,height:70,objectFit:"cover",borderRadius:6,marginTop:4,border:"1px solid "+C.line}}/>
+            </a>
+          )}
+        </div>
+      );})}
+      {issues.length===0&&ok.length>0&&<div style={{fontSize:11,color:C.taupe}}>Todo el inventario reportado en buen estado.</div>}
+    </div>
+  );
+}
+
+/* ─── Damage Summary — shown in detail view */
+function DamageSummary({danios}) {
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      <div style={{fontSize:10,fontWeight:700,color:C.red,letterSpacing:".18em",textTransform:"uppercase"}}>⚠ Daños reportados ({danios.length})</div>
+      {(danios||[]).map(function(d,i){return (
+        <div key={i} style={{padding:"12px 14px",borderRadius:8,background:"#F5EDEC",border:"1px solid #DBC8C4",display:"flex",flexDirection:"column",gap:6}}>
+          <div style={{fontSize:13,fontWeight:700,color:C.red}}>Daño {i+1}: {d.desc||d.tipo||"Sin descripción"}</div>
+          {d.origen&&<div style={{fontSize:12,color:C.earth}}>Origen: {d.origen}</div>}
+          {d.quienPaga&&<div style={{fontSize:12,color:C.earth}}>Cubre: {d.quienPaga}</div>}
+          {d.fotos&&d.fotos.length>0&&(
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:4}}>
+              {d.fotos.map(function(src,pi){return (
+                src&&(src.startsWith("http")||src.startsWith("data:"))
+                  ? <a key={pi} href={src} target="_blank" rel="noopener noreferrer">
+                      <img src={src} alt={"daño "+i+" foto "+pi} style={{width:80,height:70,objectFit:"cover",borderRadius:6,border:"1px solid "+C.line}}/>
+                    </a>
+                  : null
+              );})}
+            </div>
+          )}
+        </div>
+      );})}
+    </div>
+  );
+}
+
 /* ─── Cleaning Photo Gallery — shows all cleaning-specific photos in admin view */
 function CleaningPhotoGallery({rep}) {
   var sections = [];
@@ -3147,6 +3235,9 @@ function CleaningPhotoGallery({rep}) {
       : (photos&&typeof photos==="string"&&(photos.startsWith("http")||photos.startsWith("data:")) ? [photos] : []);
     if (valid.length>0) sections.push({title:title, photos:valid});
   }
+
+  /* Selfie en uniforme */
+  if (rep.fotoUniforme) addSection("Foto en uniforme", rep.fotoUniforme);
 
   /* Limpieza Tradicional photos */
   if (rep.fotosHabitaciones&&rep.fotosHabitaciones.length) {
@@ -3437,4 +3528,3 @@ function InvoiceUp({factura,onAdd,onDel}) {
     </div>
   );
 }
-
