@@ -79,8 +79,14 @@ const INV_DEFAULT = [
 
 /* ═══ UTILS */
 function fmtDate(d) {
-  try { return new Date(d+"T12:00:00").toLocaleDateString("es-GT",{day:"2-digit",month:"short",year:"numeric"}); }
-  catch(e) { return d; }
+  if (!d) return "—";
+  try {
+    var dt = (typeof d==="string"&&d.length===10&&/^\d{4}-\d{2}-\d{2}$/.test(d))
+      ? new Date(d+"T12:00:00")
+      : new Date(d);
+    if (isNaN(dt.getTime())) return String(d);
+    return dt.toLocaleDateString("es-GT",{day:"2-digit",month:"short",year:"numeric"});
+  } catch(e) { return String(d)||"—"; }
 }
 function todayStr() { return new Date().toISOString().split("T")[0]; }
 function relDate(days) { return new Date(Date.now()-days*86400000).toISOString().split("T")[0]; }
@@ -186,9 +192,9 @@ async function loadAllData() {
   };
 }
 
-async function uploadMedia(b64, name, mime) {
+async function uploadMedia(b64, name, mime, subfolder) {
   if (!b64||typeof b64!=="string"||!b64.startsWith("data:")) return b64;
-  var r = await apiCall("uploadFile", {b64:b64, name:name, mime:mime});
+  var r = await apiCall("uploadFile", {b64:b64, name:name, mime:mime, subfolder:subfolder||""});
   return r.url;
 }
 
@@ -210,8 +216,14 @@ async function processMedia(rep) {
     return val&&val.startsWith&&val.startsWith("data:") ? await uploadMedia(val, name+"-"+id+".jpg","image/jpeg") : val;
   }
 
-  r.fotoAntes   = r.fotoAntes   ? await Promise.all(r.fotoAntes.map(function(f,i){  return f&&f.startsWith&&f.startsWith("data:")?uploadMedia(f,"antes-"+id+"-"+i+".jpg","image/jpeg"):Promise.resolve(f); })) : [];
-  r.fotoDespues = r.fotoDespues ? await Promise.all(r.fotoDespues.map(function(f,i){return f&&f.startsWith&&f.startsWith("data:")?uploadMedia(f,"despues-"+id+"-"+i+".jpg","image/jpeg"):Promise.resolve(f);})) : [];
+  /* Build safe filename prefix: apt-name + date + category */
+  var safeApt  = (rep.propiedad||"sin-apto").replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚ\s]/g,"").replace(/\s+/g,"-").slice(0,30);
+  var safeDate = (rep.fecha||todayStr()).replace(/-/g,"");
+  var safeCat  = (rep.categoria||"trabajo").split(" ")[0].toLowerCase();
+  var prefix   = safeApt+"_"+safeDate+"_"+safeCat;
+
+  r.fotoAntes   = r.fotoAntes   ? await Promise.all(r.fotoAntes.map(function(f,i){  return f&&f.startsWith&&f.startsWith("data:")?uploadMedia(f,prefix+"_antes-"+(i+1)+".jpg","image/jpeg",safeCat):Promise.resolve(f); })) : [];
+  r.fotoDespues = r.fotoDespues ? await Promise.all(r.fotoDespues.map(function(f,i){return f&&f.startsWith&&f.startsWith("data:")?uploadMedia(f,prefix+"_despues-"+(i+1)+".jpg","image/jpeg",safeCat):Promise.resolve(f);})) : [];
 
   if (r.factura&&r.factura.data&&r.factura.data.startsWith("data:")) {
     var ext = r.factura.type==="application/pdf"?"pdf":"jpg";
@@ -267,15 +279,27 @@ async function processMedia(rep) {
 
 async function saveReportFull(rep) {
   if (IS_CLAUDE_SANDBOX) {
-    /* In Claude sandbox: save to localStorage, skip Drive upload */
     var r = Object.assign({},rep);
     ls_saveReport(r);
     return r;
   }
-  /* On Vercel/custom domain: upload images to Drive, save to Sheets */
-  var r = await processMedia(rep);
-  await apiCall("saveReport",{data:r});
-  return r;
+  /* STEP 1: Save report immediately without photos (fast, ensures record exists) */
+  var stub = Object.assign({},rep,{fotoAntes:[],fotoDespues:[],factura:null,_uploading:true});
+  try { await apiCall("saveReport",{data:stub}); } catch(e) { console.error("Stub save failed:",e); throw e; }
+
+  /* STEP 2: Upload media & update report (may take longer) */
+  try {
+    var processed = await processMedia(rep);
+    processed._uploading = false;
+    await apiCall("saveReport",{data:processed});
+    return processed;
+  } catch(e) {
+    console.error("Media upload failed, report saved without photos:",e);
+    stub._uploading = false;
+    stub._photoError = true;
+    try { await apiCall("saveReport",{data:stub}); } catch(_){}
+    return stub;
+  }
 }
 
 async function deleteReportById(id) {
@@ -300,6 +324,41 @@ async function saveConfigItem(key, value) {
   }
 }
 
+
+/* ═══ OFFLINE RETRY QUEUE */
+var RETRY_KEY = "sam_retry_q";
+
+function rq_get() { try{return JSON.parse(localStorage.getItem(RETRY_KEY)||"[]");}catch(e){return[];} }
+function rq_set(q) { try{localStorage.setItem(RETRY_KEY,JSON.stringify(q));}catch(e){} }
+function rq_add(rep) {
+  var q=rq_get(); if(q.find(function(x){return x.rep.id===rep.id;})) return;
+  q.push({rep:rep,attempts:0,nextTry:Date.now()+30000});
+  rq_set(q);
+}
+function rq_remove(id) { rq_set(rq_get().filter(function(x){return x.rep.id!==id;})); }
+function rq_pending() { return rq_get().filter(function(x){return x.attempts>=3;}); }
+
+async function rq_process(onSuccess) {
+  var q=rq_get(); if(!q.length) return false;
+  var now=Date.now(); var changed=false;
+  var delays=[30000,120000,300000];
+  for(var i=q.length-1;i>=0;i--) {
+    var item=q[i];
+    if(item.attempts>=3||now<item.nextTry) continue;
+    try {
+      var r=await saveReportFull(item.rep);
+      q.splice(i,1); changed=true;
+      if(onSuccess) onSuccess(r);
+    } catch(e) {
+      q[i].attempts++;
+      q[i].nextTry=now+(delays[Math.min(q[i].attempts-1,2)]);
+      changed=true;
+    }
+  }
+  if(changed) rq_set(q);
+  return changed;
+}
+
 /* ═══ DEFAULTS (fallback si Sheets aún no tiene config) */
 var DEF_V = [
   {id:"v1",name:"Jorge Mantenimiento",primerNombre:"Jorge",segundoNombre:"",primerApellido:"Mantenimiento",segundoApellido:"",empresa:"",tipo:"interno",categoria:"EPI Mantenimiento",email:"jorge@spacioam.com",password:"jorge123",phone:"",active:true,tarifaLimpieza:75,isAdmin:false},
@@ -318,7 +377,9 @@ var DEF_P = [
 
 /* ═══ ROOT */
 export default function App() {
-  const [sess,     setSess]     = useState(null);
+  const [sess,     setSess]     = useState(function(){
+    try { var s=localStorage.getItem("sam_sess"); return s?JSON.parse(s):null; } catch(e){return null;}
+  });
   const [reps,     setReps]     = useState([]);
   const [vendors,  setVendors]  = useState(DEF_V);
   const [props,    setProps]    = useState(DEF_P);
@@ -328,10 +389,23 @@ export default function App() {
   const [ready,    setReady]    = useState(false);
   const [syncing,  setSyncing]  = useState(false);
   const [syncMsg,  setSyncMsg]  = useState("");
-  const [sheetsOk, setSheetsOk] = useState(null); /* null=checking, true=ok, false=failed */
+  const [sheetsOk, setSheetsOk] = useState(null);
+  const [retryQ,   setRetryQ]   = useState(function(){return rq_pending();});
 
   useEffect(function(){
     setSyncing(true); setSyncMsg("Conectando con Google Sheets…");
+    /* Check retry queue every 45 seconds */
+    var retryInterval = setInterval(async function(){
+      var changed = await rq_process(function(r){
+        setReps(function(prev){
+          var i=prev.findIndex(function(x){return x.id===r.id;});
+          if(i>=0){var n=[...prev];n[i]=r;return n;}
+          return [r,...prev];
+        });
+      });
+      if(changed) setRetryQ(rq_pending());
+    }, 45000);
+
     loadAllData().then(function(d){
       setReps(d.reports);
       setVendors(d.vendors);
@@ -357,6 +431,16 @@ export default function App() {
         if(i>=0){var n=[...prev];n[i]=processed;return n;}
         return [processed,...prev];
       });
+    } catch(e) {
+      console.error("Upsert failed, adding to retry queue:", e);
+      rq_add(r);
+      /* Still show locally so the user sees it */
+      setReps(function(prev){
+        var i=prev.findIndex(function(x){return x.id===r.id;});
+        if(i>=0){var n=[...prev];n[i]=r;return n;}
+        return [r,...prev];
+      });
+      setRetryQ(rq_pending());
     } finally { setSyncing(false); setSyncMsg(""); }
   }
   async function del(id) {
@@ -369,15 +453,38 @@ export default function App() {
   async function svCo(v)  { setCompany(v); saveConfigItem("company",v); }
   async function svExtCats(v) { setExtCats(v); saveConfigItem("extcats",v); }
 
+  async function refresh() {
+    setSyncing(true); setSyncMsg("Actualizando…");
+    try {
+      var d = await loadAllData();
+      setReps(d.reports);
+      setVendors(d.vendors);
+      setProps(d.props);
+      setPin(d.pin);
+      setCompany(d.company);
+      if(d.extcats) setExtCats(d.extcats);
+      setSheetsOk(true);
+    } catch(e) { setSheetsOk(false); }
+    finally { setSyncing(false); setSyncMsg(""); }
+  }
+  function login(s) {
+    try { localStorage.setItem("sam_sess",JSON.stringify(s)); } catch(e){}
+    setSess(s);
+  }
+  function logout() {
+    try { localStorage.removeItem("sam_sess"); } catch(e){}
+    setSess(null);
+  }
+
   if (!ready) return <Loader/>;
-  if (!sess)  return <Login vendors={vendors} adminPin={pin} onLogin={setSess}/>;
+  if (!sess)  return <Login vendors={vendors} adminPin={pin} onLogin={login} sheetsOk={sheetsOk}/>;
   if (sess.role==="vendor")
-    return <VendorApp vendor={sess.vendor} allVendors={vendors} reps={reps.filter(function(r){return r.reportadoPor===sess.vendor.email;})} props={props} company={company} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onLogout={function(){setSess(null);}}/>;
-  return <AdminApp reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onLogout={function(){setSess(null);}}/>;
+    return <VendorApp vendor={sess.vendor} allVendors={vendors} reps={reps.filter(function(r){return r.reportadoPor===sess.vendor.email;})} props={props} company={company} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onLogout={logout}/>;
+  return <AdminApp reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onRefresh={refresh} onLogout={logout}/>;
 }
 
 /* ═══ LOGIN */
-function Login({vendors, adminPin, onLogin}) {
+function Login({vendors, adminPin, onLogin, sheetsOk}) {
   const [tab,   setTab]   = useState("vendor");
   const [pin,   setPin]   = useState("");
   const [email, setEmail] = useState("");
@@ -386,13 +493,22 @@ function Login({vendors, adminPin, onLogin}) {
 
   function loginAdmin() { if(pin===adminPin) onLogin({role:"admin"}); else setErr("PIN incorrecto."); }
   function loginVendor() {
-    var v = vendors.find(function(x){ return x.email.toLowerCase()===email.toLowerCase()&&x.password===pass&&x.active; });
+    /* Allow login with full email OR just the part before @ */
+    var input = email.toLowerCase().trim();
+    var v = vendors.find(function(x){
+      var em = x.email.toLowerCase();
+      var user = em.split("@")[0];
+      return (em===input||user===input) && x.password===pass && x.active;
+    });
     if (v) onLogin({role:v.isAdmin?"admin":"vendor",vendor:v}); else setErr("Correo o contraseña incorrectos.");
   }
 
   return (
     <div style={{minHeight:"100vh",background:"#F7F7F7",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"Montserrat,sans-serif",}}>
       <GS/>
+      {/* Sheets status badge top-right */}
+      {sheetsOk===false&&<div style={{position:"fixed",top:14,right:14,fontSize:10,fontWeight:700,background:"#F5EDEC",color:"#8a3030",padding:"4px 10px",borderRadius:6,border:"1px solid #DBC8C4",zIndex:200,letterSpacing:".06em"}}>⚠ Sin Sheets</div>}
+      {sheetsOk===true&&<div style={{position:"fixed",top:14,right:14,fontSize:10,fontWeight:700,background:"#EDF5EF",color:"#3d6b52",padding:"4px 10px",borderRadius:6,zIndex:200,letterSpacing:".06em"}}>● Sheets OK</div>}
       <div style={{width:"100%",maxWidth:400}}>
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:40,gap:8}}>
           <LogoWordmark size={1} color={C.black}/>
@@ -425,7 +541,7 @@ function Login({vendors, adminPin, onLogin}) {
 }
 
 /* ═══ ADMIN */
-function AdminApp({reps,vendors,props,adminPin,company,extCats,syncing,syncMsg,sheetsOk,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onLogout}) {
+function AdminApp({reps,vendors,props,adminPin,company,extCats,syncing,syncMsg,sheetsOk,retryQ,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onRefresh,onLogout}) {
   const [tab,    setTab]    = useState("dash");
   const [detail, setDetail] = useState(null);
   const [cDel,   setCDel]   = useState(null);
@@ -446,7 +562,21 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,syncing,syncMsg,s
       {sheetsOk===false&&(
         <div style={{background:"#F5EDEC",borderBottom:"1px solid #DBC8C4",padding:"10px 20px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
           <span style={{fontSize:13,fontWeight:700,color:C.red}}>⚠ Sin conexión a Google Sheets</span>
-          <span style={{fontSize:12,color:C.earth}}>Los datos se guardan localmente en este dispositivo. Verifica la conexión al servidor.</span>
+          <span style={{fontSize:12,color:C.earth}}>Los datos se guardan localmente. Se reintentará automáticamente.</span>
+        </div>
+      )}
+      {retryQ&&retryQ.length>0&&(
+        <div style={{background:"#FFF9E6",borderBottom:"1px solid #E6D88A",padding:"10px 20px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{fontSize:13,fontWeight:700,color:"#7a6000"}}>⏳ {retryQ.length} trabajo{retryQ.length!==1?"s":""} pendiente{retryQ.length!==1?"s":""} de sincronizar</span>
+          <span style={{fontSize:12,color:"#6a5500"}}>Se reintentarán automáticamente cada 45 segundos.</span>
+          <button onClick={async function(){setSyncing&&setSyncing(true);var ch=await rq_process(function(r){});setRetryQ(rq_pending());setSyncing&&setSyncing(false);}} style={{padding:"4px 12px",borderRadius:6,border:"none",background:"#7a6000",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",marginLeft:"auto"}}>↻ Reintentar</button>
+        </div>
+      )}
+      {retryQ&&retryQ.length>0&&(
+        <div style={{background:"#FFF3CD",borderBottom:"1px solid #E6D88A",padding:"10px 20px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{fontSize:13,fontWeight:700,color:"#7a6000"}}>⏳ {retryQ.length} trabajo{retryQ.length!==1?"s":""} pendiente{retryQ.length!==1?"s":""} de sincronizar</span>
+          <span style={{fontSize:12,color:"#6a5500"}}>Guardados localmente — se reintentarán automáticamente.</span>
+          <button onClick={async function(){setSyncing(true);setSyncMsg("Reintentando…");var ch=await rq_process(function(r){setReps(function(p){var i=p.findIndex(function(x){return x.id===r.id;});if(i>=0){var n=[...p];n[i]=r;return n;}return[r,...p];});});setRetryQ(rq_pending());setSyncing(false);setSyncMsg("");}} style={{padding:"4px 12px",borderRadius:6,border:"none",background:"#7a6000",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",marginLeft:"auto"}}>↻ Reintentar ahora</button>
         </div>
       )}
       <ResponsiveHeader
@@ -457,7 +587,7 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,syncing,syncMsg,s
         role="Admin"
       />
 
-      <div style={{display:tab==="dash"?"block":"none"}}><DashView reps={reps} vendors={vendors} alerts={alerts} onSelect={setDetail} onMarkPaid={markPaid}/></div>
+      <div style={{display:tab==="dash"?"block":"none"}}><DashView reps={reps} vendors={vendors} alerts={alerts} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh}/></div>
       <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
       <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  vendors={vendors} props={props} adminPin={adminPin} company={company} extCats={extCats||[]} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
 
@@ -478,14 +608,14 @@ function DashView({reps,vendors,alerts,onSelect,onMarkPaid}) {
           <button key={k} onClick={function(){setSub(k);}} style={{padding:"14px 16px",border:"none",borderBottom:"1.5px solid "+(sub===k?C.black:"transparent"),background:"none",fontSize:13,fontWeight:600,cursor:"pointer",color:sub===k?C.black:C.taupe,transition:"all .2s"}}>{l}</button>
         ); })}
       </div>
-      <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} onSelect={onSelect} onMarkPaid={onMarkPaid}/></div>
+      <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} onSelect={onSelect} onMarkPaid={onMarkPaid} onRefresh={onRefresh}/></div>
       <div style={{display:sub==="exec"?"block":"none"}}><ExecDash reps={reps} vendors={vendors}/></div>
     </div>
   );
 }
 
 /* ─── Operational Dashboard */
-function OpsDash({reps,onSelect,onMarkPaid}) {
+function OpsDash({reps,onSelect,onMarkPaid,onRefresh}) {
   const [view,     setView]     = useState("table");
   const [fVend,    setFVend]    = useState("Todos");
   const [fStatus,  setFStatus]  = useState("Todos");
@@ -539,10 +669,10 @@ function OpsDash({reps,onSelect,onMarkPaid}) {
     <div>
       {/* Stats bar */}
       <div style={{background:"#fff",padding:"12px 18px",display:"flex",gap:16,alignItems:"center",flexWrap:"wrap",borderBottom:"1px solid "+C.line}}>
-        <Stat label={fReps.length!==reps.length?"Mostrando":"Total"} value={fReps.length} sub={fReps.length!==reps.length?"de "+reps.length:null}/>
-        <Sep/><Stat label="Sin cobrar" value={unp} warn={unp>0}/>
-        <Sep/><Stat label="Subtotal"   value={"Q"+tot.toLocaleString()}/>
+        <Stat label={fReps.length!==reps.length?"Mostrando":"Trabajos"} value={fReps.length} sub={fReps.length!==reps.length?"de "+reps.length:null}/>
+        <Sep/><Stat label="Facturado"  value={"Q"+tot.toLocaleString()}/>
         <Sep/><Stat label="Cobrado"    value={"Q"+cob.toLocaleString()} green/>
+        <Sep/><Stat label="Pendiente"  value={"Q"+(tot-cob).toLocaleString()} warn={(tot-cob)>0}/>
       </div>
 
       {/* Filter panel */}
@@ -609,6 +739,7 @@ function OpsDash({reps,onSelect,onMarkPaid}) {
                 <span style={{background:C.peach,color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>{actF}</span>
               </button>
             )}
+            <button onClick={onRefresh} title="Actualizar" style={{padding:"7px 11px",borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:15,cursor:"pointer",fontWeight:600,lineHeight:1}}>↻</button>
             <div style={{display:"flex",background:C.beige,borderRadius:8,overflow:"hidden",border:"1px solid "+C.line}}>
               {[["table","☰ Lista"],["cal","📅 Cal"]].map(function(it){ var k=it[0],ic=it[1]; return <button key={k} onClick={function(){setView(k);}} style={{padding:"7px 12px",border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:view===k?C.black:C.beige,color:view===k?"#fff":C.earth,transition:"all .2s",whiteSpace:"nowrap"}}>{ic}</button>; })}
             </div>
@@ -2085,6 +2216,7 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats}) {
               <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0,marginLeft:8}}>
                 <span style={{fontSize:10,fontWeight:700,color:v.active?C.green:C.red,background:v.active?"#EDF5EF":"#F5EDEC",padding:"3px 8px",borderRadius:100}}>{v.active?"Activo":"Inactivo"}</span>
                 <button onClick={function(){var u=vendors.map(function(x){if(x.id===v.id){var r=Object.assign({},x);r.active=!x.active;return r;}return x;});onSave(u);}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11,cursor:"pointer"}}>{v.active?"Desactivar":"Activar"}</button>
+                <button onClick={function(){if(window.confirm("¿Eliminar a "+vendorDisplay(v)+" permanentemente? Esta acción no se puede deshacer.")){onSave(vendors.filter(function(x){return x.id!==v.id;}));}}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #DBC8C4",background:"#fff",color:C.red,fontSize:11,cursor:"pointer",fontWeight:600}}>Eliminar</button>
               </div>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
