@@ -2369,10 +2369,12 @@ function PropList({props, onSave}) {
         return (
           <div key={p.id} style={{background:"#fff",borderRadius:10,padding:"12px 16px",border:"1px solid "+(isConfirming?"#DBC8C4":C.line)}}>
             {/* Name + delete area */}
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:isConfirming?10:8}}>
-              <span style={{fontSize:13.5,fontWeight:500,color:C.black}}>{p.name}</span>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:isConfirming?10:8}}>
+              <span style={{fontSize:13.5,fontWeight:500,color:C.black,flex:1}}>{p.name}</span>
               {!isConfirming&&(
-                <button onClick={function(){setConfirmId(p.id);}} style={{background:"none",border:"none",color:C.gray,fontSize:16,cursor:"pointer",padding:"2px 6px",borderRadius:4,lineHeight:1}}>×</button>
+                <button onClick={function(){setConfirmId(p.id);}} style={{flexShrink:0,padding:"5px 12px",borderRadius:6,border:"1px solid #DBC8C4",background:"#FFF9F9",color:C.red,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  Eliminar
+                </button>
               )}
             </div>
 
@@ -3435,3 +3437,4 @@ function InvoiceUp({factura,onAdd,onDel}) {
     </div>
   );
 }
+
