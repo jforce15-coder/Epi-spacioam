@@ -624,20 +624,7 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,syncing,syncMsg,s
           <span style={{fontSize:12,color:C.earth}}>Los datos se guardan localmente. Se reintentará automáticamente.</span>
         </div>
       )}
-      {retryQ&&retryQ.length>0&&(
-        <div style={{background:"#FFF9E6",borderBottom:"1px solid #E6D88A",padding:"10px 20px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-          <span style={{fontSize:13,fontWeight:700,color:"#7a6000"}}>⏳ {retryQ.length} trabajo{retryQ.length!==1?"s":""} pendiente{retryQ.length!==1?"s":""} de sincronizar</span>
-          <span style={{fontSize:12,color:"#6a5500"}}>Se reintentarán automáticamente cada 45 segundos.</span>
-          <button onClick={async function(){setSyncing&&setSyncing(true);var ch=await rq_process(function(r){});setRetryQ(rq_pending());setSyncing&&setSyncing(false);}} style={{padding:"4px 12px",borderRadius:6,border:"none",background:"#7a6000",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",marginLeft:"auto"}}>↻ Reintentar</button>
-        </div>
-      )}
-      {retryQ&&retryQ.length>0&&(
-        <div style={{background:"#FFF3CD",borderBottom:"1px solid #E6D88A",padding:"10px 20px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-          <span style={{fontSize:13,fontWeight:700,color:"#7a6000"}}>⏳ {retryQ.length} trabajo{retryQ.length!==1?"s":""} pendiente{retryQ.length!==1?"s":""} de sincronizar</span>
-          <span style={{fontSize:12,color:"#6a5500"}}>Guardados localmente — se reintentarán automáticamente.</span>
-          <button onClick={async function(){setSyncing(true);setSyncMsg("Reintentando…");var ch=await rq_process(function(r){setReps(function(p){var i=p.findIndex(function(x){return x.id===r.id;});if(i>=0){var n=[...p];n[i]=r;return n;}return[r,...p];});});setRetryQ(rq_pending());setSyncing(false);setSyncMsg("");}} style={{padding:"4px 12px",borderRadius:6,border:"none",background:"#7a6000",color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",marginLeft:"auto"}}>↻ Reintentar ahora</button>
-        </div>
-      )}
+      {retryQ&&retryQ.length>0&&<RetryBanner retryQ={retryQ} setRetryQ={setRetryQ} reps={reps} setReps={setReps} onSyncing={function(b,m){setSyncing(b);setSyncMsg(m||"");}}/>}
       <ResponsiveHeader
         tab={tab} setTab={setTab}
         alertCount={alerts.length} pendingQA={pendingQA} sheetsOk={sheetsOk} adminLabel={adminVendor?vendorDisplay(adminVendor):"Admin"}
@@ -1618,6 +1605,23 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack}) {
     });
     try {
       await onSubmit(rep);
+      /* Auto-create damage report if damages were reported */
+      if (form.hayDanios && form.danios && form.danios.length>0) {
+        var dmgDesc = form.danios.map(function(d,i){return "Daño "+(i+1)+": "+d.desc;}).join(" | ");
+        var dmgRep = {
+          id: now+1, createdAt: now+1,
+          categoria:"Reporte de Daños",
+          propiedad: form.propiedad,
+          fecha: form.fecha,
+          reportadoPor: form.reportadoPor,
+          descripcion: dmgDesc||"Daños encontrados durante limpieza",
+          comentarios: "Generado automáticamente desde Limpieza Tradicional #"+now,
+          total:"", paid:false, pagadoPor:"",
+          fotoAntes:[], fotoDespues:[], factura:null,
+          danios: form.danios, hayDanios:true,
+        };
+        await onSubmit(dmgRep);
+      }
       setDone(true);
     } catch(e) {
       setErrMsg("Error al enviar: "+(e&&e.message?e.message:"verifica tu conexión e intenta de nuevo."));
@@ -2679,11 +2683,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA}
           {!editing&&(
             <div style={{display:"flex",flexDirection:"column",gap:18}}>
               {al&&<div style={{background:ALT[al].bg,borderRadius:10,padding:"10px 14px",fontSize:13,fontWeight:600,color:ALT[al].clr}}>⚠ {ALT[al].label}</div>}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-                <Tile label="Fecha"   value={fmtDate(rep.fecha)}/>
-                <Tile label="Total"   value={rep.total?"Q"+rep.total:"—"} accent={!!rep.total}/>
-                <Tile label="Técnico" value={vn||"—"}/>
-              </div>
+              <ExecSummary rep={rep} vendors={vendors}/>
               <div><div style={{fontSize:10,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Categoría</div><span style={{padding:"5px 13px",borderRadius:100,fontSize:12,fontWeight:700,background:b.bg,color:b.tx}}>{rep.categoria}</span></div>
               <div><div style={{fontSize:10,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Trabajo realizado</div><div style={{fontSize:14,color:C.black,lineHeight:1.65,background:C.beige,padding:"13px 15px",borderRadius:10}}>{rep.descripcion}</div></div>
               {rep.comentarios&&<div><div style={{fontSize:10,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Notas / Comentarios</div><div style={{fontSize:13.5,color:C.earth,lineHeight:1.65,background:C.beige,padding:"11px 14px",borderRadius:10}}>{rep.comentarios}</div></div>}
@@ -3170,22 +3170,25 @@ function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogou
 
 
 
-/* ─── Inventory Summary — shown in detail view */
+/* ─── Inventory Summary — full list with OK + issues */
 function InventorySummary({inventario}) {
-  var issues = (inventario||[]).filter(function(x){return x.estado!=="ok";});
-  var ok     = (inventario||[]).filter(function(x){return x.estado==="ok";});
+  const [expanded, setExpanded] = useState(false);
+  var all    = inventario||[];
+  var issues = all.filter(function(x){return x.estado!=="ok";});
+  var ok     = all.filter(function(x){return x.estado==="ok";});
   return (
     <div style={{display:"flex",flexDirection:"column",gap:8}}>
-      <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>Inventario verificado</div>
-      {ok.length>0&&(
-        <div style={{padding:"10px 14px",borderRadius:8,background:"#EDF5EF",fontSize:12,color:C.green,fontWeight:600}}>
-          ✓ {ok.length} ítem{ok.length!==1?"s":""} en buen estado
-        </div>
-      )}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>Inventario ({all.length} ítems)</div>
+        <button onClick={function(){setExpanded(function(p){return !p;});}} style={{fontSize:11,color:C.earth,fontWeight:600,background:"none",border:"1px solid "+C.gray,borderRadius:6,padding:"3px 10px",cursor:"pointer"}}>
+          {expanded?"Ver menos ▲":"Ver completo ▼"}
+        </button>
+      </div>
+      {/* Issues always visible */}
       {issues.map(function(item,i){return (
         <div key={i} style={{padding:"11px 14px",borderRadius:8,background:"#FEF0EC",border:"1px solid #e9c2a0",display:"flex",flexDirection:"column",gap:4}}>
           <div style={{fontSize:13,fontWeight:600,color:"#b5622a"}}>✗ {item.name}</div>
-          {item.cantidad>0&&<div style={{fontSize:12,color:C.earth}}>Cantidad reportada: {item.cantidad}</div>}
+          {item.cantidad>0&&<div style={{fontSize:12,color:C.earth}}>Cantidad: {item.cantidad}</div>}
           {item.foto&&(item.foto.startsWith("http")||item.foto.startsWith("data:"))&&(
             <a href={item.foto} target="_blank" rel="noopener noreferrer">
               <img src={item.foto} alt={item.name} style={{width:80,height:70,objectFit:"cover",borderRadius:6,marginTop:4,border:"1px solid "+C.line}}/>
@@ -3193,7 +3196,14 @@ function InventorySummary({inventario}) {
           )}
         </div>
       );})}
-      {issues.length===0&&ok.length>0&&<div style={{fontSize:11,color:C.taupe}}>Todo el inventario reportado en buen estado.</div>}
+      {issues.length===0&&<div style={{padding:"8px 14px",borderRadius:8,background:"#EDF5EF",fontSize:12,color:C.green,fontWeight:600}}>✓ Todo en buen estado</div>}
+      {/* Full list only when expanded */}
+      {expanded&&ok.map(function(item,i){return (
+        <div key={i} style={{padding:"9px 14px",borderRadius:8,background:C.surfaceWarm,border:"1px solid "+C.line,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <span style={{fontSize:12.5,color:C.black}}>{item.name}</span>
+          <span style={{fontSize:11,fontWeight:600,color:C.green}}>✓ OK</span>
+        </div>
+      );})}
     </div>
   );
 }
@@ -3221,6 +3231,127 @@ function DamageSummary({danios}) {
           )}
         </div>
       );})}
+    </div>
+  );
+}
+
+
+/* ─── RetryBanner — discrete expandable pending sync */
+function RetryBanner({retryQ, setRetryQ, reps, setReps, onSyncing}) {
+  const [open, setOpen] = useState(false);
+  var q = rq_get();
+  return (
+    <div style={{background:"#F7F5F2",borderBottom:"1px solid "+C.line,fontFamily:"Montserrat,sans-serif"}}>
+      <div style={{padding:"8px 20px",display:"flex",alignItems:"center",gap:10}}>
+        <span style={{width:7,height:7,borderRadius:"50%",background:"#b5622a",flexShrink:0,display:"inline-block"}}/>
+        <span style={{fontSize:11.5,color:"#8a5020",fontWeight:600}}>{retryQ.length} trabajo{retryQ.length!==1?"s":""} pendiente{retryQ.length!==1?"s":""} de sincronizar</span>
+        <button onClick={function(){setOpen(function(p){return !p;});}} style={{fontSize:10.5,color:C.earth,fontWeight:600,background:"none",border:"1px solid "+C.gray,borderRadius:5,padding:"2px 9px",cursor:"pointer",marginLeft:"auto"}}>{open?"Cerrar ▲":"Ver ▼"}</button>
+      </div>
+      {open&&(
+        <div style={{padding:"0 20px 14px",display:"flex",flexDirection:"column",gap:8}}>
+          {q.map(function(item,i){
+            var r=item.rep;
+            return (
+              <div key={i} style={{background:"#fff",borderRadius:8,padding:"12px 14px",border:"1px solid "+C.line,display:"flex",gap:10,alignItems:"center"}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,color:C.black,marginBottom:2}}>{r.propiedad||"Sin propiedad"}</div>
+                  <div style={{fontSize:11,color:C.earth}}>{r.categoria} · {fmtDate(r.fecha)} · {item.attempts} intento{item.attempts!==1?"s":""}</div>
+                </div>
+                <div style={{display:"flex",gap:6,flexShrink:0}}>
+                  <button onClick={async function(){
+                    onSyncing(true,"Reintentando…");
+                    await rq_process(function(r2){setReps(function(p){var ix=p.findIndex(function(x){return x.id===r2.id;});if(ix>=0){var n=[...p];n[ix]=r2;return n;}return[r2,...p];});});
+                    setRetryQ(rq_pending()); onSyncing(false,"");
+                  }} style={{fontSize:11,fontWeight:600,padding:"4px 10px",borderRadius:5,border:"none",background:C.black,color:"#fff",cursor:"pointer"}}>↻</button>
+                  <button onClick={function(){rq_remove(r.id);setRetryQ(rq_pending());}} style={{fontSize:11,fontWeight:600,padding:"4px 10px",borderRadius:5,border:"1px solid "+C.gray,background:"#fff",color:C.red,cursor:"pointer"}}>✕</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Executive Summary + PDF export */
+function ExecSummary({rep, vendors}) {
+  var vn = (function(){var v=vendors&&vendors.find(function(x){return x.email===rep.reportadoPor;});return v?vendorDisplay(v):rep.reportadoPor||"—";})();
+  var isCl = isCleaning(rep.categoria);
+  var inv = rep.inventario||[];
+  var okItems  = inv.filter(function(x){return x.estado==="ok";});
+  var badItems = inv.filter(function(x){return x.estado!=="ok";});
+  var danios   = rep.danios||[];
+
+  function exportPDF() {
+    var d = window.open("","_blank","width=850,height=700");
+    if(!d) return;
+    var lines = [
+      "<html><head><meta charset='UTF-8'>",
+      "<style>body{font-family:Georgia,serif;max-width:800px;margin:40px auto;color:#1E1E1E;line-height:1.6}",
+      "h1{font-size:26px;font-weight:400;margin:0 0 4px}",
+      ".sub{font-size:11px;color:#8C8C8A;letter-spacing:.2em;text-transform:uppercase;margin-bottom:28px}",
+      "h2{font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#8C8C8A;margin:24px 0 8px;border-bottom:1px solid #E2E2E0;padding-bottom:5px}",
+      ".row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F4F4F2;font-size:13px}",
+      ".ok{color:#3d6b52;font-weight:600}.bad{color:#8a3030;font-weight:600}",
+      ".badge{padding:2px 10px;border-radius:100px;font-size:11px;font-weight:600}",
+      ".g{background:#EDF5EF;color:#3d6b52}.r{background:#F5EDEC;color:#8a3030}",
+      "img{max-width:160px;max-height:130px;object-fit:cover;border-radius:5px;border:1px solid #E2E2E0;margin:3px}",
+      ".photos{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}",
+      "@media print{body{margin:20px}}</style>",
+      "<title>"+rep.propiedad+"</title></head><body>",
+      "<h1>"+rep.propiedad+"</h1>",
+      "<div class='sub'>"+rep.categoria+" · "+fmtDate(rep.fecha)+"</div>",
+      "<h2>Resumen</h2>",
+      "<div class='row'><span style='color:#8C8C8A'>Técnico</span><span>"+vn+"</span></div>",
+      "<div class='row'><span style='color:#8C8C8A'>Total</span><span>"+(rep.total?"Q"+rep.total:"Sin tarifa")+"</span></div>",
+      "<div class='row'><span style='color:#8C8C8A'>Pago</span><span class='badge "+(rep.paid?"g":"r")+"'>"+(rep.paid?"Pagado":"Pendiente")+"</span></div>",
+      rep.pagadoPor?"<div class='row'><span style='color:#8C8C8A'>Pagador</span><span>"+rep.pagadoPor+"</span></div>":"",
+      rep.descripcion?"<h2>Trabajo realizado</h2><p style='font-size:13px'>"+rep.descripcion+"</p>":"",
+      rep.comentarios?"<h2>Notas</h2><p style='font-size:13px;color:#666'>"+rep.comentarios+"</p>":"",
+    ];
+    if(isCl&&inv.length>0){
+      lines.push("<h2>Inventario</h2>");
+      inv.forEach(function(x){lines.push("<div class='row'><span>"+x.name+"</span><span class='"+(x.estado==="ok"?"ok":"bad")+"'>"+(x.estado==="ok"?"✓ OK":"✗ Falta")+(x.cantidad>0?" ("+x.cantidad+")":"")+"</span></div>");});
+    }
+    if(isCl&&rep.hayDanios&&danios.length>0){
+      lines.push("<h2>Daños ("+danios.length+")</h2>");
+      danios.forEach(function(d,i){
+        lines.push("<div style='background:#FFF5F5;border:1px solid #e8d0d0;border-radius:6px;padding:10px;margin-bottom:8px'>");
+        lines.push("<div class='bad'>Daño "+(i+1)+": "+d.desc+"</div>");
+        if(d.origen)lines.push("<div style='font-size:11px;color:#666'>Origen: "+d.origen+"</div>");
+        if(d.fotos&&d.fotos.length){lines.push("<div class='photos'>");d.fotos.forEach(function(s){if(s&&(s.startsWith("http")||s.startsWith("data:")))lines.push("<img src='"+s+"'/>");});lines.push("</div>");}
+        lines.push("</div>");
+      });
+    }
+    if(isCl&&rep.fotoUniforme&&(rep.fotoUniforme.startsWith("http")||rep.fotoUniforme.startsWith("data:")))
+      lines.push("<h2>Foto uniforme</h2><div class='photos'><img src='"+rep.fotoUniforme+"'/></div>");
+    lines.push("<div style='margin-top:40px;padding-top:12px;border-top:1px solid #E2E2E0;font-size:10px;color:#aaa;text-align:center'>Spacio AM · "+new Date().toLocaleDateString("es-GT")+"</div></body></html>");
+    d.document.write(lines.join(""));
+    d.document.close();
+    setTimeout(function(){d.print();},500);
+  }
+
+  return (
+    <div style={{background:C.surfaceWarm,borderRadius:10,padding:"16px",border:"1px solid "+C.line}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Resumen ejecutivo</div>
+        <button onClick={exportPDF} style={{padding:"6px 13px",borderRadius:6,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>📄 PDF</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:isCl&&inv.length>0?12:0}}>
+        <Tile label="Técnico" value={vn}/>
+        <Tile label="Fecha"   value={fmtDate(rep.fecha)}/>
+        <Tile label="Total"   value={rep.total?"Q"+rep.total:"—"} accent={!!rep.total}/>
+        <Tile label="Pago"    value={rep.paid?"✓ Pagado":"● Pendiente"}/>
+      </div>
+      {isCl&&inv.length>0&&(
+        <div style={{display:"flex",gap:8}}>
+          {[[okItems.length,"OK","#EDF5EF",C.green],[badItems.length,"Faltantes","#F5EDEC",C.red],[danios.length,"Daños","#F5EDEC",C.red]].map(function(it,i){
+            var val=it[0],lbl=it[1],bg=val>0||i>0?it[2]:C.surfaceWarm,cl=val>0||i>0?it[3]:C.taupe;
+            return <div key={i} style={{flex:1,padding:"9px 8px",borderRadius:8,background:val>0?bg:C.surfaceWarm,textAlign:"center"}}><div style={{fontSize:18,fontWeight:700,color:val>0?cl:C.taupe}}>{val}</div><div style={{fontSize:9,color:val>0?cl:C.taupe,letterSpacing:".1em",textTransform:"uppercase"}}>{lbl}</div></div>;
+          })}
+        </div>
+      )}
     </div>
   );
 }
