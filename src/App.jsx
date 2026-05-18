@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, Component } from "react";
+ import React, { useState, useEffect, useRef, Component } from "react";
 
 /* ─── Responsive hook */
 function useScreen() {
