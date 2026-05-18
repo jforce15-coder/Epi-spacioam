@@ -2358,6 +2358,59 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats}) {
 }
 
 
+
+/* ─── PropList — property list with safe delete + inline note about existing reports */
+function PropList({props, onSave}) {
+  const [confirmId, setConfirmId] = useState(null);
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {props.map(function(p,i){
+        var isConfirming = confirmId===p.id;
+        return (
+          <div key={p.id} style={{background:"#fff",borderRadius:10,padding:"12px 16px",border:"1px solid "+(isConfirming?"#DBC8C4":C.line)}}>
+            {/* Name + delete area */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:isConfirming?10:8}}>
+              <span style={{fontSize:13.5,fontWeight:500,color:C.black}}>{p.name}</span>
+              {!isConfirming&&(
+                <button onClick={function(){setConfirmId(p.id);}} style={{background:"none",border:"none",color:C.gray,fontSize:16,cursor:"pointer",padding:"2px 6px",borderRadius:4,lineHeight:1}}>×</button>
+              )}
+            </div>
+
+            {/* Confirm delete */}
+            {isConfirming&&(
+              <div style={{background:"#FFF9F9",borderRadius:8,padding:"11px 13px",border:"1px solid #E8D0D0",marginBottom:10}}>
+                <div style={{fontSize:12,fontWeight:600,color:C.red,marginBottom:4}}>¿Eliminar "{p.name}"?</div>
+                <div style={{fontSize:11.5,color:C.earth,lineHeight:1.6,marginBottom:10}}>
+                  Los trabajos ya creados con esta propiedad <strong>no se verán afectados</strong> — seguirán mostrando el nombre original. Solo desaparecerá del selector al crear nuevos reportes.
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={function(){onSave(props.filter(function(x){return x.id!==p.id;}));setConfirmId(null);}} style={{flex:1,padding:"9px",borderRadius:7,border:"none",background:C.red,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Sí, eliminar</button>
+                  <button onClick={function(){setConfirmId(null);}} style={{flex:1,padding:"9px",borderRadius:7,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+                </div>
+              </div>
+            )}
+
+            {/* Cuartos / Baños */}
+            {!isConfirming&&(
+              <div style={{display:"flex",gap:8}}>
+                <div style={{flex:1}}>
+                  <label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".12em",textTransform:"uppercase",display:"block",marginBottom:4}}>Cuartos</label>
+                  <input type="number" min="1" max="10" value={p.cuartos||1} onChange={function(e){var v=parseInt(e.target.value)||1;onSave(props.map(function(x,j){if(j!==i)return x;return Object.assign({},x,{cuartos:v});}));}} style={{width:"100%",border:"1px solid "+C.gray,borderRadius:6,padding:"6px 10px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none"}}/>
+                </div>
+                <div style={{flex:1}}>
+                  <label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".12em",textTransform:"uppercase",display:"block",marginBottom:4}}>Baños</label>
+                  <input type="number" min="1" max="10" value={p.banos||1} onChange={function(e){var v=parseInt(e.target.value)||1;onSave(props.map(function(x,j){if(j!==i)return x;return Object.assign({},x,{banos:v});}));}} style={{width:"100%",border:"1px solid "+C.gray,borderRadius:6,padding:"6px 10px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none"}}/>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+
 function PropsCfg({props,onSave}) {
   const [newP, setNewP] = useState("");
   const [msg,  setMsg]  = useState(null);
@@ -2385,7 +2438,7 @@ function PropsCfg({props,onSave}) {
         {msg&&<div style={{marginTop:10,fontSize:13,fontWeight:600,color:C.green,background:"#EDF5EF",padding:"9px 13px",borderRadius:9}}>{msg}</div>}
       </div>
       <div style={{fontSize:10.5,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",paddingLeft:2}}>Lista — {props.length} propiedades</div>
-      {props.map(function(p,i){return <div key={p.id} style={{background:"#fff",borderRadius:11,padding:"12px 16px",border:"1px solid "+C.line}}><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}><span style={{fontSize:13.5,fontWeight:500,color:C.black}}>{p.name}</span><button onClick={function(){onSave(props.filter(function(_,j){return j!==i;}));}} style={{background:"none",border:"none",color:C.gray,fontSize:18,cursor:"pointer",lineHeight:1}}>×</button></div><div style={{display:"flex",gap:8}}><div style={{flex:1}}><label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".12em",textTransform:"uppercase",display:"block",marginBottom:4}}>Cuartos</label><input type="number" min="1" max="10" value={p.cuartos||1} onChange={function(e){var v=parseInt(e.target.value)||1;onSave(props.map(function(x,j){if(j!==i)return x;return Object.assign({},x,{cuartos:v});}));}} style={{width:"100%",border:"1.5px solid "+C.gray,borderRadius:8,padding:"6px 10px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none"}}/></div><div style={{flex:1}}><label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".12em",textTransform:"uppercase",display:"block",marginBottom:4}}>Baños</label><input type="number" min="1" max="10" value={p.banos||1} onChange={function(e){var v=parseInt(e.target.value)||1;onSave(props.map(function(x,j){if(j!==i)return x;return Object.assign({},x,{banos:v});}));}} style={{width:"100%",border:"1.5px solid "+C.gray,borderRadius:8,padding:"6px 10px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none"}}/></div></div></div>;})}
+      <PropList props={props} onSave={onSave}/>
       <div style={{background:"#fff",borderRadius:12,padding:14,border:"1.5px dashed "+C.gray}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"end"}}>
           <F label="Agregar propiedad"><input placeholder="Ej. Torre Norte – Apto 304" value={newP} onChange={function(e){setNewP(e.target.value);}}/></F>
@@ -2914,29 +2967,68 @@ function VendorHistory({reps, onRespond}) {
 }
 
 function VendorAccount({vendor,allVendors,onSvV}) {
+  /* Contact info */
+  const [phone,   setPhone]   = useState(vendor.phone||"");
+  const [email,   setEmail]   = useState(vendor.email||"");
+  const [ctMsg,   setCtMsg]   = useState(null);
+
+  /* Password change */
   const [cur,  setCur]  = useState("");
   const [np,   setNp]   = useState("");
   const [cp,   setCp]   = useState("");
-  const [msg,  setMsg]  = useState(null);
-  function save() {
-    if(cur!==vendor.password) { setMsg({ok:false,t:"Contraseña actual incorrecta."}); return; }
-    if(np.length<6) { setMsg({ok:false,t:"La nueva contraseña debe tener al menos 6 caracteres."}); return; }
-    if(np!==cp) { setMsg({ok:false,t:"Las contraseñas no coinciden."}); return; }
+  const [pwMsg,setPwMsg]= useState(null);
+
+  function saveContact() {
+    if (!email.trim()) { setCtMsg({ok:false,t:"El correo no puede estar vacío."}); return; }
+    /* Check email not used by another vendor */
+    var conflict = allVendors.find(function(v){return v.id!==vendor.id&&v.email.toLowerCase()===email.toLowerCase().trim();});
+    if (conflict) { setCtMsg({ok:false,t:"Ese correo ya está en uso por otro usuario."}); return; }
+    onSvV(allVendors.map(function(v){if(v.id===vendor.id){return Object.assign({},v,{phone:phone.trim(),email:email.trim()});}return v;}));
+    vendor.phone=phone.trim(); vendor.email=email.trim();
+    setCtMsg({ok:true,t:"✓ Datos de contacto actualizados."}); setTimeout(function(){setCtMsg(null);},3000);
+  }
+
+  function savePass() {
+    if(cur!==vendor.password) { setPwMsg({ok:false,t:"Contraseña actual incorrecta."}); return; }
+    if(np.length<6) { setPwMsg({ok:false,t:"Mínimo 6 caracteres."}); return; }
+    if(np!==cp) { setPwMsg({ok:false,t:"Las contraseñas no coinciden."}); return; }
     onSvV(allVendors.map(function(v){if(v.id===vendor.id){var u=Object.assign({},v);u.password=np;return u;}return v;}));
     vendor.password=np; setCur(""); setNp(""); setCp("");
-    setMsg({ok:true,t:"✓ Contraseña actualizada."}); setTimeout(function(){setMsg(null);},3000);
+    setPwMsg({ok:true,t:"✓ Contraseña actualizada."}); setTimeout(function(){setPwMsg(null);},3000);
   }
+
   return (
-    <div style={{maxWidth:480,margin:"0 auto",padding:"28px 18px 60px",fontFamily:"Montserrat,sans-serif"}}>
-      <div style={{marginBottom:24}}><div style={{fontSize:9.5,fontWeight:600,color:C.earth,letterSpacing:".28em",textTransform:"uppercase",marginBottom:8}}>Mi cuenta</div><div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:26,fontWeight:400,color:C.black}}>{vendor.name}</div><div style={{fontSize:13,color:C.earth,marginTop:4}}>{vendor.email}</div></div>
+    <div style={{maxWidth:480,margin:"0 auto",padding:"28px 18px 100px",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:18}}>
+      {/* Header */}
+      <div>
+        <div style={{fontSize:9.5,fontWeight:600,color:C.earth,letterSpacing:".28em",textTransform:"uppercase",marginBottom:8}}>Mi cuenta</div>
+        <div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:26,fontWeight:400,color:C.black}}>{vendorDisplay(vendor)}</div>
+        {vendor.tipo&&<div style={{fontSize:11.5,color:C.taupe,marginTop:3}}>{vendorTipo(vendor)}</div>}
+      </div>
+
+      {/* Contact info — editable by all */}
+      <Card title="Datos de contacto">
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <F label="Correo electrónico">
+            <input type="email" placeholder="tu@correo.com" value={email} onChange={function(e){setEmail(e.target.value);}}/>
+          </F>
+          <F label="WhatsApp / Teléfono">
+            <input type="tel" placeholder="+502 9999 9999" value={phone} onChange={function(e){setPhone(e.target.value);}}/>
+          </F>
+          {ctMsg&&<div style={{padding:"10px 13px",borderRadius:8,fontSize:13,fontWeight:600,background:ctMsg.ok?"#EDF5EF":"#F5EDEC",color:ctMsg.ok?C.green:C.red}}>{ctMsg.t}</div>}
+          <BigBtn onClick={saveContact} dis={!email.trim()}>Guardar datos de contacto →</BigBtn>
+        </div>
+      </Card>
+
+      {/* Password change */}
       <Card title="Cambiar contraseña">
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           <F label="Contraseña actual"><input type="password" placeholder="••••••••" value={cur} onChange={function(e){setCur(e.target.value);}}/></F>
           <div style={{height:1,background:C.gray}}/>
           <F label="Nueva contraseña"><input type="password" placeholder="Mínimo 6 caracteres" value={np} onChange={function(e){setNp(e.target.value);}}/></F>
-          <F label="Confirmar contraseña"><input type="password" placeholder="Repite la contraseña" value={cp} onChange={function(e){setCp(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")save();}}/></F>
-          {msg&&<div style={{padding:"10px 13px",borderRadius:9,fontSize:13,fontWeight:600,background:msg.ok?"#EDF5EF":"#F5EDEC",color:msg.ok?C.green:C.red}}>{msg.t}</div>}
-          <BigBtn onClick={save} dis={!cur||!np||!cp}>Actualizar contraseña →</BigBtn>
+          <F label="Confirmar nueva contraseña"><input type="password" placeholder="Repite la contraseña" value={cp} onChange={function(e){setCp(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")savePass();}}/></F>
+          {pwMsg&&<div style={{padding:"10px 13px",borderRadius:8,fontSize:13,fontWeight:600,background:pwMsg.ok?"#EDF5EF":"#F5EDEC",color:pwMsg.ok?C.green:C.red}}>{pwMsg.t}</div>}
+          <BigBtn onClick={savePass} dis={!cur||!np||!cp}>Actualizar contraseña →</BigBtn>
         </div>
       </Card>
     </div>
