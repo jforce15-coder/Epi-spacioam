@@ -359,6 +359,27 @@ async function rq_process(onSuccess) {
   return changed;
 }
 
+
+/* ─── Error Boundary — catches any render crash and shows friendly screen */
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = {hasError:false, msg:""}; }
+  static getDerivedStateFromError(err) { return {hasError:true, msg:err&&err.message?err.message:String(err)}; }
+  componentDidCatch(err, info) { console.error("App crash:", err, info); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{height:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#F7F7F7",gap:20,padding:30,fontFamily:"Montserrat,sans-serif"}}>
+          <div style={{fontSize:32}}>⚠</div>
+          <div style={{fontSize:18,fontWeight:600,color:"#1E1E1E",textAlign:"center"}}>Algo salió mal</div>
+          <div style={{fontSize:12,color:"#8C8C8A",textAlign:"center",maxWidth:320,lineHeight:1.6}}>{this.state.msg||"Error inesperado al cargar la aplicación."}</div>
+          <button onClick={function(){window.location.reload();}} style={{marginTop:8,padding:"12px 28px",borderRadius:8,border:"none",background:"#1E1E1E",color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",letterSpacing:".06em"}}>Recargar →</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /* ═══ DEFAULTS (fallback si Sheets aún no tiene config) */
 var DEF_V = [
   {id:"v1",name:"Jorge Mantenimiento",primerNombre:"Jorge",segundoNombre:"",primerApellido:"Mantenimiento",segundoApellido:"",empresa:"",tipo:"interno",categoria:"EPI Mantenimiento",email:"jorge@spacioam.com",password:"jorge123",phone:"",active:true,tarifaLimpieza:75,isAdmin:false},
@@ -394,8 +415,13 @@ export default function App() {
     /* Restore session from localStorage */
     try {
       var saved = localStorage.getItem("sam_sess");
-      if (saved) { var ps = JSON.parse(saved); setSess(ps); }
-    } catch(e){}
+      if (saved) {
+        var ps = JSON.parse(saved);
+        /* Only restore if session has a valid role */
+        if (ps && (ps.role==="admin"||ps.role==="vendor")) setSess(ps);
+        else localStorage.removeItem("sam_sess");
+      }
+    } catch(e){ try{localStorage.removeItem("sam_sess");}catch(_){} }
     try { setRetryQ(rq_pending()); } catch(e){}
 
     setSyncing(true); setSyncMsg("Conectando…");
@@ -405,10 +431,11 @@ export default function App() {
       console.warn("Sheets timeout — loading with localStorage fallback");
       try {
         var fb = ls_loadAll();
-        if(fb.vendors) setVendors(fb.vendors);
-        if(fb.props)   setProps(fb.props);
-        if(fb.reports) setReps(fb.reports);
-      } catch(_){}
+        if(fb.vendors&&fb.vendors.length) setVendors(fb.vendors);
+        if(fb.props&&fb.props.length)     setProps(fb.props);
+        if(fb.reports)                    setReps(fb.reports);
+        if(fb.adminpin)                   setPin(fb.adminpin);
+      } catch(lsErr){ console.error("localStorage fallback failed:", lsErr); }
       setSheetsOk(false); setReady(true); setSyncing(false);
     }, 9000);
 
@@ -502,11 +529,17 @@ export default function App() {
     setSess(null);
   }
 
-  if (!ready) return <Loader/>;
-  if (!sess)  return <Login vendors={vendors} adminPin={pin} onLogin={login} sheetsOk={sheetsOk}/>;
-  if (sess.role==="vendor")
-    return <VendorApp vendor={sess.vendor} allVendors={vendors} reps={reps.filter(function(r){return r.reportadoPor===sess.vendor.email;})} props={props} company={company} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onLogout={logout}/>;
-  return <AdminApp reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onRefresh={refresh} onLogout={logout}/>;
+  var inner;
+  if (!ready) {
+    inner = <Loader/>;
+  } else if (!sess) {
+    inner = <Login vendors={vendors} adminPin={pin} onLogin={login} sheetsOk={sheetsOk}/>;
+  } else if (sess.role==="vendor"&&sess.vendor) {
+    inner = <VendorApp vendor={sess.vendor} allVendors={vendors} reps={reps.filter(function(r){return r.reportadoPor===sess.vendor.email;})} props={props} company={company} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onLogout={logout}/>;
+  } else {
+    inner = <AdminApp reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onRefresh={refresh} onLogout={logout}/>;
+  }
+  return <ErrorBoundary>{inner}</ErrorBoundary>;
 }
 
 /* ═══ LOGIN */
