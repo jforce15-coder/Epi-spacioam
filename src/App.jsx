@@ -537,7 +537,7 @@ export default function App() {
   } else if (sess.role==="vendor"&&sess.vendor) {
     inner = <VendorApp vendor={sess.vendor} allVendors={vendors} reps={reps.filter(function(r){return r.reportadoPor===sess.vendor.email;})} props={props} company={company} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onLogout={logout}/>;
   } else {
-    inner = <AdminApp reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onRefresh={refresh} onLogout={logout}/>;
+    inner = <AdminApp reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onRefresh={refresh} onLogout={logout}/>;
   }
   return <ErrorBoundary>{inner}</ErrorBoundary>;
 }
@@ -600,7 +600,7 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
 }
 
 /* ═══ ADMIN */
-function AdminApp({reps,vendors,props,adminPin,company,extCats,syncing,syncMsg,sheetsOk,retryQ,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onRefresh,onLogout}) {
+function AdminApp({reps,vendors,props,adminPin,company,extCats,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onRefresh,onLogout}) {
   const [tab,    setTab]    = useState("dash");
   const [detail, setDetail] = useState(null);
   const [cDel,   setCDel]   = useState(null);
@@ -624,7 +624,7 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,syncing,syncMsg,s
           <span style={{fontSize:12,color:C.earth}}>Los datos se guardan localmente. Se reintentará automáticamente.</span>
         </div>
       )}
-      {retryQ&&retryQ.length>0&&<RetryBanner retryQ={retryQ} setRetryQ={setRetryQ} reps={reps} setReps={setReps} onSyncing={function(b,m){setSyncing(b);setSyncMsg(m||"");}}/>}
+      {retryQ&&retryQ.length>0&&<RetryBanner retryQ={retryQ} setRetryQ={setRetryQ} reps={reps} setReps={setReps} onSyncing={function(b,m){}}/>}
       <ResponsiveHeader
         tab={tab} setTab={setTab}
         alertCount={alerts.length} pendingQA={pendingQA} sheetsOk={sheetsOk} adminLabel={adminVendor?vendorDisplay(adminVendor):"Admin"}
