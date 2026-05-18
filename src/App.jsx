@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, Component } from "react";
 
 /* ─── Responsive hook */
 function useScreen() {
@@ -361,7 +361,7 @@ async function rq_process(onSuccess) {
 
 
 /* ─── Error Boundary — catches any render crash and shows friendly screen */
-class ErrorBoundary extends React.Component {
+class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = {hasError:false, msg:""}; }
   static getDerivedStateFromError(err) { return {hasError:true, msg:err&&err.message?err.message:String(err)}; }
   componentDidCatch(err, info) { console.error("App crash:", err, info); }
