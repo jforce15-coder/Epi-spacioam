@@ -657,7 +657,7 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,syncing,syncMsg,s
 }
 
 /* ─── Dashboard container */
-function DashView({reps,vendors,alerts,onSelect,onMarkPaid}) {
+function DashView({reps,vendors,alerts,onSelect,onMarkPaid,onRefresh}) {
   const [sub,setSub] = useState("ops");
   return (
     <div>
