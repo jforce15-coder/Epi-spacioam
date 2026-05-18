@@ -217,7 +217,7 @@ async function processMedia(rep) {
   }
 
   /* Build safe filename prefix: apt-name + date + category */
-  var safeApt  = (rep.propiedad||"sin-apto").replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚ\s]/g,"").replace(/\s+/g,"-").slice(0,30);
+  var safeApt  = (rep.propiedad||"sin-apto").replace(/[^a-zA-Z0-9\u00C0-\u017E]/g,"").replace(/\s+/g,"-").slice(0,30);
   var safeDate = (rep.fecha||todayStr()).replace(/-/g,"");
   var safeCat  = (rep.categoria||"trabajo").split(" ")[0].toLowerCase();
   var prefix   = safeApt+"_"+safeDate+"_"+safeCat;
@@ -377,9 +377,7 @@ var DEF_P = [
 
 /* ═══ ROOT */
 export default function App() {
-  const [sess,     setSess]     = useState(function(){
-    try { var s=localStorage.getItem("sam_sess"); return s?JSON.parse(s):null; } catch(e){return null;}
-  });
+  const [sess,     setSess]     = useState(null);
   const [reps,     setReps]     = useState([]);
   const [vendors,  setVendors]  = useState(DEF_V);
   const [props,    setProps]    = useState(DEF_P);
@@ -390,20 +388,27 @@ export default function App() {
   const [syncing,  setSyncing]  = useState(false);
   const [syncMsg,  setSyncMsg]  = useState("");
   const [sheetsOk, setSheetsOk] = useState(null);
-  const [retryQ,   setRetryQ]   = useState(function(){return rq_pending();});
+  const [retryQ,   setRetryQ]   = useState([]);
 
   useEffect(function(){
+    /* Restore session from localStorage */
+    try {
+      var saved = localStorage.getItem("sam_sess");
+      if (saved) setSess(JSON.parse(saved));
+    } catch(e){}
+    /* Initialize retry queue */
+    try { setRetryQ(rq_pending()); } catch(e){}
+
     setSyncing(true); setSyncMsg("Conectando con Google Sheets…");
     /* Check retry queue every 45 seconds */
-    var retryInterval = setInterval(async function(){
-      var changed = await rq_process(function(r){
+    var retryInterval = setInterval(function(){
+      rq_process(function(r){
         setReps(function(prev){
           var i=prev.findIndex(function(x){return x.id===r.id;});
           if(i>=0){var n=[...prev];n[i]=r;return n;}
           return [r,...prev];
         });
-      });
-      if(changed) setRetryQ(rq_pending());
+      }).then(function(changed){ if(changed) setRetryQ(rq_pending()); }).catch(function(){});
     }, 45000);
 
     loadAllData().then(function(d){
@@ -420,6 +425,7 @@ export default function App() {
       setSheetsOk(false);
       setReady(true); setSyncing(false);
     });
+    return function(){ clearInterval(retryInterval); };
   },[]);
 
   async function upsert(r) {
@@ -2216,7 +2222,7 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats}) {
               <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0,marginLeft:8}}>
                 <span style={{fontSize:10,fontWeight:700,color:v.active?C.green:C.red,background:v.active?"#EDF5EF":"#F5EDEC",padding:"3px 8px",borderRadius:100}}>{v.active?"Activo":"Inactivo"}</span>
                 <button onClick={function(){var u=vendors.map(function(x){if(x.id===v.id){var r=Object.assign({},x);r.active=!x.active;return r;}return x;});onSave(u);}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11,cursor:"pointer"}}>{v.active?"Desactivar":"Activar"}</button>
-                <button onClick={function(){if(window.confirm("¿Eliminar a "+vendorDisplay(v)+" permanentemente? Esta acción no se puede deshacer.")){onSave(vendors.filter(function(x){return x.id!==v.id;}));}}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #DBC8C4",background:"#fff",color:C.red,fontSize:11,cursor:"pointer",fontWeight:600}}>Eliminar</button>
+                <button onClick={function(){if(confirm("¿Eliminar a "+vendorDisplay(v)+" permanentemente?")){onSave(vendors.filter(function(x){return x.id!==v.id;}));}}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #DBC8C4",background:"#fff",color:C.red,fontSize:11,cursor:"pointer",fontWeight:600}}>Eliminar</button>
               </div>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
