@@ -3284,52 +3284,97 @@ function ExecSummary({rep, vendors}) {
   var danios   = rep.danios||[];
 
   function exportPDF() {
-    var d = window.open("","_blank","width=850,height=700");
-    if(!d) return;
-    var lines = [
-      "<html><head><meta charset='UTF-8'>",
-      "<style>body{font-family:Georgia,serif;max-width:800px;margin:40px auto;color:#1E1E1E;line-height:1.6}",
-      "h1{font-size:26px;font-weight:400;margin:0 0 4px}",
-      ".sub{font-size:11px;color:#8C8C8A;letter-spacing:.2em;text-transform:uppercase;margin-bottom:28px}",
-      "h2{font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#8C8C8A;margin:24px 0 8px;border-bottom:1px solid #E2E2E0;padding-bottom:5px}",
-      ".row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F4F4F2;font-size:13px}",
-      ".ok{color:#3d6b52;font-weight:600}.bad{color:#8a3030;font-weight:600}",
-      ".badge{padding:2px 10px;border-radius:100px;font-size:11px;font-weight:600}",
-      ".g{background:#EDF5EF;color:#3d6b52}.r{background:#F5EDEC;color:#8a3030}",
-      "img{max-width:160px;max-height:130px;object-fit:cover;border-radius:5px;border:1px solid #E2E2E0;margin:3px}",
-      ".photos{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}",
-      "@media print{body{margin:20px}}</style>",
-      "<title>"+rep.propiedad+"</title></head><body>",
+    function isP(v){return v&&typeof v==="string"&&(v.startsWith("http")||v.startsWith("data:"));}
+    function imgTag(src){return isP(src)?"<img src='"+src+"' style='max-width:150px;max-height:120px;object-fit:cover;border-radius:5px;border:1px solid #E2E2E0;margin:3px'/>":"";}
+    function sec(title,html){return "<h2 style='font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#8C8C8A;margin:24px 0 8px;border-bottom:1px solid #E2E2E0;padding-bottom:5px'>"+title+"</h2>"+html;}
+    function row(label,val){return "<div style='display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F4F4F2;font-size:13px'><span style='color:#8C8C8A'>"+label+"</span><span>"+val+"</span></div>";}
+    function badge(txt,green){return "<span style='padding:2px 10px;border-radius:100px;font-size:11px;font-weight:600;background:"+(green?"#EDF5EF":"#F5EDEC")+";color:"+(green?"#3d6b52":"#8a3030")+"'>"+txt+"</span>";}
+    function photoRow(arr){if(!arr||!arr.length)return "";var imgs=arr.map(imgTag).join("");return imgs?"<div style='display:flex;flex-wrap:wrap;gap:4px;margin-top:6px'>"+imgs+"</div>":"";}
+    function cleanSlot(title, val, isArr){var p=isArr?(Array.isArray(val)?val.filter(isP):[]):(isP(val)?[val]:[]);return p.length?"<div style='margin-bottom:10px'><div style='font-size:9px;color:#8C8C8A;letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px'>"+title+"</div>"+photoRow(p)+"</div>":"";}
+
+    var L = [
+      "<html><head><meta charset='UTF-8'><style>",
+      "body{font-family:Georgia,serif;max-width:800px;margin:30px auto;color:#1E1E1E;line-height:1.6}",
+      "h1{font-size:24px;font-weight:400;margin:0 0 4px}",
+      ".sub{font-size:11px;color:#8C8C8A;letter-spacing:.2em;text-transform:uppercase;margin-bottom:24px}",
+      "@media print{body{margin:15px}.no-break{page-break-inside:avoid}}",
+      "</style><title>"+rep.propiedad+"</title></head><body>",
       "<h1>"+rep.propiedad+"</h1>",
       "<div class='sub'>"+rep.categoria+" · "+fmtDate(rep.fecha)+"</div>",
-      "<h2>Resumen</h2>",
-      "<div class='row'><span style='color:#8C8C8A'>Técnico</span><span>"+vn+"</span></div>",
-      "<div class='row'><span style='color:#8C8C8A'>Total</span><span>"+(rep.total?"Q"+rep.total:"Sin tarifa")+"</span></div>",
-      "<div class='row'><span style='color:#8C8C8A'>Pago</span><span class='badge "+(rep.paid?"g":"r")+"'>"+(rep.paid?"Pagado":"Pendiente")+"</span></div>",
-      rep.pagadoPor?"<div class='row'><span style='color:#8C8C8A'>Pagador</span><span>"+rep.pagadoPor+"</span></div>":"",
-      rep.descripcion?"<h2>Trabajo realizado</h2><p style='font-size:13px'>"+rep.descripcion+"</p>":"",
-      rep.comentarios?"<h2>Notas</h2><p style='font-size:13px;color:#666'>"+rep.comentarios+"</p>":"",
+      sec("Resumen general",
+        row("Técnico", vn)+
+        row("Fecha", fmtDate(rep.fecha))+
+        row("Total", rep.total?"Q"+rep.total:"Sin tarifa")+
+        row("Estado de pago", badge(rep.paid?"✓ Pagado":"● Pendiente", rep.paid))+
+        (rep.pagadoPor?row("Pagador", rep.pagadoPor):"")+
+        (rep.comentarios?row("Notas", rep.comentarios):"")
+      ),
+      rep.descripcion?sec("Trabajo realizado","<p style='font-size:13px;margin:0'>"+rep.descripcion+"</p>"):"",
     ];
+
+    /* QA */
+    var qaLabels={pendiente:"En revisión",aprobada:"✓ Aprobada",correccion:"⚠ Corrección requerida",corregido:"✓ Corregida",futuro:"→ Tomado en cuenta"};
+    if(rep.qaStatus){
+      L.push(sec("Control de calidad",
+        row("Estado", qaLabels[rep.qaStatus]||rep.qaStatus)+
+        (rep.qaComentario?row("Comentario admin", rep.qaComentario):"")+
+        (rep.qaRespuesta?row("Respuesta técnico", rep.qaRespuesta):"")
+      ));
+    }
+
+    /* Inventario */
     if(isCl&&inv.length>0){
-      lines.push("<h2>Inventario</h2>");
-      inv.forEach(function(x){lines.push("<div class='row'><span>"+x.name+"</span><span class='"+(x.estado==="ok"?"ok":"bad")+"'>"+(x.estado==="ok"?"✓ OK":"✗ Falta")+(x.cantidad>0?" ("+x.cantidad+")":"")+"</span></div>");});
-    }
-    if(isCl&&rep.hayDanios&&danios.length>0){
-      lines.push("<h2>Daños ("+danios.length+")</h2>");
-      danios.forEach(function(d,i){
-        lines.push("<div style='background:#FFF5F5;border:1px solid #e8d0d0;border-radius:6px;padding:10px;margin-bottom:8px'>");
-        lines.push("<div class='bad'>Daño "+(i+1)+": "+d.desc+"</div>");
-        if(d.origen)lines.push("<div style='font-size:11px;color:#666'>Origen: "+d.origen+"</div>");
-        if(d.fotos&&d.fotos.length){lines.push("<div class='photos'>");d.fotos.forEach(function(s){if(s&&(s.startsWith("http")||s.startsWith("data:")))lines.push("<img src='"+s+"'/>");});lines.push("</div>");}
-        lines.push("</div>");
+      var invHtml="";
+      inv.forEach(function(x){
+        var ok=x.estado==="ok";
+        invHtml+=row(x.name,"<span style='color:"+(ok?"#3d6b52":"#8a3030")+";font-weight:600'>"+(ok?"✓ OK":"✗ Falta")+(x.cantidad>0?" ("+x.cantidad+")":"")+"</span>");
+        if(isP(x.foto))invHtml+=photoRow([x.foto]);
       });
+      L.push(sec("Inventario ("+inv.length+" ítems)",invHtml));
     }
-    if(isCl&&rep.fotoUniforme&&(rep.fotoUniforme.startsWith("http")||rep.fotoUniforme.startsWith("data:")))
-      lines.push("<h2>Foto uniforme</h2><div class='photos'><img src='"+rep.fotoUniforme+"'/></div>");
-    lines.push("<div style='margin-top:40px;padding-top:12px;border-top:1px solid #E2E2E0;font-size:10px;color:#aaa;text-align:center'>Spacio AM · "+new Date().toLocaleDateString("es-GT")+"</div></body></html>");
-    d.document.write(lines.join(""));
-    d.document.close();
-    setTimeout(function(){d.print();},500);
+
+    /* Daños */
+    if(isCl&&rep.hayDanios&&danios.length>0){
+      var dmgHtml="";
+      danios.forEach(function(d,i){
+        dmgHtml+="<div class='no-break' style='background:#FFF5F5;border:1px solid #e8d0d0;border-radius:6px;padding:12px;margin-bottom:10px'>";
+        dmgHtml+="<div style='color:#8a3030;font-weight:700;margin-bottom:4px'>Daño "+(i+1)+": "+d.desc+"</div>";
+        if(d.origen)dmgHtml+=row("Origen",d.origen);
+        if(d.reparacion)dmgHtml+=row("Reparación",d.reparacion);
+        if(d.quienPaga)dmgHtml+=row("Cubre",d.quienPaga);
+        if(d.comentarios)dmgHtml+=row("Notas",d.comentarios);
+        var allFotos=(d.fotos||[]).concat(d.fotos2||[]).filter(isP);
+        if(allFotos.length)dmgHtml+=photoRow(allFotos);
+        dmgHtml+="</div>";
+      });
+      L.push(sec("Daños reportados ("+danios.length+")",dmgHtml));
+    }
+    if(isCl&&!rep.hayDanios) L.push(sec("Daños","<p style='color:#3d6b52;font-weight:600;font-size:13px;margin:0'>✓ Sin daños reportados</p>"));
+
+    /* All cleaning photos */
+    if(isCl){
+      var photoHtml="";
+      photoHtml+=cleanSlot("Foto en uniforme", rep.fotoUniforme, false);
+      photoHtml+=cleanSlot("Piso general", rep.fotoPisoGeneral, false);
+      if(rep.fotosHabitaciones)rep.fotosHabitaciones.forEach(function(f,i){photoHtml+=cleanSlot("Cuarto "+(i+1),f,false);});
+      if(rep.fotosBanos)rep.fotosBanos.forEach(function(b,i){if(b){photoHtml+=cleanSlot("Baño "+(i+1)+" – Ducha",b.ducha,false);photoHtml+=cleanSlot("Baño "+(i+1)+" – Inodoro",b.inodoro,false);}});
+      ["fotosMicroondas","fotosCafetera","fotosEcofiltro","fotosLavatrastos","fotosRefrigerador","fotosEstufa","fotosTv","fotosSillon","fotosInsumos","fotosDebajoCama","fotosCloset","fotosRegadera","fotosDucha","fotosMicroondas2","fotosPlatos","fotosDetrasElect"].forEach(function(k){
+        var lbl={"fotosMicroondas":"Microondas","fotosCafetera":"Cafetera","fotosEcofiltro":"Ecofiltro","fotosLavatrastos":"Lavatrastos","fotosRefrigerador":"Refrigerador","fotosEstufa":"Estufa","fotosTv":"Televisor","fotosSillon":"Sillón","fotosInsumos":"Insumos de cortesía","fotosDebajoCama":"Debajo de la cama","fotosCloset":"Clóset / Blancos","fotosRegadera":"Regadera","fotosDucha":"Ducha / Mampara","fotosMicroondas2":"Microondas interior","fotosPlatos":"Platos y cubiertos","fotosDetrasElect":"Detrás electrodomésticos"}[k]||k;
+        photoHtml+=cleanSlot(lbl,rep[k],false);
+      });
+      if(rep.fotosVentanas)photoHtml+=cleanSlot("Ventanas",rep.fotosVentanas,true);
+      if(rep.fotosGavetas)photoHtml+=cleanSlot("Gavetas",rep.fotosGavetas,true);
+      if(rep.fotosDrenajes)rep.fotosDrenajes.forEach(function(f,i){photoHtml+=cleanSlot("Drenaje baño "+(i+1),f,false);});
+      if(rep.fotosDetalle)photoHtml+=cleanSlot("Detalle extra",rep.fotosDetalle,true);
+      if(photoHtml) L.push(sec("Evidencia fotográfica de limpieza",photoHtml));
+    }
+
+    L.push("<div style='margin-top:36px;padding-top:10px;border-top:1px solid #E2E2E0;font-size:10px;color:#aaa;text-align:center'>Spacio AM · Generado "+new Date().toLocaleString("es-GT")+"</div></body></html>");
+    var w=window.open("","_blank","width=900,height=750");
+    if(!w) return;
+    w.document.write(L.join(""));
+    w.document.close();
+    setTimeout(function(){w.print();},700);
   }
 
   return (
@@ -3358,84 +3403,133 @@ function ExecSummary({rep, vendors}) {
 
 /* ─── Cleaning Photo Gallery — shows all cleaning-specific photos in admin view */
 function CleaningPhotoGallery({rep}) {
-  var sections = [];
+  /* Helper to check if a value is a valid photo URL */
+  function isPhoto(v) { return v&&typeof v==="string"&&(v.startsWith("http")||v.startsWith("data:")); }
+  function validArr(arr) { return Array.isArray(arr)?arr.filter(isPhoto):[]; }
+  function validOne(v) { return isPhoto(v)?[v]:[]; }
 
-  function addSection(title, photos) {
-    var valid = Array.isArray(photos)
-      ? photos.filter(function(p){return p&&typeof p==="string"&&(p.startsWith("http")||p.startsWith("data:"));})
-      : (photos&&typeof photos==="string"&&(photos.startsWith("http")||photos.startsWith("data:")) ? [photos] : []);
-    if (valid.length>0) sections.push({title:title, photos:valid});
+  /* Build sections array — ALL expected cleaning photo slots */
+  var sections   = [];
+  var expected   = 0; /* total expected photo slots */
+  var uploaded   = 0; /* slots that have a photo */
+
+  function slot(title, val, isArr) {
+    expected++;
+    var photos = isArr ? validArr(val) : validOne(val);
+    if(photos.length>0){ uploaded++; sections.push({title:title,photos:photos}); }
   }
-
-  /* Selfie en uniforme */
-  if (rep.fotoUniforme) addSection("Foto en uniforme", rep.fotoUniforme);
-
-  /* Limpieza Tradicional photos */
-  if (rep.fotosHabitaciones&&rep.fotosHabitaciones.length) {
-    rep.fotosHabitaciones.forEach(function(f,i){ addSection("Cuarto "+(i+1),[f]); });
+  function slotArr(title, arr) {
+    if(!arr||!arr.length) return;
+    arr.forEach(function(v,i){
+      expected++;
+      var p = isArr2(v)?validArr(v):validOne(v);
+      if(p.length>0){ uploaded++; sections.push({title:title+" "+(i+1),photos:p}); }
+    });
   }
-  addSection("Piso general",   rep.fotoPisoGeneral);
+  function isArr2(v){return Array.isArray(v);}
 
-  if (rep.fotosBanos&&rep.fotosBanos.length) {
+  /* Selfie */
+  slot("Foto en uniforme",       rep.fotoUniforme,       false);
+
+  /* Trad — rooms */
+  if(rep.fotosHabitaciones&&rep.fotosHabitaciones.length){
+    rep.fotosHabitaciones.forEach(function(f,i){expected++;var p=validOne(f);if(p.length){uploaded++;sections.push({title:"Cuarto "+(i+1),photos:p});}});
+  } else { expected++; } /* at least 1 room expected */
+
+  slot("Piso general",           rep.fotoPisoGeneral,    false);
+
+  /* Bathrooms */
+  if(rep.fotosBanos&&rep.fotosBanos.length){
     rep.fotosBanos.forEach(function(b,i){
-      if(b){
-        addSection("Baño "+(i+1)+" — Ducha",   b.ducha);
-        addSection("Baño "+(i+1)+" — Inodoro", b.inodoro);
-      }
+      if(!b) return;
+      expected+=2;
+      var d=validOne(b.ducha),in2=validOne(b.inodoro);
+      if(d.length){ uploaded++; sections.push({title:"Baño "+(i+1)+" – Ducha",photos:d}); }
+      if(in2.length){ uploaded++; sections.push({title:"Baño "+(i+1)+" – Inodoro",photos:in2}); }
     });
-  }
+  } else { expected+=2; }
 
-  addSection("Microondas",    rep.fotosMicroondas);
-  addSection("Cafetera",      rep.fotosCafetera);
-  addSection("Ecofiltro",     rep.fotosEcofiltro);
-  addSection("Lavatrastos",   rep.fotosLavatrastos);
-  addSection("Refrigerador",  rep.fotosRefrigerador);
-  addSection("Televisor",     rep.fotosTv);
-  addSection("Sillón",        rep.fotosSillon);
-  addSection("Insumos cortesía", rep.fotosInsumos);
-  addSection("Debajo de la cama", rep.fotosDebajoCama);
-  addSection("Clóset / Blancos",  rep.fotosCloset);
+  /* Kitchen */
+  slot("Microondas",             rep.fotosMicroondas,    false);
+  slot("Cafetera",               rep.fotosCafetera,      false);
+  slot("Ecofiltro",              rep.fotosEcofiltro,     false);
+  slot("Lavatrastos",            rep.fotosLavatrastos,   false);
+  slot("Refrigerador",           rep.fotosRefrigerador,  false);
+  slot("Estufa",                 rep.fotosEstufa,        false);
 
-  /* Limpieza Profunda photos */
-  addSection("Regadera",      rep.fotosRegadera);
-  addSection("Ducha / Mampara",rep.fotosDucha);
+  /* Sala */
+  slot("Televisor",              rep.fotosTv,            false);
+  slot("Sillón",                 rep.fotosSillon,        false);
+  slot("Insumos de cortesía",    rep.fotosInsumos,       false);
 
-  if (rep.fotosDrenajes&&rep.fotosDrenajes.length) {
-    rep.fotosDrenajes.forEach(function(f,i){ addSection("Drenaje baño "+(i+1),[f]); });
-  }
-  if (rep.fotosVentanas&&rep.fotosVentanas.length) addSection("Ventanas", rep.fotosVentanas);
-  addSection("Estufa",        rep.fotosEstufa);
-  addSection("Fregadero",     rep.fotosFregadero);
-  addSection("Microondas (interior)", rep.fotosMicroondas2);
-  addSection("Platos y cubiertos",    rep.fotosPlatos);
-  if (rep.fotosGavetas&&rep.fotosGavetas.length) addSection("Gavetas", rep.fotosGavetas);
-  addSection("Detrás electrodomésticos", rep.fotosDetrasElect);
-  if (rep.fotosDetalle&&rep.fotosDetalle.length) addSection("Detalle extra", rep.fotosDetalle);
+  /* Detail */
+  slot("Debajo de la cama",      rep.fotosDebajoCama,    false);
+  slot("Clóset / Blancos",       rep.fotosCloset,        false);
 
-  /* Inventario photos */
-  if (rep.inventario&&rep.inventario.length) {
+  /* Prof-only */
+  slot("Regadera",               rep.fotosRegadera,      false);
+  slot("Ducha / Mampara",        rep.fotosDucha,         false);
+  slot("Microondas (interior)",  rep.fotosMicroondas2,   false);
+  slot("Platos y cubiertos",     rep.fotosPlatos,        false);
+  slot("Detrás electrodomésticos",rep.fotosDetrasElect,  false);
+
+  if(rep.fotosDrenajes&&rep.fotosDrenajes.length)
+    rep.fotosDrenajes.forEach(function(f,i){expected++;var p=validOne(f);if(p.length){uploaded++;sections.push({title:"Drenaje baño "+(i+1),photos:p});}});
+  if(rep.fotosVentanas&&rep.fotosVentanas.length){expected++;var vw=validArr(rep.fotosVentanas);if(vw.length){uploaded++;sections.push({title:"Ventanas",photos:vw});}}
+  if(rep.fotosGavetas&&rep.fotosGavetas.length){expected++;var gv=validArr(rep.fotosGavetas);if(gv.length){uploaded++;sections.push({title:"Gavetas",photos:gv});}}
+  if(rep.fotosDetalle&&rep.fotosDetalle.length){expected++;var dt=validArr(rep.fotosDetalle);if(dt.length){uploaded++;sections.push({title:"Detalle extra",photos:dt});}}
+
+  /* Inventory photos */
+  if(rep.inventario&&rep.inventario.length){
     rep.inventario.forEach(function(item){
-      if (item.foto&&(item.foto.startsWith("http")||item.foto.startsWith("data:"))) {
-        addSection("Inventario: "+item.name, [item.foto]);
-      }
+      if(isPhoto(item.foto)) sections.push({title:"Inventario: "+item.name, photos:[item.foto]});
     });
   }
 
-  if (sections.length===0) {
-    return <div style={{fontSize:12,color:C.taupe,padding:"12px",background:C.surfaceWarm,borderRadius:8,textAlign:"center"}}>Sin fotos adjuntas en esta limpieza.</div>;
+  /* Damage photos */
+  if(rep.danios&&rep.danios.length){
+    rep.danios.forEach(function(d,i){
+      var p=validArr(d.fotos).concat(validArr(d.fotos2));
+      if(p.length) sections.push({title:"Daño "+(i+1)+(d.desc?" – "+d.desc.slice(0,30):""), photos:p});
+    });
   }
+
+  var pct = expected>0 ? Math.round(uploaded/expected*100) : 100;
+  var lowPhotos = pct < 50;
 
   return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      {/* Photo coverage indicator */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderRadius:8,background:lowPhotos?"#F5EDEC":C.surfaceWarm,border:"1px solid "+(lowPhotos?"#DBC8C4":C.line)}}>
+        <div>
+          <div style={{fontSize:12.5,fontWeight:600,color:lowPhotos?C.red:C.black}}>
+            {lowPhotos?"⚠ Fotos insuficientes":"📷 Evidencia fotográfica"}
+          </div>
+          <div style={{fontSize:11,color:C.earth,marginTop:2}}>
+            {uploaded} de {expected} secciones con foto ({pct}%)
+            {lowPhotos&&" — el proveedor no subió suficientes fotos"}
+          </div>
+        </div>
+        <div style={{fontSize:18,fontWeight:700,color:lowPhotos?C.red:C.green}}>{pct}%</div>
+      </div>
+
+      {sections.length===0&&(
+        <div style={{padding:"14px",background:"#F5EDEC",borderRadius:8,fontSize:13,color:C.red,fontWeight:600,textAlign:"center"}}>
+          ⚠ No se subió ninguna foto en este reporte
+        </div>
+      )}
+
+      {/* Gallery */}
       {sections.map(function(sec,si) {
         return (
           <div key={si}>
-            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase",marginBottom:8}}>{sec.title}</div>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {sec.photos.map(function(src,pi) {
+            <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase",marginBottom:6}}>{sec.title}</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {sec.photos.map(function(src,pi){
                 return (
                   <a key={pi} href={src} target="_blank" rel="noopener noreferrer" style={{display:"block",textDecoration:"none"}}>
-                    <img src={src} alt={sec.title+" "+pi} style={{width:110,height:90,objectFit:"cover",borderRadius:8,border:"1px solid "+C.line,cursor:"zoom-in"}}/>
+                    <img src={src} alt={sec.title} style={{width:100,height:84,objectFit:"cover",borderRadius:7,border:"1px solid "+C.line,cursor:"zoom-in"}}
+                      onError={function(e){e.target.style.display="none";}}/>
                   </a>
                 );
               })}
