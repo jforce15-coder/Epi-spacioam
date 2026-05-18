@@ -394,13 +394,47 @@ export default function App() {
     /* Restore session from localStorage */
     try {
       var saved = localStorage.getItem("sam_sess");
-      if (saved) setSess(JSON.parse(saved));
+      if (saved) { var ps = JSON.parse(saved); setSess(ps); }
     } catch(e){}
-    /* Initialize retry queue */
     try { setRetryQ(rq_pending()); } catch(e){}
 
-    setSyncing(true); setSyncMsg("Conectando con Google Sheets…");
-    /* Check retry queue every 45 seconds */
+    setSyncing(true); setSyncMsg("Conectando…");
+
+    /* Hard timeout: 9s — show app no matter what */
+    var timeoutId = setTimeout(function(){
+      console.warn("Sheets timeout — loading with localStorage fallback");
+      try {
+        var fb = ls_loadAll();
+        if(fb.vendors) setVendors(fb.vendors);
+        if(fb.props)   setProps(fb.props);
+        if(fb.reports) setReps(fb.reports);
+      } catch(_){}
+      setSheetsOk(false); setReady(true); setSyncing(false);
+    }, 9000);
+
+    loadAllData().then(function(d){
+      clearTimeout(timeoutId);
+      setReps(d.reports||[]);
+      setVendors(d.vendors||DEF_V);
+      setProps(d.props||DEF_P);
+      setPin(d.pin||"spacio2024");
+      setCompany(d.company||{name:"Spacio AM S.A.",nit:"118287796"});
+      if(d.extcats) setExtCats(d.extcats);
+      setSheetsOk(!IS_CLAUDE_SANDBOX);
+      setReady(true); setSyncing(false);
+    }).catch(function(e){
+      clearTimeout(timeoutId);
+      console.error("Load failed:",e);
+      try {
+        var fb = ls_loadAll();
+        if(fb.vendors) setVendors(fb.vendors);
+        if(fb.props)   setProps(fb.props);
+        if(fb.reports) setReps(fb.reports);
+      } catch(_){}
+      setSheetsOk(false); setReady(true); setSyncing(false);
+    });
+
+    /* Retry queue — every 45s */
     var retryInterval = setInterval(function(){
       rq_process(function(r){
         setReps(function(prev){
@@ -408,24 +442,10 @@ export default function App() {
           if(i>=0){var n=[...prev];n[i]=r;return n;}
           return [r,...prev];
         });
-      }).then(function(changed){ if(changed) setRetryQ(rq_pending()); }).catch(function(){});
+      }).then(function(ch){if(ch)setRetryQ(rq_pending());}).catch(function(){});
     }, 45000);
 
-    loadAllData().then(function(d){
-      setReps(d.reports);
-      setVendors(d.vendors);
-      setProps(d.props);
-      setPin(d.pin);
-      setCompany(d.company);
-      if(d.extcats) setExtCats(d.extcats);
-      setSheetsOk(!IS_CLAUDE_SANDBOX);
-      setReady(true); setSyncing(false);
-    }).catch(function(e){
-      console.error("Load error:",e);
-      setSheetsOk(false);
-      setReady(true); setSyncing(false);
-    });
-    return function(){ clearInterval(retryInterval); };
+    return function(){ clearTimeout(timeoutId); clearInterval(retryInterval); };
   },[]);
 
   async function upsert(r) {
@@ -3197,14 +3217,27 @@ function Tile({label,value,accent}) { return <div style={{background:C.surfaceWa
 function Overlay({onClick,children}) { return <div onClick={onClick} style={{position:"fixed",inset:0,background:"rgba(62,63,63,.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:16}}>{children}</div>; }
 function Err({msg}) { return <div style={{fontSize:12,color:C.red,background:"#F5EDEC",padding:"9px 12px",borderRadius:8,lineHeight:1.4}}>{msg}</div>; }
 function Loader() {
+  const [secs, setSecs] = useState(0);
+  useEffect(function(){
+    var t = setInterval(function(){setSecs(function(s){return s+1;});},1000);
+    return function(){clearInterval(t);};
+  },[]);
   return (
     <div style={{height:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:C.alabaster,gap:20}}>
       <LogoWordmark width={180}/>
       <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
-        <div style={{fontSize:9.5,color:C.taupe,letterSpacing:".24em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif"}}>Conectando con Google Sheets</div>
-        <div style={{display:"flex",gap:6}}>
-          {[0,1,2].map(function(i){return <div key={i} style={{width:6,height:6,borderRadius:"50%",background:C.earth,animation:"pulse 1.2s ease-in-out "+i*0.2+"s infinite",opacity:.3}}/>;}) }
+        <div style={{fontSize:9.5,color:C.taupe,letterSpacing:".22em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif"}}>
+          {secs<4?"Conectando con Google Sheets…":secs<8?"Esto puede tardar unos segundos…":"Verificando conexión…"}
         </div>
+        <div style={{display:"flex",gap:6,marginTop:4}}>
+          {[0,1,2].map(function(i){return <div key={i} style={{width:6,height:6,borderRadius:"50%",background:C.earth,opacity:.4}}/>;}) }
+        </div>
+        {secs>=7&&(
+          <div style={{marginTop:12,fontSize:11,color:C.taupe,fontFamily:"Montserrat,sans-serif",textAlign:"center",maxWidth:260,lineHeight:1.7}}>
+            Primera carga puede tardar ~10 seg.<br/>
+            <span style={{fontSize:10,opacity:.7}}>El app cargará automáticamente.</span>
+          </div>
+        )}
       </div>
     </div>
   );
