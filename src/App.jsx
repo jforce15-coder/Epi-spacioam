@@ -1679,7 +1679,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
   function next(){if(step<STEPS.length-1)setStep(function(s){return s+1;});}
   function prev(){if(step>0)setStep(function(s){return s-1;});}
 
-  async function submit() {
+  async function submitTrad() {
     setBusy(true);
     var vend = vendors.find(function(v){return v.email===form.reportadoPor;});
     var tarifa = vend&&vend.tarifaLimpieza ? String(vend.tarifaLimpieza) : "";
