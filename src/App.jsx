@@ -3790,6 +3790,287 @@ function blankSched() {
 /* Admin: Schedule management */
 
 /* Hospitable URL config widget — shown in ScheduleCfg */
+
+/* ─── CSV Importer — parses Hospitable export format */
+function CSVImporter({vendors, props, onImport, onClose}) {
+  const [raw,     setRaw]     = useState("");
+  const [preview, setPreview] = useState(null);
+  const [err,     setErr]     = useState("");
+  const [busy,    setBusy]    = useState(false);
+
+  function parseCSV(text) {
+    var lines = text.trim().split(/\r?\n/);
+    if (lines.length < 2) return {error:"El archivo está vacío o tiene formato incorrecto."};
+
+    /* Detect separator */
+    var sep = lines[0].includes("\t") ? "\t" : ",";
+
+    function splitLine(line) {
+      /* Handle quoted fields */
+      var result=[]; var cur=""; var inQ=false;
+      for(var i=0;i<line.length;i++){
+        var c=line[i];
+        if(c==='"') {inQ=!inQ; continue;}
+        if(c===sep&&!inQ){result.push(cur.trim());cur="";}
+        else cur+=c;
+      }
+      result.push(cur.trim());
+      return result;
+    }
+
+    var headers = splitLine(lines[0]).map(function(h){return h.toLowerCase().replace(/[^a-z0-9]/g,"");});
+
+    /* Column detection */
+    function col(keys) {
+      for(var i=0;i<keys.length;i++){
+        var idx=headers.indexOf(keys[i]);
+        if(idx>=0) return idx;
+      }
+      return -1;
+    }
+
+    var idxDate  = col(["startdate","start","startdatetime","scheduleddate","date"]);
+    var idxEnd   = col(["enddate","end","enddatetime"]);
+    var idxType  = col(["type","tasktype","cleaningtype"]);
+    var idxFName = col(["teammatefirstname","firstname","assigneefirstname","technicianfirst"]);
+    var idxLName = col(["teammatelastname","lastname","assigneelastname","technicianlast"]);
+    var idxEmail = col(["teammateemail","email","assigneeemail","technicianaemail"]);
+    var idxProp  = col(["listing","listingname","property","propertyname","unit","apartment"]);
+    var idxTime  = col(["starttime","time","hour"]);
+    var idxNote  = col(["notes","note","comment","comments","description"]);
+
+    if (idxDate<0) return {error:"No se encontró columna de fecha. Verifica que el CSV tenga 'Start Date'."};
+
+    var entries = [];
+    for(var r=1;r<lines.length;r++){
+      var cols = splitLine(lines[r]);
+      if(!cols[idxDate]||cols[idxDate].trim()==="") continue;
+
+      var dateRaw = cols[idxDate]||"";
+      /* Normalize date to yyyy-MM-dd */
+      var fecha = dateRaw.replace(/\//g,"-").replace(/(\d{4})-(\d{1,2})-(\d{1,2}).*/, function(_,y,m,d){
+        return y+"-"+m.padStart(2,"0")+"-"+d.padStart(2,"0");
+      });
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+        /* Try MM/DD/YYYY or DD-MM-YYYY */
+        var parts = dateRaw.split(/[\/-]/);
+        if(parts.length===3){
+          if(parts[0].length===4) fecha=parts[0]+"-"+parts[1].padStart(2,"0")+"-"+parts[2].padStart(2,"0");
+          else fecha=parts[2]+"-"+parts[0].padStart(2,"0")+"-"+parts[1].padStart(2,"0");
+        }
+      }
+
+      var fname  = idxFName>=0 ? (cols[idxFName]||"").trim() : "";
+      var lname  = idxLName>=0 ? (cols[idxLName]||"").trim() : "";
+      var email  = idxEmail>=0 ? (cols[idxEmail]||"").trim() : "";
+      var prop   = idxProp>=0  ? (cols[idxProp]||"").trim()  : "";
+      var tipo   = idxType>=0  ? (cols[idxType]||"Limpieza").trim() : "Limpieza";
+      var hora   = idxTime>=0  ? (cols[idxTime]||"").trim()  : "";
+      var notas  = idxNote>=0  ? (cols[idxNote]||"").trim()  : "";
+
+      /* Normalize tipo */
+      var tipoMap = {cleaning:"Limpieza",maintenance:"Mantenimiento",inspection:"Revisión","deep cleaning":"Limpieza Profunda","limpieza profunda":"Limpieza Profunda"};
+      tipo = tipoMap[tipo.toLowerCase()] || tipo || "Limpieza";
+
+      /* Fuzzy match vendor */
+      var query = [fname,lname,email].filter(Boolean).join(" ");
+      var match = fuzzyMatchVendor(query, vendors.filter(function(v){return v.active;}));
+
+      /* Fuzzy match property */
+      var propMatch = null;
+      if(prop) {
+        var bestProp=null,bestScore=0;
+        (props||[]).forEach(function(p){
+          var s=similarity(prop, p.name);
+          if(s>bestScore){bestScore=s;bestProp=p;}
+        });
+        if(bestProp&&bestScore>0.4) propMatch={prop:bestProp,score:bestScore};
+      }
+
+      entries.push({
+        fecha:      fecha,
+        hora:       hora,
+        tipo:       tipo,
+        rawProp:    prop,
+        propMatch:  propMatch,
+        rawVendor:  query,
+        vendorMatch:match,
+        notas:      notas,
+        email:      email,
+      });
+    }
+
+    return {entries:entries};
+  }
+
+  function handlePaste(text) {
+    setErr(""); setPreview(null);
+    var result = parseCSV(text);
+    if(result.error) { setErr(result.error); return; }
+    if(!result.entries.length) { setErr("No se encontraron filas con datos."); return; }
+    setPreview(result.entries);
+  }
+
+  function doImport() {
+    if(!preview||!preview.length) return;
+    setBusy(true);
+    var newScheds = preview.map(function(e,i){
+      return {
+        id:          "csv"+Date.now()+i,
+        fecha:       e.fecha,
+        hora:        e.hora,
+        propiedad:   e.propMatch ? e.propMatch.prop.name : e.rawProp,
+        vendorId:    e.vendorMatch.vendor ? e.vendorMatch.vendor.id : "",
+        vendorRaw:   e.rawVendor,
+        tipo:        e.tipo,
+        codigoAcceso:"",
+        notas:       e.notas,
+      };
+    });
+    onImport(newScheds);
+    setBusy(false);
+    onClose();
+  }
+
+  var IS = {border:"1px solid "+C.gray,borderRadius:6,padding:"8px 11px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",width:"100%",boxSizing:"border-box",background:"#fff"};
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:"#fff",borderRadius:14,padding:"20px",maxWidth:640,width:"100%",maxHeight:"90vh",overflow:"auto",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:16,fontWeight:700,color:C.black}}>Importar desde Hospitable</div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:3}}>Pega el CSV de la vista "Detalles" de Hospitable</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,color:C.gray,cursor:"pointer",lineHeight:1}}>×</button>
+        </div>
+
+        {/* Instructions */}
+        <div style={{background:"#EDF5EF",borderRadius:8,padding:"11px 14px",fontSize:12,lineHeight:1.7}}>
+          <div style={{fontWeight:700,color:C.green,marginBottom:4}}>Cómo exportar de Hospitable:</div>
+          <div style={{color:C.black}}>1. Ve a <b>Metrics → Operations → Details</b></div>
+          <div style={{color:C.black}}>2. Selecciona el rango de fechas que quieres importar</div>
+          <div style={{color:C.black}}>3. Presiona <b>Export / CSV</b> arriba a la derecha</div>
+          <div style={{color:C.black}}>4. Abre el archivo y copia todo el contenido (Ctrl+A, Ctrl+C)</div>
+          <div style={{color:C.black}}>5. Pega aquí abajo</div>
+        </div>
+
+        {/* Paste area */}
+        {!preview&&(
+          <div>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase",marginBottom:6}}>Pega el contenido del CSV</div>
+            <textarea
+              rows={8}
+              placeholder={"Start Date,End Date,Type,Teammate First Name,Teammate Last Name,Teammate Email\n2026-05-20,2026-05-20,Cleaning,Lilia,Del Cid,dubonmar20@gmail.com\n..."}
+              value={raw}
+              onChange={function(e){setRaw(e.target.value);}}
+              style={{width:"100%",border:"1.5px solid "+C.gray,borderRadius:8,padding:"10px 12px",fontSize:12,fontFamily:"monospace",outline:"none",resize:"vertical",boxSizing:"border-box",minHeight:140}}
+            />
+            {err&&<div style={{color:C.red,fontSize:12,marginTop:6,fontWeight:600}}>{err}</div>}
+            <button onClick={function(){handlePaste(raw);}} disabled={!raw.trim()} style={{marginTop:10,width:"100%",padding:"12px",borderRadius:7,border:"none",background:raw.trim()?C.black:C.gray,color:"#fff",fontSize:13,fontWeight:600,cursor:raw.trim()?"pointer":"default"}}>
+              Analizar CSV →
+            </button>
+          </div>
+        )}
+
+        {/* Preview */}
+        {preview&&(
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontSize:13.5,fontWeight:700,color:C.black}}>{preview.length} turnos detectados</div>
+              <button onClick={function(){setPreview(null);setRaw("");}} style={{fontSize:11.5,color:C.earth,background:"none",border:"1px solid "+C.gray,borderRadius:5,padding:"3px 9px",cursor:"pointer"}}>← Editar</button>
+            </div>
+            <div style={{display:"flex",gap:8,fontSize:11.5}}>
+              <span style={{padding:"3px 10px",borderRadius:100,background:"#EDF5EF",color:C.green,fontWeight:700}}>✓ {preview.filter(function(e){return e.vendorMatch.score>0.7;}).length} técnicos identificados</span>
+              <span style={{padding:"3px 10px",borderRadius:100,background:"#FFF9E6",color:"#7a6000",fontWeight:700}}>⚠ {preview.filter(function(e){return e.vendorMatch.score<=0.7&&e.vendorMatch.vendor;}).length} coincidencia baja</span>
+              <span style={{padding:"3px 10px",borderRadius:100,background:"#F5EDEC",color:C.red,fontWeight:700}}>✕ {preview.filter(function(e){return !e.vendorMatch.vendor;}).length} sin match</span>
+            </div>
+
+            {/* Preview list */}
+            <div style={{maxHeight:320,overflow:"auto",display:"flex",flexDirection:"column",gap:6}}>
+              {preview.map(function(e,i){
+                var vm=e.vendorMatch; var pm=e.propMatch;
+                var bg=vm.score>0.7?"#fff":vm.vendor?"#FFF9E6":"#FFF5F5";
+                return (
+                  <div key={i} style={{background:bg,borderRadius:7,padding:"10px 12px",border:"1px solid "+C.line,fontSize:12}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:8}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontWeight:600,color:C.black,marginBottom:2}}>
+                          {pm?pm.prop.name:<span style={{color:C.red}}>{e.rawProp||"Sin propiedad"}</span>}
+                        </div>
+                        <div style={{color:C.earth}}>{fmtDate(e.fecha)} {e.hora&&"· "+e.hora} · {e.tipo}</div>
+                      </div>
+                      <div style={{textAlign:"right",flexShrink:0}}>
+                        {vm.vendor?(
+                          <div style={{color:vm.score>0.7?C.green:"#7a6000",fontWeight:600}}>
+                            {vm.score>0.7?"✓":"⚠"} {vendorDisplay(vm.vendor)}
+                            <div style={{fontSize:10,color:C.taupe,fontWeight:400}}>{Math.round(vm.score*100)}% match</div>
+                          </div>
+                        ):(
+                          <div style={{color:C.red,fontWeight:600}}>✕ {e.rawVendor||"Sin técnico"}</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <button onClick={doImport} disabled={busy} style={{padding:"13px",borderRadius:7,border:"none",background:busy?C.gray:C.black,color:"#fff",fontSize:13,fontWeight:600,cursor:busy?"default":"pointer",letterSpacing:".04em"}}>
+              {busy?"Importando…":"✓ Importar "+preview.length+" turnos →"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+
+/* ─── Hospitable live sync button */
+function HospSyncButton({onImport}) {
+  const [busy,   setBusy]   = useState(false);
+  const [result, setResult] = useState(null);
+  const [err,    setErr]    = useState("");
+
+  async function sync() {
+    setBusy(true); setErr(""); setResult(null);
+    try {
+      var r = await apiCall("syncHospitable", {days:14});
+      if (!r.schedules||!r.schedules.length) {
+        setErr("Sin tareas encontradas en Hospitable para los próximos 14 días. " + (r.message||""));
+        return;
+      }
+      onImport(r.schedules);
+      setResult({count:r.schedules.length, source:r.source, period:r.period});
+    } catch(e) {
+      setErr("Error: "+(e&&e.message?e.message:"No se pudo conectar con Hospitable"));
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div style={{background:"#EDF5EF",borderRadius:8,padding:"12px 14px",border:"1px solid #c8dfc8"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+        <div>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.green,letterSpacing:".16em",textTransform:"uppercase",marginBottom:3}}>Sincronizar con Hospitable</div>
+          <div style={{fontSize:11.5,color:C.earth}}>Importa automáticamente los próximos 14 días de limpiezas y mantenimientos</div>
+        </div>
+        <button onClick={sync} disabled={busy} style={{flexShrink:0,padding:"9px 16px",borderRadius:7,border:"none",background:busy?C.gray:"#3d6b52",color:"#fff",fontSize:12.5,fontWeight:700,cursor:busy?"default":"pointer",whiteSpace:"nowrap"}}>
+          {busy?"Sincronizando…":"↻ Sync"}
+        </button>
+      </div>
+      {result&&(
+        <div style={{marginTop:8,fontSize:12,color:C.green,fontWeight:600}}>
+          ✓ {result.count} turno{result.count!==1?"s":""} importado{result.count!==1?"s":""} · {result.period}
+        </div>
+      )}
+      {err&&<div style={{marginTop:8,fontSize:12,color:C.red,fontWeight:600}}>{err}</div>}
+    </div>
+  );
+}
+
+
 function HospUrlConfig({hospUrlDay, hospUrlWeek, onSaveDay, onSaveWeek}) {
   const [editD, setEditD] = useState(false);
   const [editW, setEditW] = useState(false);
@@ -3835,10 +4116,11 @@ function HospUrlConfig({hospUrlDay, hospUrlWeek, onSaveDay, onSaveWeek}) {
 
 
 function ScheduleCfg({schedules, vendors, props, hospUrlDay, hospUrlWeek, onSave, onSaveHospUrlDay, onSaveHospUrlWeek}) {
-  const [form,     setForm]     = useState(blankSched());
-  const [editId,   setEditId]   = useState(null);
-  const [showForm, setShowForm] = useState(false);
-  const [filter,   setFilter]   = useState("week"); /* today|week|all */
+  const [form,       setForm]       = useState(blankSched());
+  const [editId,     setEditId]     = useState(null);
+  const [showForm,   setShowForm]   = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [filter,     setFilter]     = useState("week"); /* today|week|all */
 
   var today = todayStr();
   var weekEnd = (function(){var d=new Date();d.setDate(d.getDate()+7);return d.toISOString().split("T")[0];})();
@@ -3874,6 +4156,8 @@ function ScheduleCfg({schedules, vendors, props, hospUrlDay, hospUrlWeek, onSave
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      {/* Hospitable sync */}
+      <HospSyncButton onImport={function(newS){onSave((schedules||[]).filter(function(s){return !s.hospId;}).concat(newS));}}/>
       {/* Hospitable URL config */}
       <HospUrlConfig hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} onSaveDay={onSaveHospUrlDay} onSaveWeek={onSaveHospUrlWeek}/>
 
@@ -3885,9 +4169,15 @@ function ScheduleCfg({schedules, vendors, props, hospUrlDay, hospUrlWeek, onSave
       </div>
 
       {/* Add button */}
-      <button onClick={function(){setForm(blankSched());setEditId(null);setShowForm(!showForm);}} style={{padding:"11px",borderRadius:7,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",textAlign:"left"}}>
-        {showForm?"✕ Cancelar":"+ Agregar turno"}
-      </button>
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={function(){setForm(blankSched());setEditId(null);setShowForm(!showForm);}} style={{flex:1,padding:"11px",borderRadius:7,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",textAlign:"left"}}>
+          {showForm?"✕ Cancelar":"+ Agregar turno"}
+        </button>
+        <button onClick={function(){setShowImport(true);}} style={{padding:"11px 14px",borderRadius:7,border:"1.5px solid "+C.earth,background:C.surfaceWarm,color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
+          ↓ CSV
+        </button>
+      </div>
+      {showImport&&<CSVImporter vendors={vendors} props={props} onImport={function(newS){onSave((schedules||[]).concat(newS));}} onClose={function(){setShowImport(false);}}/>}
 
       {/* Form */}
       {showForm&&(
