@@ -226,6 +226,8 @@ function ls_loadAll(){
     company: ls_get("c:co")||null,
     extcats:   ls_get("c:ec")||null,
     schedules: ls_get("c:sched")||null,
+    hospurlday:  ls_get("c:hospday")||null,
+    hospurlweek: ls_get("c:hospweek")||null,
     feedback:  ls_get("c:fb")||null,
   };
   return {reports:reps.sort(function(a,b){return (b.createdAt||b.id)-(a.createdAt||a.id);}), ...cfg};
@@ -473,6 +475,8 @@ export default function App() {
   const [pin,      setPin]      = useState("spacio2024");
   const [company,  setCompany]  = useState({name:"Spacio AM S.A.",nit:"118287796"});
   const [extCats,   setExtCats]   = useState([]);
+  const [hospUrlDay,  setHospUrlDay]  = useState("https://share.hospitable.com/metrics/83c19ef2-72d9-45bc-abf8-9cf53e8b1a96");
+  const [hospUrlWeek, setHospUrlWeek] = useState("https://share.hospitable.com/metrics/41c8a454-1ece-4ad6-b4ef-605a140ec3f7");
   const [schedules, setSchedules] = useState([]);
   const [feedback,  setFeedback]  = useState([]);
   const [ready,    setReady]    = useState(false);
@@ -518,6 +522,8 @@ export default function App() {
       setCompany(d.company||{name:"Spacio AM S.A.",nit:"118287796"});
       if(d.extcats)   setExtCats(d.extcats);
       if(d.schedules) setSchedules(d.schedules);
+      if(d.hospurlday)  setHospUrlDay(d.hospurlday||"");
+      if(d.hospurlweek) setHospUrlWeek(d.hospurlweek||"");
       if(d.feedback)  setFeedback(d.feedback);
       setSheetsOk(!IS_CLAUDE_SANDBOX);
       setReady(true); setSyncing(false);
@@ -578,6 +584,9 @@ export default function App() {
   async function svCo(v)  { setCompany(v); saveConfigItem("company",v); }
   async function svExtCats(v)   { setExtCats(v);   saveConfigItem("extcats",v); }
   async function svSchedules(v) { setSchedules(v); saveConfigItem("schedules",v); }
+  async function svHospUrlDay(v)  { setHospUrlDay(v);  saveConfigItem("hospurlday",v); }
+  /* Preset Hospitable URLs already configured */
+  async function svHospUrlWeek(v) { setHospUrlWeek(v); saveConfigItem("hospurlweek",v); }
   async function svFeedback(v)  { setFeedback(v);  saveConfigItem("feedback",v); }
 
   async function refresh() {
@@ -591,6 +600,8 @@ export default function App() {
       setCompany(d.company);
       if(d.extcats)   setExtCats(d.extcats);
       if(d.schedules) setSchedules(d.schedules);
+      if(d.hospurlday)  setHospUrlDay(d.hospurlday||"");
+      if(d.hospurlweek) setHospUrlWeek(d.hospurlweek||"");
       if(d.feedback)  setFeedback(d.feedback);
       setSheetsOk(true);
     } catch(e) { setSheetsOk(false); }
@@ -611,9 +622,9 @@ export default function App() {
   } else if (!sess) {
     inner = <Login vendors={vendors} adminPin={pin} onLogin={login} sheetsOk={sheetsOk}/>;
   } else if (sess.role==="vendor"&&sess.vendor) {
-    inner = <VendorApp vendor={sess.vendor} allVendors={vendors} reps={reps.filter(function(r){return r.reportadoPor===sess.vendor.email;})} props={props} company={company} schedules={schedules} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={svFeedback} onLogout={logout}/>;
+    inner = <VendorApp vendor={sess.vendor} allVendors={vendors} reps={reps.filter(function(r){return r.reportadoPor===sess.vendor.email;})} props={props} company={company} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={svFeedback} onLogout={logout}/>;
   } else {
-    inner = <AdminApp reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} feedback={feedback} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout}/>;
+    inner = <AdminApp reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout}/>;
   }
   return <ErrorBoundary>{inner}</ErrorBoundary>;
 }
@@ -676,7 +687,7 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
 }
 
 /* ═══ ADMIN */
-function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,feedback,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvFeedback,onRefresh,onLogout}) {
+function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout}) {
   const [tab,    setTab]    = useState("dash");
   const [detail, setDetail] = useState(null);
   const [cDel,   setCDel]   = useState(null);
@@ -2283,7 +2294,7 @@ function MultiPhotoUp({label,photos,max,accent,onAdd,onDel}) {
 
 
 /* ─── Config */
-function CfgView({vendors,props,adminPin,company,extCats,schedules,feedback,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvFeedback}) {
+function CfgView({vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback}) {
   const [tab,setTab] = useState("vendors");
   return (
     <div style={{maxWidth:640,margin:"0 auto",padding:"28px 18px 60px",fontFamily:"Montserrat,sans-serif"}}>
@@ -2292,7 +2303,7 @@ function CfgView({vendors,props,adminPin,company,extCats,schedules,feedback,onSv
         {[["vendors","Proveedores"],["props","Propiedades"],["company","Empresa"],["security","Seguridad"]].map(function(it){ var k=it[0],l=it[1]; return <button key={k} onClick={function(){setTab(k);}} style={{flex:1,minWidth:90,padding:"9px 6px",borderRadius:8,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,fontSize:12,letterSpacing:".06em",transition:"all .2s"}}>{l}</button>; })}
       </div>
       <div style={{display:tab==="vendors"  ?"block":"none"}}><VendorsCfg  vendors={vendors} extCats={extCats||[]} onSave={onSvV} onSaveExtCats={onSvExtCats}/></div>
-      <div style={{display:tab==="sched"   ?"block":"none"}}><ScheduleCfg schedules={schedules||[]} vendors={vendors||[]} props={props||[]} onSave={onSvSchedules}/></div>
+      <div style={{display:tab==="sched"   ?"block":"none"}}><ScheduleCfg schedules={schedules||[]} vendors={vendors||[]} props={props||[]} hospUrlDay={hospUrlDay||""} hospUrlWeek={hospUrlWeek||""} onSave={onSvSchedules} onSaveHospUrlDay={onSvHospUrlDay} onSaveHospUrlWeek={onSvHospUrlWeek}/></div>
       <div style={{display:tab==="feedback"?"block":"none"}}><FeedbackCfg feedback={feedback||[]} onSave={onSvFeedback}/></div>
       <div style={{display:tab==="props"   ?"block":"none"}}><PropsCfg    props={props}     onSave={onSvP}/></div>
       <div style={{display:tab==="company" ?"block":"none"}}><CompanyCfg  company={company} onSave={onSvCo}/></div>
@@ -2826,7 +2837,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA}
 }
 
 /* ═══ VENDOR APP */
-function VendorApp({vendor,allVendors,reps,props,company,schedules,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout}) {
+function VendorApp({vendor,allVendors,reps,props,company,schedules,hospUrlDay,hospUrlWeek,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout}) {
   const [view,setView] = useState("jobs");
   var tot=reps.reduce(function(s,r){return s+parseFloat(r.total||0);},0);
   var cob=reps.filter(function(r){return r.paid;}).reduce(function(s,r){return s+parseFloat(r.total||0);},0);
@@ -2851,7 +2862,7 @@ function VendorApp({vendor,allVendors,reps,props,company,schedules,onSubmit,onUp
       />
       <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}}/></div>
       <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={[]} props={props} company={company} defaultVendor={vendor.email} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
-      <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules}/></div>
+      <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek}/></div>
       <div style={{display:view==="hist"   ?"block":"none"}}><VendorHistory reps={cleaningReps} onRespond={vendorRespond}/></div>
       <div style={{display:view==="account"?"block":"none"}}><VendorAccount vendor={vendor} allVendors={allVendors} onSvV={onSvV}/></div>
     </div>
@@ -3777,7 +3788,53 @@ function blankSched() {
 }
 
 /* Admin: Schedule management */
-function ScheduleCfg({schedules, vendors, props, onSave}) {
+
+/* Hospitable URL config widget — shown in ScheduleCfg */
+function HospUrlConfig({hospUrlDay, hospUrlWeek, onSaveDay, onSaveWeek}) {
+  const [editD, setEditD] = useState(false);
+  const [editW, setEditW] = useState(false);
+  const [valD,  setValD]  = useState(hospUrlDay||"");
+  const [valW,  setValW]  = useState(hospUrlWeek||"");
+
+  function UrlRow({label, val, editing, setEditing, curVal, setCurVal, onSave, placeholder}) {
+    return (
+      <div style={{borderBottom:"1px solid "+C.line,paddingBottom:10,marginBottom:10}}>
+        <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase",marginBottom:5}}>{label}</div>
+        {!editing&&(
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{flex:1,fontSize:11.5,color:val?C.black:C.taupe,fontStyle:val?"normal":"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              {val||"Sin configurar"}
+            </div>
+            <button onClick={function(){setCurVal(val||"");setEditing(true);}} style={{flexShrink:0,fontSize:11,padding:"3px 9px",borderRadius:5,border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",fontWeight:600}}>
+              {val?"✏":"+ Agregar"}
+            </button>
+          </div>
+        )}
+        {editing&&(
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            <input value={curVal} onChange={function(e){setCurVal(e.target.value);}} placeholder={placeholder} style={{border:"1.5px solid "+C.earth,borderRadius:6,padding:"7px 10px",fontSize:12,fontFamily:"Montserrat,sans-serif",outline:"none",width:"100%",boxSizing:"border-box"}}/>
+            <div style={{display:"flex",gap:6}}>
+              <button onClick={function(){if(onSave)onSave(curVal.trim());setEditing(false);}} style={{flex:1,padding:"7px",borderRadius:5,border:"none",background:C.black,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>Guardar</button>
+              <button onClick={function(){setEditing(false);}} style={{padding:"7px 12px",borderRadius:5,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,cursor:"pointer"}}>✕</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{background:C.surfaceWarm,borderRadius:8,padding:"12px 14px",border:"1px solid "+C.line}}>
+      <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",marginBottom:10}}>Enlaces de Hospitable</div>
+      <UrlRow label="Programa de hoy" val={hospUrlDay} editing={editD} setEditing={setEditD} curVal={valD} setCurVal={setValD} onSave={onSaveDay} placeholder="https://share.hospitable.com/metrics/..."/>
+      <UrlRow label="Programa semanal" val={hospUrlWeek} editing={editW} setEditing={setEditW} curVal={valW} setCurVal={setValW} onSave={onSaveWeek} placeholder="https://share.hospitable.com/metrics/..."/>
+      <div style={{fontSize:10.5,color:C.taupe}}>Los proveedores ven estos programas como respaldo cuando no tienen turnos asignados.</div>
+    </div>
+  );
+}
+
+
+function ScheduleCfg({schedules, vendors, props, hospUrlDay, hospUrlWeek, onSave, onSaveHospUrlDay, onSaveHospUrlWeek}) {
   const [form,     setForm]     = useState(blankSched());
   const [editId,   setEditId]   = useState(null);
   const [showForm, setShowForm] = useState(false);
@@ -3817,6 +3874,9 @@ function ScheduleCfg({schedules, vendors, props, onSave}) {
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      {/* Hospitable URL config */}
+      <HospUrlConfig hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} onSaveDay={onSaveHospUrlDay} onSaveWeek={onSaveHospUrlWeek}/>
+
       {/* Filter tabs */}
       <div style={{display:"flex",background:C.surfaceWarm,borderRadius:7,padding:3,gap:2,border:"1px solid "+C.line}}>
         {[["today","Hoy"],["week","Esta semana"],["all","Todo"]].map(function(it){var k=it[0],l=it[1];return(
@@ -3953,8 +4013,8 @@ function FeedbackCfg({feedback, onSave}) {
   );
 }
 
-/* Vendor: Schedule for today + week */
-function VendorSchedule({vendor, schedules}) {
+/* Vendor: Schedule for today + week — with Hospitable fallback */
+function VendorSchedule({vendor, schedules, hospUrlDay, hospUrlWeek}) {
   const [view, setView] = useState("today");
   var today    = todayStr();
   var weekEnd  = (function(){var d=new Date();d.setDate(d.getDate()+7);return d.toISOString().split("T")[0];})();
@@ -3994,8 +4054,9 @@ function VendorSchedule({vendor, schedules}) {
         </div>
       )}
       {todayList.length===0&&(
-        <div style={{background:C.surfaceWarm,padding:"13px 18px",borderBottom:"1px solid "+C.line}}>
-          <div style={{fontSize:12.5,color:C.taupe,fontStyle:"italic"}}>Sin turnos programados para hoy.</div>
+        <div style={{background:"#F7F5F2",padding:"13px 18px",borderBottom:"1px solid "+C.line}}>
+          <div style={{fontSize:12.5,color:C.taupe}}>Sin turnos asignados hoy en el sistema.</div>
+          {(hospUrlDay||hospUrlWeek)&&<div style={{fontSize:11,color:C.earth,marginTop:3}}>Revisa el programa completo abajo →</div>}
         </div>
       )}
 
@@ -4010,7 +4071,38 @@ function VendorSchedule({vendor, schedules}) {
 
       {/* List */}
       <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
-        {shown.length===0&&<div style={{textAlign:"center",padding:"32px",color:C.taupe,fontSize:13}}>Sin turnos {view==="today"?"hoy":"esta semana"}.</div>}
+        {shown.length===0&&(
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{textAlign:"center",padding:"20px",color:C.taupe,fontSize:13}}>
+              Sin turnos asignados {view==="today"?"para hoy":"esta semana"} en el sistema.
+            </div>
+            {(function(){
+              var url = view==="today" ? hospUrlDay : hospUrlWeek;
+              var lbl = view==="today" ? "Programa de hoy (Hospitable)" : "Programa semanal (Hospitable)";
+              if (!url) return (
+                <div style={{padding:"14px",borderRadius:8,background:C.surfaceWarm,fontSize:12,color:C.taupe,textAlign:"center",border:"1px dashed "+C.gray}}>
+                  El administrador puede configurar los enlaces de Hospitable en Configuración → Programación
+                </div>
+              );
+              return (
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>{lbl}</div>
+                  <div style={{borderRadius:10,overflow:"hidden",border:"1px solid "+C.line,background:"#fff",boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
+                    <iframe
+                      src={url}
+                      title={lbl}
+                      style={{width:"100%",height:560,border:"none",display:"block"}}
+                      sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                    />
+                  </div>
+                  <a href={url} target="_blank" rel="noopener noreferrer" style={{fontSize:12,color:C.earth,textAlign:"center",textDecoration:"none",fontWeight:600,padding:"10px",borderRadius:7,border:"1px solid "+C.gray,background:"#fff",display:"block",textAlign:"center"}}>
+                    ↗ Abrir en pantalla completa
+                  </a>
+                </div>
+              );
+            })()}
+          </div>
+        )}
         {shown.map(function(s,i){
           var isToday=s.fecha===today;
           return (
