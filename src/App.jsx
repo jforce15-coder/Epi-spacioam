@@ -45,6 +45,70 @@ function vendorDisplay(v) {
   if (v.primerNombre) return [v.primerNombre, v.primerApellido].filter(Boolean).join(" ");
   return v.name||v.email||"—";
 }
+
+/* ─── Fuzzy vendor matcher
+   Matches by email, phone, or name similarity.
+   Returns the best-matching vendor and a confidence score 0-1.
+*/
+function normalize(s) {
+  if (!s) return "";
+  return String(s).toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g,"")  /* remove accents */
+    .replace(/[^a-z0-9@.+\s]/g," ")
+    .replace(/\s+/g," ").trim();
+}
+
+function similarity(a, b) {
+  a = normalize(a); b = normalize(b);
+  if (!a||!b) return 0;
+  if (a===b) return 1;
+  if (a.includes(b)||b.includes(a)) return 0.9;
+  /* Count matching words */
+  var wa = a.split(" ").filter(Boolean);
+  var wb = b.split(" ").filter(Boolean);
+  var matches = wa.filter(function(w){ return w.length>2&&wb.some(function(x){return x.includes(w)||w.includes(x)||levenshtein(w,x)<=2;}); });
+  return matches.length / Math.max(wa.length, wb.length);
+}
+
+function levenshtein(a, b) {
+  var m=a.length, n=b.length;
+  var dp=[];
+  for(var i=0;i<=m;i++){dp[i]=[i];for(var j=1;j<=n;j++){if(i===0){dp[i][j]=j;}else{var cost=a[i-1]===b[j-1]?0:1;dp[i][j]=Math.min(dp[i-1][j]+1,dp[i][j-1]+1,dp[i-1][j-1]+cost);}}}
+  return dp[m][n];
+}
+
+function fuzzyMatchVendor(query, vendors) {
+  /* query: raw text from Hospitable — could be email, name, phone, or any combo */
+  if (!query||!vendors||!vendors.length) return {vendor:null, score:0};
+  var q = normalize(query);
+
+  var scored = vendors.map(function(v){
+    var scores = [];
+    /* Email match */
+    var em = normalize(v.email||"");
+    if (em&&q.includes(em.split("@")[0])) scores.push(0.95);
+    else if (em&&similarity(q,em)>0.5) scores.push(similarity(q,em));
+
+    /* Phone match — normalize digits only */
+    var ph = (v.phone||"").replace(/\D/g,"");
+    var qph = q.replace(/\D/g,"");
+    if (ph&&qph&&qph.includes(ph.slice(-8))) scores.push(0.9);
+
+    /* Full name match */
+    var fullName = [v.primerNombre,v.segundoNombre,v.primerApellido,v.segundoApellido].filter(Boolean).join(" ");
+    var oldName  = v.name||"";
+    var ns1 = similarity(q, fullName);
+    var ns2 = similarity(q, oldName);
+    scores.push(Math.max(ns1,ns2));
+
+    return {vendor:v, score:scores.length?Math.max.apply(null,scores):0};
+  });
+
+  scored.sort(function(a,b){return b.score-a.score;});
+  var best = scored[0];
+  return best&&best.score>0.25 ? best : {vendor:null, score:0};
+}
+
 function vendorTipo(v) {
   if (!v) return "";
   var t = v.tipo==="interno" ? "Interno" : v.tipo==="externo" ? "Externo" : "";
@@ -160,7 +224,9 @@ function ls_loadAll(){
     props:   ls_get("c:p")||null,
     adminpin:ls_get("c:pin")||null,
     company: ls_get("c:co")||null,
-    extcats: ls_get("c:ec")||null,
+    extcats:   ls_get("c:ec")||null,
+    schedules: ls_get("c:sched")||null,
+    feedback:  ls_get("c:fb")||null,
   };
   return {reports:reps.sort(function(a,b){return (b.createdAt||b.id)-(a.createdAt||a.id);}), ...cfg};
 }
@@ -172,12 +238,14 @@ async function loadAllData() {
   if (IS_CLAUDE_SANDBOX) {
     var d = ls_loadAll();
     return {
-      reports: d.reports,
-      vendors: d.vendors || DEF_V,
-      props:   d.props   || DEF_P,
-      pin:     d.adminpin|| "spacio2024",
-      company: d.company || {name:"Spacio AM S.A.",nit:"118287796"},
-      extcats: d.extcats || [],
+      reports:   d.reports,
+      vendors:   d.vendors   || DEF_V,
+      props:     d.props     || DEF_P,
+      pin:       d.adminpin  || "spacio2024",
+      company:   d.company   || {name:"Spacio AM S.A.",nit:"118287796"},
+      extcats:   d.extcats   || [],
+      schedules: d.schedules || [],
+      feedback:  d.feedback  || [],
     };
   }
   var results = await Promise.all([apiCall("getAll"), apiCall("getConfig")]);
@@ -404,7 +472,9 @@ export default function App() {
   const [props,    setProps]    = useState(DEF_P);
   const [pin,      setPin]      = useState("spacio2024");
   const [company,  setCompany]  = useState({name:"Spacio AM S.A.",nit:"118287796"});
-  const [extCats,  setExtCats]  = useState([]);
+  const [extCats,   setExtCats]   = useState([]);
+  const [schedules, setSchedules] = useState([]);
+  const [feedback,  setFeedback]  = useState([]);
   const [ready,    setReady]    = useState(false);
   const [syncing,  setSyncing]  = useState(false);
   const [syncMsg,  setSyncMsg]  = useState("");
@@ -446,7 +516,9 @@ export default function App() {
       setProps(d.props||DEF_P);
       setPin(d.pin||"spacio2024");
       setCompany(d.company||{name:"Spacio AM S.A.",nit:"118287796"});
-      if(d.extcats) setExtCats(d.extcats);
+      if(d.extcats)   setExtCats(d.extcats);
+      if(d.schedules) setSchedules(d.schedules);
+      if(d.feedback)  setFeedback(d.feedback);
       setSheetsOk(!IS_CLAUDE_SANDBOX);
       setReady(true); setSyncing(false);
     }).catch(function(e){
@@ -504,7 +576,9 @@ export default function App() {
   async function svP(v) { setProps(v);   saveConfigItem("props",v); }
   async function svPin(v) { setPin(v);     saveConfigItem("pin",v); }
   async function svCo(v)  { setCompany(v); saveConfigItem("company",v); }
-  async function svExtCats(v) { setExtCats(v); saveConfigItem("extcats",v); }
+  async function svExtCats(v)   { setExtCats(v);   saveConfigItem("extcats",v); }
+  async function svSchedules(v) { setSchedules(v); saveConfigItem("schedules",v); }
+  async function svFeedback(v)  { setFeedback(v);  saveConfigItem("feedback",v); }
 
   async function refresh() {
     setSyncing(true); setSyncMsg("Actualizando…");
@@ -515,7 +589,9 @@ export default function App() {
       setProps(d.props);
       setPin(d.pin);
       setCompany(d.company);
-      if(d.extcats) setExtCats(d.extcats);
+      if(d.extcats)   setExtCats(d.extcats);
+      if(d.schedules) setSchedules(d.schedules);
+      if(d.feedback)  setFeedback(d.feedback);
       setSheetsOk(true);
     } catch(e) { setSheetsOk(false); }
     finally { setSyncing(false); setSyncMsg(""); }
@@ -535,9 +611,9 @@ export default function App() {
   } else if (!sess) {
     inner = <Login vendors={vendors} adminPin={pin} onLogin={login} sheetsOk={sheetsOk}/>;
   } else if (sess.role==="vendor"&&sess.vendor) {
-    inner = <VendorApp vendor={sess.vendor} allVendors={vendors} reps={reps.filter(function(r){return r.reportadoPor===sess.vendor.email;})} props={props} company={company} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onLogout={logout}/>;
+    inner = <VendorApp vendor={sess.vendor} allVendors={vendors} reps={reps.filter(function(r){return r.reportadoPor===sess.vendor.email;})} props={props} company={company} schedules={schedules} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={svFeedback} onLogout={logout}/>;
   } else {
-    inner = <AdminApp reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onRefresh={refresh} onLogout={logout}/>;
+    inner = <AdminApp reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} feedback={feedback} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout}/>;
   }
   return <ErrorBoundary>{inner}</ErrorBoundary>;
 }
@@ -600,7 +676,7 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
 }
 
 /* ═══ ADMIN */
-function AdminApp({reps,vendors,props,adminPin,company,extCats,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onRefresh,onLogout}) {
+function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,feedback,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvFeedback,onRefresh,onLogout}) {
   const [tab,    setTab]    = useState("dash");
   const [detail, setDetail] = useState(null);
   const [cDel,   setCDel]   = useState(null);
@@ -1562,8 +1638,9 @@ function DanosFormSolo({vendors,props,onSubmit,defaultVendor,onBack}) {
 }
 
 /* ═══════════════ LIMPIEZA TRADICIONAL WIZARD ══════════════════════════ */
-function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack}) {
+function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFeedback}) {
   const STEPS = ["Bienvenida","País","Ciudad","Responsable","Propiedad","Habitaciones","Baños","Cocina","Sala e Insumos","Limpieza Detallada","Inventario","Daños","Foto uniforme","Confirmación"];
+  var TOTAL_STEPS_F = STEPS.length - 1;
   const [step,setStep]   = useState(0);
   const [errMsg,setErrMsg] = useState("");
   const [form,setForm] = useState({
@@ -1634,6 +1711,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack}) {
 
   return (
     <div style={{maxWidth:560,margin:"0 auto",padding:"0 0 80px",fontFamily:"Montserrat,sans-serif"}}>
+      <FeedbackBubble vendor={vendors&&vendors.find(function(v){return v.email===form.reportadoPor;})} onSaveFeedback={onSaveFeedback} currentStep={step} totalSteps={TOTAL_STEPS_F}/>
       {/* Progress bar */}
       {step>0&&step<STEPS.length-1&&(
         <div style={{position:"sticky",top:58,zIndex:20,background:"#fff",borderBottom:"1px solid "+C.gray,padding:"12px 18px"}}>
@@ -2205,7 +2283,7 @@ function MultiPhotoUp({label,photos,max,accent,onAdd,onDel}) {
 
 
 /* ─── Config */
-function CfgView({vendors,props,adminPin,company,extCats,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats}) {
+function CfgView({vendors,props,adminPin,company,extCats,schedules,feedback,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvFeedback}) {
   const [tab,setTab] = useState("vendors");
   return (
     <div style={{maxWidth:640,margin:"0 auto",padding:"28px 18px 60px",fontFamily:"Montserrat,sans-serif"}}>
@@ -2213,7 +2291,9 @@ function CfgView({vendors,props,adminPin,company,extCats,onSvV,onSvP,onSvPin,onS
       <div style={{display:"flex",background:"#fff",borderRadius:10,padding:4,gap:3,marginBottom:18,border:"1px solid "+C.gray,flexWrap:"wrap"}}>
         {[["vendors","Proveedores"],["props","Propiedades"],["company","Empresa"],["security","Seguridad"]].map(function(it){ var k=it[0],l=it[1]; return <button key={k} onClick={function(){setTab(k);}} style={{flex:1,minWidth:90,padding:"9px 6px",borderRadius:8,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,fontSize:12,letterSpacing:".06em",transition:"all .2s"}}>{l}</button>; })}
       </div>
-      <div style={{display:tab==="vendors" ?"block":"none"}}><VendorsCfg  vendors={vendors} extCats={extCats||[]} onSave={onSvV} onSaveExtCats={onSvExtCats}/></div>
+      <div style={{display:tab==="vendors"  ?"block":"none"}}><VendorsCfg  vendors={vendors} extCats={extCats||[]} onSave={onSvV} onSaveExtCats={onSvExtCats}/></div>
+      <div style={{display:tab==="sched"   ?"block":"none"}}><ScheduleCfg schedules={schedules||[]} vendors={vendors||[]} props={props||[]} onSave={onSvSchedules}/></div>
+      <div style={{display:tab==="feedback"?"block":"none"}}><FeedbackCfg feedback={feedback||[]} onSave={onSvFeedback}/></div>
       <div style={{display:tab==="props"   ?"block":"none"}}><PropsCfg    props={props}     onSave={onSvP}/></div>
       <div style={{display:tab==="company" ?"block":"none"}}><CompanyCfg  company={company} onSave={onSvCo}/></div>
       <div style={{display:tab==="security"?"block":"none"}}><SecurityCfg adminPin={adminPin} onSave={onSvPin}/></div>
@@ -2746,7 +2826,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA}
 }
 
 /* ═══ VENDOR APP */
-function VendorApp({vendor,allVendors,reps,props,company,onSubmit,onUpdate,onSvV,onLogout}) {
+function VendorApp({vendor,allVendors,reps,props,company,schedules,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout}) {
   const [view,setView] = useState("jobs");
   var tot=reps.reduce(function(s,r){return s+parseFloat(r.total||0);},0);
   var cob=reps.filter(function(r){return r.paid;}).reduce(function(s,r){return s+parseFloat(r.total||0);},0);
@@ -2765,12 +2845,13 @@ function VendorApp({vendor,allVendors,reps,props,company,onSubmit,onUpdate,onSvV
       <ResponsiveHeader
         tab={view} setTab={setView}
         alertCount={0}
-        navItems={[["jobs","Mis trabajos","◫"],["new","Nuevo reporte","✎"],["hist","Calidad","★"],["account","Cuenta","◉"]]}
+        navItems={[["jobs","Mis trabajos","◫"],["new","Nuevo reporte","✎"],["sched","Programa","📅"],["hist","Calidad","★"],["account","Cuenta","◉"]]}
         onLogout={onLogout}
         role={vendorDisplay(vendor)}
       />
       <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}}/></div>
-      <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={[]} props={props} company={company} defaultVendor={vendor.email} onSubmit={async function(r){await onSubmit(r);setView("jobs");}}/></div>
+      <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={[]} props={props} company={company} defaultVendor={vendor.email} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
+      <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules}/></div>
       <div style={{display:view==="hist"   ?"block":"none"}}><VendorHistory reps={cleaningReps} onRespond={vendorRespond}/></div>
       <div style={{display:view==="account"?"block":"none"}}><VendorAccount vendor={vendor} allVendors={allVendors} onSvV={onSvV}/></div>
     </div>
@@ -3620,6 +3701,338 @@ function QASection({rep, onQA}) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+
+/* ══════════════════════════════════════════════════════════
+   FEEDBACK BUBBLE — non-invasive corner popup during forms
+   Shows around step 5-7 of any wizard
+   ══════════════════════════════════════════════════════════ */
+function FeedbackBubble({vendor, onSaveFeedback, currentStep, totalSteps}) {
+  const [open,    setOpen]    = useState(false);
+  const [sent,    setSent]    = useState(false);
+  const [text,    setText]    = useState("");
+  const [type,    setType]    = useState("mejora"); /* mejora | error */
+  const [visible, setVisible] = useState(false);
+
+  /* Show bubble around the middle of the form */
+  useEffect(function(){
+    if (!sent && totalSteps && currentStep >= Math.floor(totalSteps/2)) {
+      var t = setTimeout(function(){ setVisible(true); }, 1500);
+      return function(){ clearTimeout(t); };
+    }
+  }, [currentStep, totalSteps, sent]);
+
+  function submit() {
+    if (!text.trim()) return;
+    var fb = {
+      id:        Date.now(),
+      fecha:     todayStr(),
+      hora:      new Date().toLocaleTimeString("es-GT",{hour:"2-digit",minute:"2-digit"}),
+      usuario:   vendor ? vendor.email : "anon",
+      tipo:      type,
+      mensaje:   text.trim(),
+      visto:     false,
+    };
+    onSaveFeedback(fb);
+    setText(""); setSent(true); setOpen(false);
+  }
+
+  if (!visible || sent) return null;
+
+  return (
+    <div style={{position:"fixed",bottom:80,right:16,zIndex:500,maxWidth:280,fontFamily:"Montserrat,sans-serif"}}>
+      {!open&&(
+        <button onClick={function(){setOpen(true);}} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 14px",borderRadius:100,background:"#fff",border:"1px solid "+C.line,boxShadow:"0 2px 12px rgba(0,0,0,.12)",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
+          💬 ¿Tienes un comentario?
+          <button onClick={function(e){e.stopPropagation();setVisible(false);}} style={{background:"none",border:"none",color:C.gray,fontSize:14,cursor:"pointer",padding:"0 0 0 4px",lineHeight:1}}>×</button>
+        </button>
+      )}
+      {open&&(
+        <div style={{background:"#fff",borderRadius:14,padding:"16px",boxShadow:"0 4px 24px rgba(0,0,0,.14)",border:"1px solid "+C.line}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <div style={{fontSize:13,fontWeight:700,color:C.black}}>Tu opinión nos ayuda</div>
+            <button onClick={function(){setOpen(false);}} style={{background:"none",border:"none",color:C.gray,fontSize:16,cursor:"pointer",lineHeight:1}}>×</button>
+          </div>
+          <div style={{display:"flex",gap:6,marginBottom:12}}>
+            {[["mejora","💡 Sugerencia"],["error","🐛 Error"]].map(function(it){
+              return <button key={it[0]} onClick={function(){setType(it[0]);}} style={{flex:1,padding:"6px",borderRadius:6,border:"1.5px solid "+(type===it[0]?C.black:C.gray),background:type===it[0]?C.black:"#fff",color:type===it[0]?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{it[1]}</button>;
+            })}
+          </div>
+          <textarea rows={3} placeholder={type==="error"?"Describe el error que encontraste…":"¿Qué mejorarías en el app?"} value={text} onChange={function(e){setText(e.target.value);}} style={{width:"100%",border:"1px solid "+C.gray,borderRadius:8,padding:"9px 11px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",resize:"none",boxSizing:"border-box"}}/>
+          <button onClick={submit} disabled={!text.trim()} style={{marginTop:10,width:"100%",padding:"10px",borderRadius:7,border:"none",background:text.trim()?C.black:C.gray,color:"#fff",fontSize:12.5,fontWeight:600,cursor:text.trim()?"pointer":"default",letterSpacing:".04em"}}>Enviar comentario →</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
+   SCHEDULE SYSTEM
+   ══════════════════════════════════════════════════════════ */
+function blankSched() {
+  return {id:"",fecha:todayStr(),hora:"09:00",propiedad:"",vendorId:"",tipo:"Limpieza",codigoAcceso:"",notas:""};
+}
+
+/* Admin: Schedule management */
+function ScheduleCfg({schedules, vendors, props, onSave}) {
+  const [form,     setForm]     = useState(blankSched());
+  const [editId,   setEditId]   = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [filter,   setFilter]   = useState("week"); /* today|week|all */
+
+  var today = todayStr();
+  var weekEnd = (function(){var d=new Date();d.setDate(d.getDate()+7);return d.toISOString().split("T")[0];})();
+
+  var filtered = (schedules||[]).filter(function(s){
+    if(filter==="today") return s.fecha===today;
+    if(filter==="week")  return s.fecha>=today&&s.fecha<=weekEnd;
+    return true;
+  }).sort(function(a,b){return a.fecha>b.fecha?1:a.fecha<b.fecha?-1:a.hora>b.hora?1:-1;});
+
+  var intVendors = vendors.filter(function(v){
+    return v.tipo==="interno"&&v.active&&(v.categoria==="EPI Limpieza"||v.categoria==="EPI Mantenimiento"||v.categoria==="Administrativo");
+  });
+
+  function sf(k,v){setForm(function(p){return Object.assign({},p,{[k]:v});});}
+
+  function save() {
+    if(!form.fecha||!form.propiedad||!form.vendorId) return;
+    var id = editId || "s"+Date.now();
+    var entry = Object.assign({},form,{id:id,vendorRaw:form.vendorRaw||""});
+    var updated = editId
+      ? (schedules||[]).map(function(s){return s.id===editId?entry:s;})
+      : (schedules||[]).concat([entry]);
+    onSave(updated);
+    setForm(blankSched()); setEditId(null); setShowForm(false);
+  }
+
+  function del(id){ onSave((schedules||[]).filter(function(s){return s.id!==id;})); }
+
+  function edit(s){ setForm(Object.assign({},s)); setEditId(s.id); setShowForm(true); window.scrollTo(0,0); }
+
+  var IS = {border:"1px solid "+C.gray,borderRadius:6,padding:"9px 11px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",width:"100%",background:"#fff"};
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      {/* Filter tabs */}
+      <div style={{display:"flex",background:C.surfaceWarm,borderRadius:7,padding:3,gap:2,border:"1px solid "+C.line}}>
+        {[["today","Hoy"],["week","Esta semana"],["all","Todo"]].map(function(it){var k=it[0],l=it[1];return(
+          <button key={k} onClick={function(){setFilter(k);}} style={{flex:1,padding:"7px",borderRadius:5,border:"none",background:filter===k?C.black:"transparent",color:filter===k?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{l}</button>
+        );})}
+      </div>
+
+      {/* Add button */}
+      <button onClick={function(){setForm(blankSched());setEditId(null);setShowForm(!showForm);}} style={{padding:"11px",borderRadius:7,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",textAlign:"left"}}>
+        {showForm?"✕ Cancelar":"+ Agregar turno"}
+      </button>
+
+      {/* Form */}
+      {showForm&&(
+        <div style={{background:"#fff",borderRadius:10,padding:"16px",border:"1.5px solid "+C.black,display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>{editId?"Editar turno":"Nuevo turno"}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div><label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:5}}>Fecha *</label><input type="date" value={form.fecha} onChange={function(e){sf("fecha",e.target.value);}} style={IS}/></div>
+            <div><label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:5}}>Hora</label><input type="time" value={form.hora} onChange={function(e){sf("hora",e.target.value);}} style={IS}/></div>
+          </div>
+          <div><label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:5}}>Propiedad *</label>
+            <select value={form.propiedad} onChange={function(e){sf("propiedad",e.target.value);}} style={IS}>
+              <option value="">Seleccionar…</option>
+              {(props||[]).map(function(p){return <option key={p.id} value={p.name}>{p.name}</option>;})}
+            </select>
+          </div>
+          <div>
+            <label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:5}}>Técnico *</label>
+            <div style={{position:"relative"}}>
+              <input
+                placeholder="Nombre, correo o teléfono del técnico…"
+                value={form.vendorRaw||""}
+                onChange={function(e){
+                  sf("vendorRaw",e.target.value);
+                  /* Auto fuzzy-match */
+                  var match = fuzzyMatchVendor(e.target.value, intVendors);
+                  if(match.vendor) sf("vendorId", match.vendor.id);
+                  else sf("vendorId","");
+                }}
+                style={IS}
+              />
+              {form.vendorRaw&&(function(){
+                var m = fuzzyMatchVendor(form.vendorRaw, intVendors);
+                if(!m.vendor) return <div style={{fontSize:11,color:C.red,marginTop:4}}>⚠ Sin coincidencia — verifica el nombre</div>;
+                return (
+                  <div style={{marginTop:5,padding:"7px 11px",borderRadius:6,background:m.score>0.7?"#EDF5EF":"#FFF9E6",border:"1px solid "+(m.score>0.7?"#c8dfc8":"#e6d88a"),fontSize:12}}>
+                    <span style={{fontWeight:600,color:m.score>0.7?C.green:"#7a6000"}}>
+                      {m.score>0.7?"✓":"⚠"} {vendorDisplay(m.vendor)}
+                    </span>
+                    <span style={{color:C.taupe,marginLeft:6}}>{m.vendor.categoria} · {Math.round(m.score*100)}% coincidencia</span>
+                    {m.score<0.7&&<div style={{fontSize:10.5,color:"#7a6000",marginTop:2}}>Coincidencia baja — confirma que es el técnico correcto</div>}
+                  </div>
+                );
+              })()}
+              {/* Also show dropdown as fallback */}
+              <div style={{marginTop:8,display:"flex",alignItems:"center",gap:6}}>
+                <span style={{fontSize:10.5,color:C.taupe}}>O selecciona directamente:</span>
+                <select value={form.vendorId} onChange={function(e){sf("vendorId",e.target.value);var v=intVendors.find(function(x){return x.id===e.target.value;});if(v)sf("vendorRaw",vendorDisplay(v));}} style={{fontSize:12,padding:"4px 8px",border:"1px solid "+C.gray,borderRadius:5,background:"#fff",fontFamily:"Montserrat,sans-serif",outline:"none"}}>
+                  <option value="">—</option>
+                  {intVendors.map(function(v){return <option key={v.id} value={v.id}>{vendorDisplay(v)}</option>;})}
+                </select>
+              </div>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div><label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:5}}>Tipo</label>
+              <select value={form.tipo} onChange={function(e){sf("tipo",e.target.value);}} style={IS}>
+                <option>Limpieza</option><option>Limpieza Profunda</option><option>Mantenimiento</option><option>Revisión</option>
+              </select>
+            </div>
+            <div><label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:5}}>Código de acceso</label>
+              <input placeholder="Ej. 1234#" value={form.codigoAcceso} onChange={function(e){sf("codigoAcceso",e.target.value);}} style={IS}/>
+            </div>
+          </div>
+          <div><label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:5}}>Notas</label>
+            <input placeholder="Instrucciones especiales…" value={form.notas} onChange={function(e){sf("notas",e.target.value);}} style={IS}/>
+          </div>
+          <button onClick={save} disabled={!form.fecha||!form.propiedad||!form.vendorId} style={{padding:"12px",borderRadius:7,border:"none",background:form.fecha&&form.propiedad&&form.vendorId?C.black:C.gray,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>
+            {editId?"Guardar cambios →":"Agregar turno →"}
+          </button>
+        </div>
+      )}
+
+      {/* Schedule list */}
+      {filtered.length===0&&<div style={{textAlign:"center",padding:"32px",color:C.taupe,fontSize:13}}>Sin turnos {filter==="today"?"hoy":filter==="week"?"esta semana":"programados"}.</div>}
+      {filtered.map(function(s){
+        var v=vendors.find(function(x){return x.id===s.vendorId;});
+        var isToday=s.fecha===today;
+        return (
+          <div key={s.id} style={{background:"#fff",borderRadius:9,padding:"13px 15px",border:"1px solid "+(isToday?"#B2A193":C.line),display:"flex",flexDirection:"column",gap:5}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:8}}>
+              <div>
+                <div style={{fontSize:13.5,fontWeight:600,color:C.black}}>{s.propiedad}</div>
+                <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{fmtDate(s.fecha)} {s.hora&&"· "+s.hora} · {s.tipo}</div>
+                {v?<div style={{fontSize:11,color:C.taupe,marginTop:1}}>{vendorDisplay(v)}</div>:s.vendorRaw?<div style={{fontSize:11,color:C.taupe,marginTop:1}}>{s.vendorRaw}</div>:null}
+              </div>
+              <div style={{display:"flex",gap:6,flexShrink:0}}>
+                <button onClick={function(){edit(s);}} style={{fontSize:11,padding:"4px 9px",borderRadius:5,border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer"}}>✏</button>
+                <button onClick={function(){del(s.id);}} style={{fontSize:11,padding:"4px 9px",borderRadius:5,border:"1px solid #DBC8C4",background:"#fff",color:C.red,cursor:"pointer"}}>✕</button>
+              </div>
+            </div>
+            {s.codigoAcceso&&<div style={{display:"flex",alignItems:"center",gap:6,marginTop:4}}>
+              <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase"}}>Código:</span>
+              <span style={{fontSize:13,fontWeight:700,color:C.black,background:C.surfaceWarm,padding:"2px 10px",borderRadius:5,letterSpacing:".1em"}}>{s.codigoAcceso}</span>
+            </div>}
+            {s.notas&&<div style={{fontSize:12,color:C.taupe,fontStyle:"italic"}}>{s.notas}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* Admin: Feedback viewer */
+function FeedbackCfg({feedback, onSave}) {
+  var items = (feedback||[]).slice().sort(function(a,b){return b.id-a.id;});
+  function markRead(id){ onSave((feedback||[]).map(function(f){return f.id===id?Object.assign({},f,{visto:true}):f;})); }
+  var unread = items.filter(function(f){return !f.visto;}).length;
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {unread>0&&<div style={{padding:"9px 13px",borderRadius:7,background:"#EDF5EF",fontSize:12.5,fontWeight:600,color:C.green}}>✓ {unread} comentario{unread!==1?"s":""} nuevo{unread!==1?"s":""} sin leer</div>}
+      {items.length===0&&<div style={{textAlign:"center",padding:"32px",color:C.taupe,fontSize:13}}>Sin comentarios aún.</div>}
+      {items.map(function(f){return (
+        <div key={f.id} style={{background:"#fff",borderRadius:9,padding:"13px 15px",border:"1px solid "+(f.visto?C.line:"#B2A193"),opacity:f.visto?.7:1}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <span style={{padding:"2px 10px",borderRadius:100,fontSize:10,fontWeight:700,background:f.tipo==="error"?"#F5EDEC":"#EDF5EF",color:f.tipo==="error"?C.red:C.green}}>{f.tipo==="error"?"🐛 Error":"💡 Sugerencia"}</span>
+            <span style={{fontSize:10.5,color:C.taupe}}>{f.fecha} {f.hora} · {f.usuario}</span>
+          </div>
+          <div style={{fontSize:13.5,color:C.black,lineHeight:1.6,marginBottom:8}}>{f.mensaje}</div>
+          {!f.visto&&<button onClick={function(){markRead(f.id);}} style={{fontSize:11,padding:"4px 12px",borderRadius:5,border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",fontWeight:600}}>Marcar como leído</button>}
+        </div>
+      );})}
+    </div>
+  );
+}
+
+/* Vendor: Schedule for today + week */
+function VendorSchedule({vendor, schedules}) {
+  const [view, setView] = useState("today");
+  var today    = todayStr();
+  var weekEnd  = (function(){var d=new Date();d.setDate(d.getDate()+7);return d.toISOString().split("T")[0];})();
+  /* Match by vendorId OR by fuzzy name/email/phone match on vendorRaw */
+  var myScheds = (schedules||[]).filter(function(s){
+    if(s.vendorId===vendor.id) return true;
+    if(s.vendorRaw) {
+      var m = fuzzyMatchVendor(s.vendorRaw, [vendor]);
+      return m.score > 0.5;
+    }
+    return false;
+  }).sort(function(a,b){return a.fecha>b.fecha?1:a.fecha<b.fecha?-1:a.hora>b.hora?1:-1;});
+  var todayList = myScheds.filter(function(s){return s.fecha===today;});
+  var weekList  = myScheds.filter(function(s){return s.fecha>=today&&s.fecha<=weekEnd;});
+  var shown     = view==="today" ? todayList : weekList;
+
+  return (
+    <div style={{maxWidth:600,margin:"0 auto",padding:"0 0 100px",fontFamily:"Montserrat,sans-serif"}}>
+      {/* Today highlight */}
+      {todayList.length>0&&(
+        <div style={{background:"#1E1E1E",padding:"14px 18px",marginBottom:0}}>
+          <div style={{fontSize:9.5,color:"rgba(255,255,255,.6)",letterSpacing:".2em",textTransform:"uppercase",marginBottom:4}}>Hoy · {todayList.length} turno{todayList.length!==1?"s":""}</div>
+          {todayList.map(function(s,i){return(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:i>0?8:0}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:600,color:"#fff"}}>{s.propiedad}</div>
+                <div style={{fontSize:11.5,color:"rgba(255,255,255,.6)"}}>{s.hora&&s.hora+" · "}{s.tipo}</div>
+              </div>
+              {s.codigoAcceso&&(
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:9,color:"rgba(255,255,255,.5)",letterSpacing:".1em",textTransform:"uppercase"}}>Código</div>
+                  <div style={{fontSize:18,fontWeight:700,color:"#fff",letterSpacing:".15em"}}>{s.codigoAcceso}</div>
+                </div>
+              )}
+            </div>
+          );})}
+        </div>
+      )}
+      {todayList.length===0&&(
+        <div style={{background:C.surfaceWarm,padding:"13px 18px",borderBottom:"1px solid "+C.line}}>
+          <div style={{fontSize:12.5,color:C.taupe,fontStyle:"italic"}}>Sin turnos programados para hoy.</div>
+        </div>
+      )}
+
+      {/* Toggle */}
+      <div style={{padding:"14px 16px",background:"#fff",borderBottom:"1px solid "+C.line}}>
+        <div style={{display:"flex",background:C.surfaceWarm,borderRadius:7,padding:3,gap:2,border:"1px solid "+C.line}}>
+          {[["today","Hoy"],["week","Esta semana"]].map(function(it){var k=it[0],l=it[1];return(
+            <button key={k} onClick={function(){setView(k);}} style={{flex:1,padding:"8px",borderRadius:5,border:"none",background:view===k?C.black:"transparent",color:view===k?"#fff":C.earth,fontSize:12,fontWeight:600,cursor:"pointer"}}>{l}</button>
+          );})}
+        </div>
+      </div>
+
+      {/* List */}
+      <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
+        {shown.length===0&&<div style={{textAlign:"center",padding:"32px",color:C.taupe,fontSize:13}}>Sin turnos {view==="today"?"hoy":"esta semana"}.</div>}
+        {shown.map(function(s,i){
+          var isToday=s.fecha===today;
+          return (
+            <div key={i} style={{background:"#fff",borderRadius:10,padding:"14px 16px",border:"1.5px solid "+(isToday?C.black:C.line)}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",marginBottom:6}}>
+                <div>
+                  {!isToday&&<div style={{fontSize:10.5,fontWeight:700,color:C.earth,letterSpacing:".08em",textTransform:"uppercase",marginBottom:3}}>{fmtDate(s.fecha)}</div>}
+                  <div style={{fontSize:14.5,fontWeight:600,color:C.black}}>{s.propiedad}</div>
+                  <div style={{fontSize:12,color:C.earth,marginTop:2}}>{s.hora&&s.hora+" · "}{s.tipo}</div>
+                  {s.notas&&<div style={{fontSize:11.5,color:C.taupe,marginTop:3,fontStyle:"italic"}}>{s.notas}</div>}
+                </div>
+                {s.codigoAcceso&&(
+                  <div style={{textAlign:"right",flexShrink:0,marginLeft:12}}>
+                    <div style={{fontSize:9,color:C.taupe,letterSpacing:".12em",textTransform:"uppercase",marginBottom:2}}>Código acceso</div>
+                    <div style={{fontSize:20,fontWeight:700,color:C.black,letterSpacing:".15em",background:C.surfaceWarm,padding:"4px 12px",borderRadius:6}}>{s.codigoAcceso}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
