@@ -901,15 +901,15 @@ function OpsDash({reps,vendors,onSelect,onMarkPaid,onRefresh}) {
 
       {fReps.length===0&&<div style={{textAlign:"center",padding:"52px 20px",color:C.earth,fontSize:14}}>No hay trabajos con estos filtros.<br/><button onClick={reset} style={{marginTop:14,padding:"9px 22px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:13,fontWeight:600,cursor:"pointer"}}>Limpiar filtros</button></div>}
       {fReps.length>0&&(view==="table"
-        ?<TableView reps={shown} total={fReps.length} showAll={showAll} onToggleAll={function(){setShowAll(function(p){return !p;});}} onSelect={onSelect} onMarkPaid={onMarkPaid}/>
-        :<CalView   reps={fReps} onSelect={onSelect}/>
+        ?<TableView reps={shown} total={fReps.length} showAll={showAll} onToggleAll={function(){setShowAll(function(p){return !p;});}} onSelect={onSelect} onMarkPaid={onMarkPaid} vendors={vendors}/>
+        :<CalView   reps={fReps} onSelect={onSelect} onMarkPaid={onMarkPaid} vendors={vendors}/>
       )}
     </div>
   );
 }
 
 /* ─── Table View */
-function TableView({reps,total,showAll,onToggleAll,onSelect,onMarkPaid}) {
+function TableView({reps,total,showAll,onToggleAll,onSelect,onMarkPaid,vendors}) {
   return (
     <div style={{padding:"20px 16px 80px"}}>
       <div style={{background:"#fff",borderRadius:16,border:"1px solid "+C.gray,overflow:"hidden"}}>
@@ -943,7 +943,7 @@ function TableView({reps,total,showAll,onToggleAll,onSelect,onMarkPaid}) {
 }
 
 /* ─── Calendar View */
-function CalView({reps,onSelect}) {
+function CalView({reps,onSelect,onMarkPaid,vendors}) {
   const [month,setMonth] = useState(function(){
     if (reps.length>0&&reps[0].fecha) { var p=reps[0].fecha.split("-"); return new Date(parseInt(p[0]),parseInt(p[1])-1,1); }
     return new Date();
