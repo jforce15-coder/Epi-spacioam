@@ -705,7 +705,13 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrl
   const [detail, setDetail] = useState(null);
   const [cDel,   setCDel]   = useState(null);
 
-  function markPaid(id,p) { var r=reps.find(function(x){return x.id===id;}); if(r) onUpsert(Object.assign({},r,{paid:p})); }
+  function markPaid(idOrRep,p) {
+    /* markPaid(id, bool) — toggle paid    |    markPaid(repObj) — update any field */
+    var base;
+    if (typeof idOrRep==="object") { base=Object.assign({},reps.find(function(x){return x.id===idOrRep.id;})||{},idOrRep); }
+    else { base=Object.assign({},reps.find(function(x){return x.id===idOrRep;})||{},{paid:p}); }
+    onUpsert(base);
+  }
   function qaUpdate(id,status,comment) {
     var r=reps.find(function(x){return x.id===id;}); if(!r) return;
     var upd=Object.assign({},r,{qaStatus:status,qaComentario:comment||"",qaFecha:todayStr()});
@@ -754,14 +760,14 @@ function DashView({reps,vendors,alerts,onSelect,onMarkPaid,onRefresh}) {
           <button key={k} onClick={function(){setSub(k);}} style={{padding:"14px 16px",border:"none",borderBottom:"1.5px solid "+(sub===k?C.black:"transparent"),background:"none",fontSize:13,fontWeight:600,cursor:"pointer",color:sub===k?C.black:C.taupe,transition:"all .2s"}}>{l}</button>
         ); })}
       </div>
-      <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} onSelect={onSelect} onMarkPaid={onMarkPaid} onRefresh={onRefresh}/></div>
+      <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} vendors={vendors} onSelect={onSelect} onMarkPaid={onMarkPaid} onRefresh={onRefresh}/></div>
       <div style={{display:sub==="exec"?"block":"none"}}><ExecDash reps={reps} vendors={vendors}/></div>
     </div>
   );
 }
 
 /* ─── Operational Dashboard */
-function OpsDash({reps,onSelect,onMarkPaid,onRefresh}) {
+function OpsDash({reps,vendors,onSelect,onMarkPaid,onRefresh}) {
   const [view,     setView]     = useState("table");
   const [fVend,    setFVend]    = useState("Todos");
   const [fStatus,  setFStatus]  = useState("Todos");
@@ -922,7 +928,7 @@ function TableView({reps,total,showAll,onToggleAll,onSelect,onMarkPaid}) {
               </div>
               <div style={{fontSize:12,color:C.earth,paddingTop:2}}>{fmtDate(r.fecha)}</div>
               <div style={{fontSize:13,color:C.black,lineHeight:1.55,paddingRight:12}}>{r.descripcion}</div>
-              <div style={{fontSize:14,fontWeight:600,color:r.total?C.black:C.gray}}>{r.total?"Q"+r.total:"—"}</div>
+              <QuickEditTotal rep={r} vendors={vendors} onSave={function(val){onMarkPaid(Object.assign({},r,{total:val}));}}/>
               <div onClick={function(e){e.stopPropagation();}} style={{display:"flex",flexDirection:"column",gap:5}}>
                 {r.total ? <button onClick={function(){onMarkPaid(r.id,!r.paid);}} style={{padding:"5px 10px",borderRadius:100,border:"none",fontSize:11,fontWeight:700,cursor:"pointer",background:r.paid?"#EDF5EF":"#F5EDEC",color:r.paid?C.green:C.red,whiteSpace:"nowrap"}}>{r.paid?"✓ Pagado":"● Pendiente"}</button> : <span style={{fontSize:12,color:C.gray}}>—</span>}
                 {r.pagadoPor&&<span style={{fontSize:9.5,fontWeight:700,letterSpacing:".08em",padding:"2px 7px",borderRadius:100,whiteSpace:"nowrap",background:r.pagadoPor==="Spacio AM"?"#EEF3FA":"#FEF0EC",color:r.pagadoPor==="Spacio AM"?"#4a7fa5":"#E9826A"}}>{r.pagadoPor}</span>}
@@ -994,7 +1000,7 @@ function CalView({reps,onSelect}) {
                 <div style={{fontSize:12,color:C.earth,marginTop:3}}>{r.descripcion.slice(0,65)}{r.descripcion.length>65?"…":""}</div>
               </div>
               <div style={{textAlign:"right",flexShrink:0,marginLeft:14}}>
-                <div style={{fontSize:14,fontWeight:700,color:r.total?C.black:C.gray}}>{r.total?"Q"+r.total:"—"}</div>
+                <QuickEditTotal rep={r} vendors={vendors} onSave={function(val){onMarkPaid(Object.assign({},r,{total:val}));}} />
                 {r.total&&<div style={{fontSize:10,fontWeight:700,color:r.paid?C.green:C.red,marginTop:3}}>{r.paid?"✓ Pagado":"● Pendiente"}</div>}
               </div>
             </div>
@@ -2655,6 +2661,9 @@ function SecurityCfg({adminPin,onSave}) {
 /* ─── Detail Modal */
 function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA}) {
   const [editing, setEditing] = useState(false);
+  /* Auto-fill total from tariff if empty */
+  var initAT2 = autoTarifa(rep.reportadoPor||"", vendors);
+  var initTotal = rep.total||"" || initAT2.tarifa;
   const [form,    setForm]    = useState({
     propiedad:    rep.propiedad,
     fecha:        rep.fecha,
@@ -2662,7 +2671,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA}
     categoria:    rep.categoria,
     descripcion:  rep.descripcion,
     comentarios:  rep.comentarios||"",
-    total:        rep.total||"",
+    total:        initTotal,
     pagadoPor:    rep.pagadoPor||"",
     fotoAntes:    rep.fotoAntes||[],
     fotoDespues:  rep.fotoDespues||[],
@@ -2673,7 +2682,8 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA}
   function setF(k,v) { setForm(function(p){var u=Object.assign({},p);u[k]=v;return u;}); }
 
   function resetForm() {
-    setForm({propiedad:rep.propiedad,fecha:rep.fecha,reportadoPor:rep.reportadoPor,categoria:rep.categoria,descripcion:rep.descripcion,comentarios:rep.comentarios||"",total:rep.total||"",pagadoPor:rep.pagadoPor||"",fotoAntes:rep.fotoAntes||[],fotoDespues:rep.fotoDespues||[],factura:rep.factura||null});
+    var rAT=autoTarifa(rep.reportadoPor||"",vendors);
+    setForm({propiedad:rep.propiedad,fecha:rep.fecha,reportadoPor:rep.reportadoPor,categoria:rep.categoria,descripcion:rep.descripcion,comentarios:rep.comentarios||"",total:rep.total||""||rAT.tarifa,pagadoPor:rep.pagadoPor||"",fotoAntes:rep.fotoAntes||[],fotoDespues:rep.fotoDespues||[],factura:rep.factura||null});
   }
 
   async function addPics(files,field,max) {
@@ -2776,18 +2786,16 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA}
 
               {(function(){
                 var at = autoTarifa(form.reportadoPor, vendors);
-                if(at.locked) return (
-                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                    <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>Total cobrado (Q)</div>
-                    <div style={{padding:"11px 14px",borderRadius:8,background:"#EDF5EF",border:"1px solid #c8dfc8",fontSize:14,fontWeight:700,color:C.green}}>
-                      Q{at.tarifa} <span style={{fontSize:11,fontWeight:400,color:C.earth}}>— tarifa fija del técnico</span>
-                    </div>
-                  </div>
-                );
                 return (
-                  <F label={"Total cobrado (Q)"+(at.tarifa?" (sin tarifa fija — opcional)":"")}>
-                    <input type="number" placeholder="Ej. 850" value={form.total} onChange={function(e){setF("total",e.target.value);}}/>
-                  </F>
+                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",flex:1}}>Total cobrado (Q)</div>
+                      {at.locked&&<span style={{fontSize:10,color:C.green,fontWeight:600}}>Tarifa fija: Q{at.tarifa}</span>}
+                    </div>
+                    <input type="number" placeholder="Ej. 850" value={form.total} onChange={function(e){setF("total",e.target.value);}}
+                      style={{border:"1.5px solid "+(at.locked&&form.total===at.tarifa?"#c8dfc8":C.gray),borderRadius:8,padding:"10px 14px",fontSize:14,fontFamily:"Montserrat,sans-serif",outline:"none",fontWeight:at.locked&&form.total===at.tarifa?700:400,color:at.locked&&form.total===at.tarifa?C.green:C.black}}/>
+                    {at.locked&&form.total!==at.tarifa&&form.total!==""&&<div style={{fontSize:11,color:"#7a6000"}}>⚠ Modificado — tarifa fija es Q{at.tarifa}</div>}
+                  </div>
                 );
               })()}
 
@@ -4480,6 +4488,47 @@ function VendorSchedule({vendor, schedules, hospUrlDay, hospUrlWeek}) {
     </div>
   );
 }
+
+
+/* ─── Quick inline total editor in dashboard list */
+function QuickEditTotal({rep, vendors, onSave}) {
+  const [editing, setEditing] = useState(false);
+  const [val,     setVal]     = useState(rep.total||"");
+  var at = autoTarifa(rep.reportadoPor||"", vendors);
+
+  function save() {
+    if(onSave) onSave(val);
+    setEditing(false);
+  }
+
+  if (editing) return (
+    <div style={{display:"flex",gap:4,alignItems:"center"}}>
+      <input
+        type="number"
+        value={val}
+        onChange={function(e){setVal(e.target.value);}}
+        onKeyDown={function(e){if(e.key==="Enter")save();if(e.key==="Escape")setEditing(false);}}
+        autoFocus
+        style={{width:72,border:"1.5px solid "+C.black,borderRadius:6,padding:"4px 8px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",fontWeight:600}}
+      />
+      <button onClick={save} style={{padding:"4px 8px",borderRadius:5,border:"none",background:C.black,color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}}>✓</button>
+      <button onClick={function(){setEditing(false);setVal(rep.total||"");}} style={{padding:"4px 6px",borderRadius:5,border:"none",background:"#eee",color:C.gray,fontSize:11,cursor:"pointer"}}>✕</button>
+    </div>
+  );
+
+  return (
+    <div onClick={function(){setVal(rep.total||at.tarifa||"");setEditing(true);}} style={{cursor:"pointer",display:"flex",alignItems:"center",gap:4,borderRadius:6,padding:"2px 4px",transition:"background .15s"}}
+      onMouseEnter={function(e){e.currentTarget.style.background=C.surfaceWarm;}}
+      onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}
+      title="Toca para editar total">
+      <span style={{fontSize:14,fontWeight:700,color:rep.total?C.black:C.gray}}>
+        {rep.total?"Q"+rep.total:at.tarifa?"Q"+at.tarifa:"—"}
+      </span>
+      <span style={{fontSize:9,color:C.gray}}>✏</span>
+    </div>
+  );
+}
+
 
 function GS() {
   var css = "@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=Montserrat:wght@300;400;500;600;700&display=swap');"
