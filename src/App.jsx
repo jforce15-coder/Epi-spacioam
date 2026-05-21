@@ -37,6 +37,19 @@ const ALT = {
 const PERIODS   = [[3,"3 días"],[5,"5 días"],[7,"7 días"],[14,"14 días"],[30,"30 días+"]];
 const PAGADORES   = ["Spacio AM","Dueño"];
 const CLEAN_CATS  = ["Limpieza tradicional","Limpieza profunda"];
+
+/* ─── Auto-tariff helper — shared across all form types */
+function autoTarifa(email, vendors) {
+  if (!email||!vendors) return {tarifa:"",locked:false};
+  var v = vendors.find(function(x){return x.email===email;});
+  if (!v) return {tarifa:"",locked:false};
+  var isEPI = v.tipo==="interno"&&(v.categoria==="EPI Limpieza"||v.categoria==="EPI Mantenimiento");
+  if (!isEPI) return {tarifa:"",locked:false};
+  var hasTarifa = v.tarifaLimpieza && parseFloat(v.tarifaLimpieza)>0;
+  return {tarifa: hasTarifa ? String(v.tarifaLimpieza) : "", locked: hasTarifa};
+}
+
+
 function isCleaning(cat){return CLEAN_CATS.indexOf(cat)>=0;}
 const INTERNAL_CATS = ["Administrativo","EPI Limpieza","EPI Mantenimiento"];
 
@@ -1296,17 +1309,7 @@ function RepForm({vendors,props,company,onSubmit,defaultVendor}) {
 
 /* ─── Standard Rep Form (Mantenimiento / Producto) */
 function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendor}) {
-  /* Get auto-tariff for current vendor if EPI internal */
-  function getAutoTarifa(email) {
-    if (!email||!vendors) return {tarifa:"",locked:false};
-    var v = vendors.find(function(x){return x.email===email;});
-    if (!v) return {tarifa:"",locked:false};
-    var isEPI = v.tipo==="interno"&&(v.categoria==="EPI Limpieza"||v.categoria==="EPI Mantenimiento");
-    if (!isEPI) return {tarifa:"",locked:false};
-    var hasTarifa = v.tarifaLimpieza && parseFloat(v.tarifaLimpieza)>0;
-    return {tarifa: hasTarifa ? String(v.tarifaLimpieza) : "", locked: hasTarifa};
-  }
-  var initAT = getAutoTarifa(defaultVendor||"");
+  var initAT = autoTarifa(defaultVendor||"", vendors);
   var blank={propiedad:"",fecha:todayStr(),categoria:cat,reportadoPor:defaultVendor||"",descripcion:"",comentarios:"",total:initAT.tarifa,paid:false,pagadoPor:"",fotoAntes:[],fotoDespues:[],factura:null};
   const [form,setForm] = useState(blank);
   const [busy,setBusy] = useState(false);
@@ -1351,7 +1354,7 @@ function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendo
             :<F label="Técnico / Proveedor"><select value={form.reportadoPor} onChange={function(e){
                     var email = e.target.value;
                     setF("reportadoPor",email);
-                    var at = getAutoTarifa(email);
+                    var at = autoTarifa(email, vendors);
                     if(at.tarifa) setF("total",at.tarifa);
                   }}><option value="">Seleccionar…</option>{vendors.filter(function(v){return v.active;}).map(function(v){return <option key={v.id} value={v.email}>{v.name}</option>;})}</select></F>
           }
@@ -2748,7 +2751,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA}
                 <select value={form.reportadoPor} onChange={function(e){
                     var email = e.target.value;
                     setF("reportadoPor",email);
-                    var at = getAutoTarifa(email);
+                    var at = autoTarifa(email, vendors);
                     if(at.tarifa) setF("total",at.tarifa);
                   }}>
                   {vendors&&vendors.map(function(v){return <option key={v.id} value={v.email}>{vendorDisplay(v)} ({v.email})</option>;})}
@@ -2772,7 +2775,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA}
               </F>
 
               {(function(){
-                var at = getAutoTarifa(form.reportadoPor);
+                var at = autoTarifa(form.reportadoPor, vendors);
                 if(at.locked) return (
                   <div style={{display:"flex",flexDirection:"column",gap:5}}>
                     <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>Total cobrado (Q)</div>
