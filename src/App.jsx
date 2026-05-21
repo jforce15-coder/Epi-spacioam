@@ -1296,7 +1296,18 @@ function RepForm({vendors,props,company,onSubmit,defaultVendor}) {
 
 /* ─── Standard Rep Form (Mantenimiento / Producto) */
 function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendor}) {
-  var blank={propiedad:"",fecha:todayStr(),categoria:cat,reportadoPor:defaultVendor||"",descripcion:"",comentarios:"",total:"",paid:false,pagadoPor:"",fotoAntes:[],fotoDespues:[],factura:null};
+  /* Get auto-tariff for current vendor if EPI internal */
+  function getAutoTarifa(email) {
+    if (!email||!vendors) return {tarifa:"",locked:false};
+    var v = vendors.find(function(x){return x.email===email;});
+    if (!v) return {tarifa:"",locked:false};
+    var isEPI = v.tipo==="interno"&&(v.categoria==="EPI Limpieza"||v.categoria==="EPI Mantenimiento");
+    if (!isEPI) return {tarifa:"",locked:false};
+    var hasTarifa = v.tarifaLimpieza && parseFloat(v.tarifaLimpieza)>0;
+    return {tarifa: hasTarifa ? String(v.tarifaLimpieza) : "", locked: hasTarifa};
+  }
+  var initAT = getAutoTarifa(defaultVendor||"");
+  var blank={propiedad:"",fecha:todayStr(),categoria:cat,reportadoPor:defaultVendor||"",descripcion:"",comentarios:"",total:initAT.tarifa,paid:false,pagadoPor:"",fotoAntes:[],fotoDespues:[],factura:null};
   const [form,setForm] = useState(blank);
   const [busy,setBusy] = useState(false);
   const [done,setDone] = useState(false);
@@ -1336,8 +1347,13 @@ function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendo
         </Card>
         <Card title="Responsable">
           {defaultVendor
-            ?<div style={{fontSize:14,fontWeight:600,color:C.black,background:C.beige,padding:"11px 14px",borderRadius:10}}>{vendors.find(function(v){return v.email===defaultVendor;})?vendors.find(function(v){return v.email===defaultVendor;}).name:defaultVendor}</div>
-            :<F label="Técnico / Proveedor"><select value={form.reportadoPor} onChange={function(e){setF("reportadoPor",e.target.value);}}><option value="">Seleccionar…</option>{vendors.filter(function(v){return v.active;}).map(function(v){return <option key={v.id} value={v.email}>{v.name}</option>;})}</select></F>
+            ?<div style={{fontSize:14,fontWeight:600,color:C.black,background:C.surfaceWarm,padding:"11px 14px",borderRadius:10}}>{vendors.find(function(v){return v.email===defaultVendor;})?vendorDisplay(vendors.find(function(v){return v.email===defaultVendor;})):defaultVendor}</div>
+            :<F label="Técnico / Proveedor"><select value={form.reportadoPor} onChange={function(e){
+                    var email = e.target.value;
+                    setF("reportadoPor",email);
+                    var at = getAutoTarifa(email);
+                    if(at.tarifa) setF("total",at.tarifa);
+                  }}><option value="">Seleccionar…</option>{vendors.filter(function(v){return v.active;}).map(function(v){return <option key={v.id} value={v.email}>{v.name}</option>;})}</select></F>
           }
         </Card>
         <Card title="Propiedad">
@@ -1589,7 +1605,7 @@ function DanosFormSolo({vendors,props,onSubmit,defaultVendor,onBack}) {
         <Card title="Información básica">
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             {defaultVendor
-              ?<div style={{fontSize:14,fontWeight:600,color:C.black,background:C.beige,padding:"11px 14px",borderRadius:10}}>{vendors.find(function(v){return v.email===defaultVendor;})?vendors.find(function(v){return v.email===defaultVendor;}).name:defaultVendor}</div>
+              ?<div style={{fontSize:14,fontWeight:600,color:C.black,background:C.surfaceWarm,padding:"11px 14px",borderRadius:10}}>{vendors.find(function(v){return v.email===defaultVendor;})?vendorDisplay(vendors.find(function(v){return v.email===defaultVendor;})):defaultVendor}</div>
               :<F label="Quien reporta"><select value={resp} onChange={function(e){setResp(e.target.value);}}><option value="">Seleccionar…</option>{vendors.filter(function(v){return v.active;}).map(function(v){return <option key={v.id} value={v.email}>{v.name}</option>;})}</select></F>
             }
             <F label="Propiedad"><select value={prop} onChange={function(e){setProp(e.target.value);}}><option value="">Seleccionar…</option>{props.map(function(p){return <option key={p.id}>{p.name}</option>;})}</select></F>
@@ -2392,11 +2408,37 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats}) {
               </div>
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {EditRow("email",           "Email",    v.email)}
-              {EditRow("password",        "Password", v.password, "password")}
-              {EditRow("phone",           "Tel.",     v.phone)}
-              {EditRow("empresa",         "Empresa",  v.empresa)}
-              {EditRow("tarifaLimpieza",  "Tarifa lim.", v.tarifaLimpieza||0, "number")}
+              {EditRow("email",          "Email",       v.email)}
+              {EditRow("password",       "Password",    v.password, "password")}
+              {EditRow("phone",          "Tel.",        v.phone)}
+              {EditRow("empresa",        "Empresa",     v.empresa)}
+              {EditRow("tarifaLimpieza", "Tarifa (Q)",  v.tarifaLimpieza||0, "number")}
+              {EditRow("primerNombre",   "1er nombre",  v.primerNombre)}
+              {EditRow("primerApellido", "1er apellido",v.primerApellido)}
+              {/* Tipo + Categoria inline */}
+              <div style={{paddingTop:6,borderTop:"1px solid "+C.line}}>
+                <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:6}}>Tipo de proveedor</div>
+                <div style={{display:"flex",gap:6,marginBottom:8}}>
+                  {["interno","externo"].map(function(t){var s=v.tipo===t;return(
+                    <button key={t} onClick={function(){var u=vendors.map(function(x){if(x.id===v.id){var r=Object.assign({},x);r.tipo=t;r.categoria=t==="interno"?"EPI Limpieza":allExtCats[0]||"";return r;}return x;});onSave(u);}} style={{padding:"5px 14px",borderRadius:6,border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",textTransform:"capitalize"}}>{t}</button>
+                  );})}
+                </div>
+                <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:6}}>Categoría</div>
+                {v.tipo==="interno"?(
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                    {INTERNAL_CATS.map(function(c){var s=v.categoria===c;return(
+                      <button key={c} onClick={function(){var u=vendors.map(function(x){if(x.id===v.id){var r=Object.assign({},x);r.categoria=c;return r;}return x;});onSave(u);}} style={{padding:"4px 10px",borderRadius:100,border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{c}</button>
+                    );})}
+                  </div>
+                ):(
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                    {(allExtCats||[]).map(function(c){var s=v.categoria===c;return(
+                      <button key={c} onClick={function(){var u=vendors.map(function(x){if(x.id===v.id){var r=Object.assign({},x);r.categoria=c;return r;}return x;});onSave(u);}} style={{padding:"4px 10px",borderRadius:100,border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{c}</button>
+                    );})}
+                  </div>
+                )}
+              </div>
+              {/* Admin toggle for internal */}
               {v.tipo==="interno"&&(
                 <div style={{display:"flex",alignItems:"center",gap:10,paddingTop:6,borderTop:"1px solid "+C.line}}>
                   <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase",minWidth:72}}>Acceso Admin</span>
@@ -2404,7 +2446,6 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats}) {
                     <span style={{width:14,height:14,borderRadius:"50%",background:v.isAdmin?C.green:"#ccc",display:"inline-block",flexShrink:0}}/>
                     {v.isAdmin?"Admin activo":"Sin acceso admin"}
                   </button>
-                  {v.isAdmin&&<span style={{fontSize:10,color:C.earth}}>Puede iniciar sesión como administrador</span>}
                 </div>
               )}
             </div>
@@ -2704,7 +2745,12 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA}
               </div>
 
               <F label="Proveedor / Técnico responsable">
-                <select value={form.reportadoPor} onChange={function(e){setF("reportadoPor",e.target.value);}}>
+                <select value={form.reportadoPor} onChange={function(e){
+                    var email = e.target.value;
+                    setF("reportadoPor",email);
+                    var at = getAutoTarifa(email);
+                    if(at.tarifa) setF("total",at.tarifa);
+                  }}>
                   {vendors&&vendors.map(function(v){return <option key={v.id} value={v.email}>{vendorDisplay(v)} ({v.email})</option>;})}
                   {!(vendors&&vendors.some(function(v){return v.email===form.reportadoPor;}))&&<option value={form.reportadoPor}>{form.reportadoPor}</option>}
                 </select>
@@ -2725,9 +2771,22 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA}
                 <textarea rows={3} placeholder="Observaciones, materiales usados, pendientes…" value={form.comentarios} onChange={function(e){setF("comentarios",e.target.value);}}/>
               </F>
 
-              <F label="Total cobrado (Q)">
-                <input type="number" placeholder="Ej. 850" value={form.total} onChange={function(e){setF("total",e.target.value);}}/>
-              </F>
+              {(function(){
+                var at = getAutoTarifa(form.reportadoPor);
+                if(at.locked) return (
+                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                    <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>Total cobrado (Q)</div>
+                    <div style={{padding:"11px 14px",borderRadius:8,background:"#EDF5EF",border:"1px solid #c8dfc8",fontSize:14,fontWeight:700,color:C.green}}>
+                      Q{at.tarifa} <span style={{fontSize:11,fontWeight:400,color:C.earth}}>— tarifa fija del técnico</span>
+                    </div>
+                  </div>
+                );
+                return (
+                  <F label={"Total cobrado (Q)"+(at.tarifa?" (sin tarifa fija — opcional)":"")}>
+                    <input type="number" placeholder="Ej. 850" value={form.total} onChange={function(e){setF("total",e.target.value);}}/>
+                  </F>
+                );
+              })()}
 
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
                 <div style={{fontSize:10.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>¿Quién paga este trabajo?</div>
