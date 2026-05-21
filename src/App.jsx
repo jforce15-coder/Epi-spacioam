@@ -30,9 +30,9 @@ const BADGE = {
   "Reporte de Daños":   {bg:"#EDE4E4",tx:"#9b3a3a"},
 };
 const ALT = {
-  red:    {label:"10+ días sin pago", clr:"#9b3a3a", bg:"#EDE4E4"},
-  orange: {label:"3+ días sin pago",  clr:"#b5622a", bg:"#EDE7E0"},
-  yellow: {label:"1+ día sin pago",   clr:"#8a7040", bg:"#EDEAE0"},
+  red:    {label:"Trabajo de hace 3+ semanas", clr:"#9b3a3a", bg:"#EDE4E4"},
+  orange: {label:"Trabajo de hace 2 semanas",  clr:"#b5622a", bg:"#EDE7E0"},
+  yellow: {label:"Trabajo de la semana anterior", clr:"#8a7040", bg:"#F5F2EC"},
 };
 const PERIODS   = [[3,"3 días"],[5,"5 días"],[7,"7 días"],[14,"14 días"],[30,"30 días+"]];
 const PAGADORES   = ["Spacio AM","Dueño"];
@@ -171,7 +171,7 @@ function daysSince(ts) { return Math.floor((Date.now()-ts)/86400000); }
 function alertLvl(r) {
   if (r.paid || !r.total) return null;
   var d = daysSince(r.createdAt||r.id);
-  if (d>=10) return "red"; if (d>=3) return "orange"; if (d>=1) return "yellow";
+  if (d>=21) return "red"; if (d>=14) return "orange"; if (d>=7) return "yellow";
   return null;
 }
 function uniq(arr) { return [...new Set(arr)]; }
@@ -810,7 +810,11 @@ function OpsDash({reps,vendors,onSelect,onMarkPaid,onRefresh}) {
   var tot    = fReps.reduce(function(s,r){return s+parseFloat(r.total||0);},0);
   var cob    = fReps.filter(function(r){return r.paid;}).reduce(function(s,r){return s+parseFloat(r.total||0);},0);
   var unp    = fReps.filter(function(r){return r.total&&!r.paid;}).length;
-  var vNames = ["Todos"].concat(uniq(reps.map(function(r){return r.reportadoPor;}).filter(Boolean)));
+  /* Build vendor map: email → display name */
+  var vMap = {};
+  (vendors||[]).forEach(function(v){if(v.email)vMap[v.email]=vendorDisplay(v);});
+  /* List of unique vendor emails in current reports */
+  var vEmails = uniq(reps.map(function(r){return r.reportadoPor;}).filter(Boolean));
   var actF   = [fVend!=="Todos",fStatus!=="Todos",fCat!=="Todos",fPagador!=="Todos",!!fDesde,!!fHasta].filter(Boolean).length;
 
   var IS = {border:"1.5px solid "+C.gray,borderRadius:9,padding:"7px 10px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",color:C.black,cursor:"pointer",transition:"all .2s"};
@@ -834,7 +838,8 @@ function OpsDash({reps,vendors,onSelect,onMarkPaid,onRefresh}) {
           <div>
             <span style={LBL}>Técnico</span>
             <select value={fVend} onChange={function(e){setFVend(e.target.value);setShowAll(false);}} style={fVend!=="Todos"?IS_A:IS}>
-              {vNames.map(function(n){return <option key={n}>{n}</option>;})}
+              <option value="Todos">Todos</option>
+              {vEmails.map(function(email){return <option key={email} value={email}>{vMap[email]||email}</option>;})}
             </select>
           </div>
           <div>
@@ -862,6 +867,23 @@ function OpsDash({reps,vendors,onSelect,onMarkPaid,onRefresh}) {
         </div>
 
         {/* Row 2: date range + presets + actions */}
+        {/* Bulk paid action — only shows when there are pending reps */}
+        {fReps.filter(function(r){return !r.paid&&(r.total||autoTarifa(r.reportadoPor||"",vendors).tarifa);}).length>0&&(
+          <div style={{background:"#EDF5EF",borderRadius:8,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <div style={{fontSize:12.5,color:C.green,fontWeight:600}}>
+              {fReps.filter(function(r){return !r.paid&&(r.total||autoTarifa(r.reportadoPor||"",vendors).tarifa);}).length} trabajo{fReps.filter(function(r){return !r.paid;}).length!==1?"s":""} pendientes de pago{fVend!=="Todos"?" de "+( vMap[fVend]||fVend):""}
+            </div>
+            <button onClick={function(){
+              var toMark = fReps.filter(function(r){return !r.paid&&(r.total||autoTarifa(r.reportadoPor||"",vendors).tarifa);});
+              toMark.forEach(function(r){
+                var at=autoTarifa(r.reportadoPor||"",vendors);
+                onMarkPaid(Object.assign({},r,{paid:true,total:r.total||at.tarifa}));
+              });
+            }} style={{padding:"7px 16px",borderRadius:7,border:"none",background:"#3d6b52",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+              ✓ Marcar todos como pagados
+            </button>
+          </div>
+        )}
         <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
           <div>
             <span style={LBL}>Período rápido</span>
@@ -930,7 +952,7 @@ function TableView({reps,total,showAll,onToggleAll,onSelect,onMarkPaid,vendors})
               <div style={{fontSize:13,color:C.black,lineHeight:1.55,paddingRight:12}}>{r.descripcion}</div>
               <QuickEditTotal rep={r} vendors={vendors} onSave={function(val){onMarkPaid(Object.assign({},r,{total:val}));}}/>
               <div onClick={function(e){e.stopPropagation();}} style={{display:"flex",flexDirection:"column",gap:5}}>
-                {r.total ? <button onClick={function(){onMarkPaid(r.id,!r.paid);}} style={{padding:"5px 10px",borderRadius:100,border:"none",fontSize:11,fontWeight:700,cursor:"pointer",background:r.paid?"#EDF5EF":"#F5EDEC",color:r.paid?C.green:C.red,whiteSpace:"nowrap"}}>{r.paid?"✓ Pagado":"● Pendiente"}</button> : <span style={{fontSize:12,color:C.gray}}>—</span>}
+                {(r.total||autoTarifa(r.reportadoPor||"",vendors).tarifa) ? <button onClick={function(e){e.stopPropagation();onMarkPaid(r.id,!r.paid);}} style={{padding:"5px 10px",borderRadius:100,border:"none",fontSize:11,fontWeight:700,cursor:"pointer",background:r.paid?"#EDF5EF":"#F5EDEC",color:r.paid?C.green:C.red,whiteSpace:"nowrap"}}>{r.paid?"✓ Pagado":"● Pendiente"}</button> : <span style={{fontSize:12,color:C.gray}}>—</span>}
                 {r.pagadoPor&&<span style={{fontSize:9.5,fontWeight:700,letterSpacing:".08em",padding:"2px 7px",borderRadius:100,whiteSpace:"nowrap",background:r.pagadoPor==="Spacio AM"?"#EEF3FA":"#FEF0EC",color:r.pagadoPor==="Spacio AM"?"#4a7fa5":"#E9826A"}}>{r.pagadoPor}</span>}
               </div>
             </div>
