@@ -314,7 +314,7 @@ async function processMedia(rep) {
     r.factura = {name:r.factura.name, type:r.factura.type, data:fu};
   }
 
-  var singleFields = ["fotoPisoGeneral","fotosRegadera","fotosDucha","fotosEstufa","fotosFregadero",
+  var singleFields = ["fotoUniforme","fotoPisoGeneral","fotosRegadera","fotosDucha","fotosEstufa","fotosFregadero",
     "fotosMicroondas","fotosCafetera","fotosEcofiltro","fotosLavatrastos","fotosRefrigerador",
     "fotosTv","fotosSillon","fotosInsumos","fotosDebajoCama","fotosCloset",
     "fotosMicroondas2","fotosPlatos","fotosDetrasElect"];
@@ -367,7 +367,23 @@ async function saveReportFull(rep) {
     return r;
   }
   /* STEP 1: Save report immediately without photos (fast, ensures record exists) */
-  var stub = Object.assign({},rep,{fotoAntes:[],fotoDespues:[],factura:null,_uploading:true});
+  /* Strip ALL base64 photo fields — they're too large for Sheets and will be uploaded in step 2 */
+  function stripBase64(v) {
+    if(!v) return v;
+    if(typeof v==="string"&&v.startsWith("data:")) return null;
+    if(Array.isArray(v)) return v.map(function(x){return stripBase64(x);});
+    if(typeof v==="object"){var c=Object.assign({},v);Object.keys(c).forEach(function(k){c[k]=stripBase64(c[k]);});return c;}
+    return v;
+  }
+  var photoFields=["fotoAntes","fotoDespues","factura","fotoUniforme","fotoPisoGeneral",
+    "fotosHabitaciones","fotosBanos","fotosDrenajes","fotosVentanas","fotosGavetas","fotosDetalle",
+    "fotosMicroondas","fotosCafetera","fotosEcofiltro","fotosLavatrastos","fotosRefrigerador",
+    "fotosEstufa","fotosTv","fotosSillon","fotosInsumos","fotosDebajoCama","fotosCloset",
+    "fotosMicroondas2","fotosPlatos","fotosDetrasElect","fotosRegadera","fotosDucha","fotosFregadero","inventario","danios"];
+  var stub = Object.assign({},rep,{_uploading:true});
+  photoFields.forEach(function(k){if(stub[k]!==undefined)stub[k]=stripBase64(stub[k]);});
+  /* Also clear simple array fields */
+  stub.fotoAntes=[]; stub.fotoDespues=[]; stub.factura=null;
   try { await apiCall("saveReport",{data:stub}); } catch(e) { console.error("Stub save failed:",e); throw e; }
 
   /* STEP 2: Upload media & update report (may take longer) */
