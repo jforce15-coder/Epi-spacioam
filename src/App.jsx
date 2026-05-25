@@ -3873,25 +3873,40 @@ function CleaningPhotoGallery({rep}) {
       )}
 
       {/* Gallery */}
-      {light&&<PhotoLightbox photos={light.photos} initialIdx={light.idx} onClose={function(){setLight(null);}}/>}
-      {sections.map(function(sec,si) {
+      {/* Build flat list of ALL photos for global navigation */}
+      {(function(){
+        var allPhotos = [];
+        sections.forEach(function(sec){ sec.photos.forEach(function(p){ allPhotos.push(p); }); });
         return (
-          <div key={si}>
-            <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase",marginBottom:6}}>{sec.title}</div>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              {sec.photos.map(function(src,pi){
+          <>
+            {light&&<PhotoLightbox photos={light.photos} initialIdx={light.idx} onClose={function(){setLight(null);}}/>}
+            {(function(){
+              var gIdx = 0;
+              return sections.map(function(sec,si) {
+                var sectionStart = gIdx;
+                gIdx += sec.photos.length;
                 return (
-                  <div key={pi} onClick={function(){setLight({photos:sec.photos.filter(function(x){return x&&(x.startsWith("http")||x.startsWith("data:"));}),idx:pi});}} style={{cursor:"zoom-in",flexShrink:0}}>
-                    <img src={driveThumb(src,300)} alt={sec.title}
-                      style={{width:100,height:84,objectFit:"cover",borderRadius:7,border:"1px solid "+C.line,cursor:"zoom-in",background:"#f0f0f0"}}
-                      onError={function(e){e.target.src=src;}}/>
+                  <div key={si} style={{marginBottom:12}}>
+                    <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase",marginBottom:6}}>{sec.title}</div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {sec.photos.map(function(src,pi){
+                        var globalPhotoIdx = sectionStart + pi;
+                        return (
+                          <div key={pi} onClick={function(){ setLight({photos:allPhotos,idx:globalPhotoIdx}); }} style={{cursor:"zoom-in",flexShrink:0}}>
+                            <img src={driveThumb(src,300)} alt={sec.title}
+                              style={{width:100,height:84,objectFit:"cover",borderRadius:7,border:"1px solid "+C.line,cursor:"zoom-in",background:"#f0f0f0"}}
+                              onError={function(e){e.target.src=src;}}/>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
-              })}
-            </div>
-          </div>
+              });
+            })()}
+          </>
         );
-      })}
+      })()}
     </div>
   );
 }
