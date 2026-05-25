@@ -783,7 +783,7 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrl
       />
 
       <div style={{display:tab==="dash"?"block":"none"}}><DashView reps={reps} vendors={vendors} alerts={alerts} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh}/></div>
-      <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
+      <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
       <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  vendors={vendors} props={props} adminPin={adminPin} company={company} extCats={extCats||[]} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
 
       {detail&&<DetailModal rep={detail} vendors={vendors} props={props} onClose={function(){setDetail(null);}} onMarkPaid={function(p){markPaid(detail.id,p);setDetail(function(x){return Object.assign({},x,{paid:p});});}} onSave={function(r){onUpsert(r);setDetail(r);}} onQA={qaUpdate} onDelete={function(){setCDel(detail.id);}}/>}
@@ -3030,7 +3030,7 @@ function VendorApp({vendor,allVendors,reps,props,company,schedules,hospUrlDay,ho
         role={vendorDisplay(vendor)}
       />
       <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}}/></div>
-      <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={vendors||[]} props={props} company={company} defaultVendor={vendor.email} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
+      <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={allVendors||[]} props={props} company={company} defaultVendor={vendor.email} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
       <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek}/></div>
       <div style={{display:view==="hist"   ?"block":"none"}}><VendorHistory reps={cleaningReps} onRespond={vendorRespond}/></div>
       <div style={{display:view==="account"?"block":"none"}}><VendorAccount vendor={vendor} allVendors={allVendors} onSvV={onSvV}/></div>
