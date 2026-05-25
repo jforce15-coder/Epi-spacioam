@@ -704,9 +704,7 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
       <div style={{width:"100%",maxWidth:400,padding:"0 4px"}}>
         {/* Logo — same as before */}
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:36,gap:12}}>
-          <div style={{width:72,height:72,borderRadius:20,background:"#fff",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 12px rgba(0,0,0,.09)",border:"1px solid "+C.line}}>
-            <LogoMark size={44}/>
-          </div>
+          <LogoWordmark width={180}/>
           <div style={{fontSize:9.5,color:C.earth,fontWeight:600,letterSpacing:".22em",textTransform:"uppercase",marginTop:2,textAlign:"center",lineHeight:1.9}}>
             App operativa para el<br/>Equipo de primera impresión (EPI)
           </div>
@@ -1400,11 +1398,12 @@ function RepForm({vendors,props,company,onSubmit,defaultVendor,onSaveFeedback}) 
   if (cat==="Ajuste")               return <AjusteForm           {...shared}/>;
   if (cat==="Reporte de Daños")     return <DanosFormSolo         {...shared}/>;
   if (cat==="Nuevo Producto")       return <NuevoProductoForm      {...shared}/>;
-  return <StandardRepForm cat={cat} setCat={setCat} {...shared}/>;
+  return <StandardRepForm cat={cat} setCat={setCat} allowedCats={allowedCats} {...shared}/>;
 }
 
 /* ─── Standard Rep Form (Mantenimiento / Producto) */
-function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendor}) {
+function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendor,allowedCats}) {
+  allowedCats = allowedCats||CATS;
   var initAT = autoTarifa(defaultVendor||"", vendors);
   var blank={propiedad:"",fecha:todayStr(),categoria:cat,reportadoPor:defaultVendor||"",descripcion:"",comentarios:"",total:initAT.tarifa,paid:false,pagadoPor:"",fotoAntes:[],fotoDespues:[],factura:null};
   const [form,setForm] = useState(blank);
