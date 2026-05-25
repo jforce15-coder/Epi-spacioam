@@ -513,8 +513,8 @@ export default function App() {
   const [pin,      setPin]      = useState("spacio2024");
   const [company,  setCompany]  = useState({name:"Spacio AM S.A.",nit:"118287796"});
   const [extCats,   setExtCats]   = useState([]);
-  const [hospUrlDay,  setHospUrlDay]  = useState("https://share.hospitable.com/metrics/83c19ef2-72d9-45bc-abf8-9cf53e8b1a96");
-  const [hospUrlWeek, setHospUrlWeek] = useState("https://share.hospitable.com/metrics/41c8a454-1ece-4ad6-b4ef-605a140ec3f7");
+  const [hospUrlDay,  setHospUrlDay]  = useState("https://share.hospitable.com/metrics/1d1aabad-db5f-4f7a-847d-0de50c9dedc4");
+  const [hospUrlWeek, setHospUrlWeek] = useState("https://share.hospitable.com/metrics/c914e6fc-94b9-4c1b-89c6-7722cf2315d6");
   const [schedules, setSchedules] = useState([]);
   const [feedback,  setFeedback]  = useState([]);
   const [ready,    setReady]    = useState(false);
@@ -669,56 +669,74 @@ export default function App() {
 
 /* ═══ LOGIN */
 function Login({vendors, adminPin, onLogin, sheetsOk}) {
-  const [tab,   setTab]   = useState("vendor");
-  const [pin,   setPin]   = useState("");
-  const [email, setEmail] = useState("");
-  const [pass,  setPass]  = useState("");
-  const [err,   setErr]   = useState("");
+  const [email,    setEmail]    = useState("");
+  const [pass,     setPass]     = useState("");
+  const [err,      setErr]      = useState("");
+  const [adminPin2,setAdminPin2]= useState("");
+  const [adminErr, setAdminErr] = useState("");
+  const [showAdmin,setShowAdmin]= useState(false);
 
-  function loginAdmin() { if(pin===adminPin) onLogin({role:"admin"}); else setErr("PIN incorrecto."); }
-  function loginVendor() {
-    /* Allow login with full email OR just the part before @ */
+  function loginUser() {
     var input = email.toLowerCase().trim();
     var v = vendors.find(function(x){
       var em = x.email.toLowerCase();
       var user = em.split("@")[0];
       return (em===input||user===input) && x.password===pass && x.active;
     });
-    if (v) onLogin({role:v.isAdmin?"admin":"vendor",vendor:v}); else setErr("Correo o contraseña incorrectos.");
+    if (v) onLogin({role:v.isAdmin?"admin":"vendor",vendor:v});
+    else setErr("Correo o contraseña incorrectos.");
+  }
+  function loginAdmin() {
+    if(adminPin2===adminPin) onLogin({role:"admin"});
+    else setAdminErr("Contraseña incorrecta.");
   }
 
   return (
     <div style={{minHeight:"100vh",background:"#F7F7F7",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"Montserrat,sans-serif",}}>
       <GS/>
-      {/* Sheets status badge top-right */}
-      {sheetsOk===false&&<div style={{position:"fixed",top:14,right:14,fontSize:10,fontWeight:700,background:"#F5EDEC",color:"#8a3030",padding:"4px 10px",borderRadius:6,border:"1px solid #DBC8C4",zIndex:200,letterSpacing:".06em"}}>⚠ Sin Sheets</div>}
-      {sheetsOk===true&&<div style={{position:"fixed",top:14,right:14,fontSize:10,fontWeight:700,background:"#EDF5EF",color:"#3d6b52",padding:"4px 10px",borderRadius:6,zIndex:200,letterSpacing:".06em"}}>● Sheets OK</div>}
-      <div style={{width:"100%",maxWidth:400}}>
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:40,gap:8}}>
-          <LogoWordmark size={1} color={C.black}/>
-          <div style={{fontSize:9.5,color:C.earth,fontWeight:600,letterSpacing:".28em",textTransform:"uppercase",marginTop:4}}>Gestión de Mantenimiento</div>
+      {/* Sheets badge + hidden admin gear — top right, fixed */}
+      <div style={{position:"fixed",top:14,right:14,display:"flex",alignItems:"center",gap:8,zIndex:200}}>
+        {sheetsOk===false&&<div style={{fontSize:10,fontWeight:700,background:"#F5EDEC",color:"#8a3030",padding:"4px 10px",borderRadius:6,border:"1px solid #DBC8C4",letterSpacing:".06em"}}>⚠ Sin Sheets</div>}
+        {sheetsOk===true&&<div style={{fontSize:10,fontWeight:700,background:"#EDF5EF",color:"#3d6b52",padding:"4px 10px",borderRadius:6,letterSpacing:".06em"}}>● Sheets OK</div>}
+        <button onClick={function(){setShowAdmin(function(p){return !p;});setAdminErr("");setAdminPin2("");}} title="Acceso administrador" style={{background:"none",border:"none",cursor:"pointer",padding:"4px",color:C.gray,fontSize:15,lineHeight:1,opacity:.45}}>⚙</button>
+      </div>
+
+      <div style={{width:"100%",maxWidth:400,padding:"0 4px"}}>
+        {/* Logo — same as before */}
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:36,gap:10}}>
+          <LogoWordmark width={180}/>
+          <div style={{fontSize:9.5,color:C.earth,fontWeight:600,letterSpacing:".24em",textTransform:"uppercase",marginTop:4,textAlign:"center"}}>
+            App operativa para el Equipo de primera impresión (EPI)
+          </div>
         </div>
-        <div style={{display:"flex",background:C.surfaceWarm,borderRadius:6,padding:3,gap:3,marginBottom:18,border:"1px solid "+C.line}}>
-          {[["vendor","Proveedor"],["admin","Administrador"]].map(function(it){ var k=it[0],l=it[1]; return (
-            <button key={k} onClick={function(){setTab(k);setErr("");}} style={{flex:1,padding:"10px",borderRadius:9,border:"none",fontSize:12.5,fontWeight:600,cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,fontSize:12,letterSpacing:".06em",transition:"all .2s"}}>{l}</button>
-          ); })}
+
+        {/* Main login form */}
+        <div style={{background:"#fff",borderRadius:12,padding:"28px 24px",border:"1px solid "+C.line,boxShadow:"0 2px 12px rgba(0,0,0,.06)"}}>
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <F label="Correo electrónico">
+              <input type="email" placeholder="tu@correo.com" value={email} onChange={function(e){setEmail(e.target.value);setErr("");}} autoFocus/>
+            </F>
+            <F label="Contraseña">
+              <input type="password" placeholder="••••••••" value={pass} onChange={function(e){setPass(e.target.value);setErr("");}} onKeyDown={function(e){if(e.key==="Enter")loginUser();}}/>
+            </F>
+            {err&&<Err msg={err}/>}
+            <BigBtn onClick={loginUser} dis={!email||!pass}>Ingresar →</BigBtn>
+          </div>
         </div>
-        <div style={{background:"#fff",borderRadius:8,padding:"26px 22px",border:"1px solid "+C.line}}>
-          {tab==="vendor" ? (
-            <div style={{display:"flex",flexDirection:"column",gap:14}}>
-              <F label="Correo electrónico"><input type="email" placeholder="tu@correo.com" value={email} onChange={function(e){setEmail(e.target.value);}} autoFocus/></F>
-              <F label="Contraseña"><input type="password" placeholder="••••••••" value={pass} onChange={function(e){setPass(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")loginVendor();}}/></F>
-              {err&&<Err msg={err}/>}
-              <BigBtn onClick={loginVendor} dis={!email||!pass}>Ingresar →</BigBtn>
+
+        {/* Admin panel — revealed by gear icon */}
+        {showAdmin&&(
+          <div style={{marginTop:12,background:"#fff",borderRadius:10,padding:"16px 20px",border:"1.5px solid "+C.line,boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".22em",textTransform:"uppercase",marginBottom:12}}>Acceso administrador</div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <F label="Contraseña">
+                <input type="password" placeholder="••••••••" value={adminPin2} onChange={function(e){setAdminPin2(e.target.value);setAdminErr("");}} onKeyDown={function(e){if(e.key==="Enter")loginAdmin();}} autoFocus/>
+              </F>
+              {adminErr&&<Err msg={adminErr}/>}
+              <BigBtn onClick={loginAdmin} dis={!adminPin2}>Ingresar →</BigBtn>
             </div>
-          ) : (
-            <div style={{display:"flex",flexDirection:"column",gap:14}}>
-              <F label="PIN de administrador"><input type="password" placeholder="••••••••" value={pin} onChange={function(e){setPin(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")loginAdmin();}} autoFocus/></F>
-              {err&&<Err msg={err}/>}
-              <BigBtn onClick={loginAdmin} dis={!pin}>Ingresar →</BigBtn>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1346,12 +1364,20 @@ function PagosLimpieza({reps,vendors}) {
 
 
 /* ─── Report Form — dispatcher (all hooks before any return) */
-function RepForm({vendors,props,company,onSubmit,defaultVendor}) {
-  const [cat,setCat] = useState("Mantenimiento");
-  /* All hooks above any conditional return — satisfies Rules of Hooks */
-  /* Each specialized form is its own component with its own hooks    */
-  function goBack(){setCat("Mantenimiento");}
-  var shared = {vendors:vendors,props:props,company:company,onSubmit:onSubmit,defaultVendor:defaultVendor,onBack:goBack};
+function RepForm({vendors,props,company,onSubmit,defaultVendor,onSaveFeedback}) {
+  /* Determine allowed cats by vendor type */
+  var vend = vendors&&vendors.find(function(v){return v.email===defaultVendor;});
+  var isEPILimpieza = vend&&vend.tipo==="interno"&&vend.categoria==="EPI Limpieza";
+  var isEPIMant = vend&&vend.tipo==="interno"&&vend.categoria==="EPI Mantenimiento";
+  var allowedCats = isEPILimpieza
+    ? ["Limpieza tradicional","Limpieza profunda","Reporte de Daños"]
+    : isEPIMant
+    ? ["Mantenimiento","Ajuste","Nuevo Producto","Reporte de Daños"]
+    : CATS;
+  var defCat = allowedCats[0]||"Mantenimiento";
+  const [cat,setCat] = useState(defCat);
+  function goBack(){setCat(defCat);}
+  var shared = {vendors:vendors,props:props,company:company,onSubmit:onSubmit,defaultVendor:defaultVendor,onBack:goBack,onSaveFeedback:onSaveFeedback};
   if (cat==="Limpieza tradicional") return <LimpiezaTradForm {...shared}/>;
   if (cat==="Limpieza profunda")    return <LimpiezaProfForm  {...shared}/>;
   if (cat==="Ajuste")               return <AjusteForm           {...shared}/>;
@@ -1398,7 +1424,7 @@ function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendo
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         <Card title="Tipo de trabajo">
           <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-            {CATS.map(function(c){var b=BADGE[c]||BADGE["Mantenimiento"];var s=cat===c;return <button key={c} onClick={function(){setCat(c);}} style={{padding:"7px 14px",borderRadius:100,cursor:"pointer",border:"1.5px solid "+(s?b.tx:C.gray),background:s?b.bg:"#fff",color:s?b.tx:C.earth,fontSize:12.5,fontWeight:600,transition:"all .18s"}}>{c}</button>;})}
+            {allowedCats.map(function(c){var b=BADGE[c]||BADGE["Mantenimiento"];var s=cat===c;return <button key={c} onClick={function(){setCat(c);}} style={{padding:"7px 14px",borderRadius:100,cursor:"pointer",border:"1.5px solid "+(s?b.tx:C.gray),background:s?b.bg:"#fff",color:s?b.tx:C.earth,fontSize:12.5,fontWeight:600,transition:"all .18s"}}>{c}</button>;})}
           </div>
         </Card>
         <Card title="Responsable">
@@ -2040,7 +2066,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
                       return <button key={it[0]} onClick={function(){sf("_gorraOk",it[0]);}} style={{flex:1,padding:"8px",borderRadius:7,border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:12,fontWeight:600,cursor:"pointer"}}>{it[1]}</button>;
                     })}
                   </div>
-                  {form._gorraOk==="no"&&<div style={{marginTop:8,fontSize:12,color:"#b5622a",fontWeight:600}}>⚠ Recuerda que el uniforme completo incluye playera <strong>y</strong> gorra Spacio AM. Por favor usa tu gorra para el siguiente trabajo.</div>}
+                  {form._gorraOk==="no"&&<div style={{marginTop:8,fontSize:12,color:"#b5622a",fontWeight:600}}>⚠ Recuerda que el uniforme consiste en playera y gorra. No olvides llevar tu gorra pues es parte esencial del uniforme.</div>}
                 </div>
               )}
               {!form.fotoUniforme&&<div style={{fontSize:11.5,color:"#b5622a",textAlign:"center",fontWeight:600}}>⚠ La foto es obligatoria antes de continuar</div>}
@@ -3004,7 +3030,7 @@ function VendorApp({vendor,allVendors,reps,props,company,schedules,hospUrlDay,ho
         role={vendorDisplay(vendor)}
       />
       <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}}/></div>
-      <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={[]} props={props} company={company} defaultVendor={vendor.email} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
+      <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={vendors||[]} props={props} company={company} defaultVendor={vendor.email} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
       <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek}/></div>
       <div style={{display:view==="hist"   ?"block":"none"}}><VendorHistory reps={cleaningReps} onRespond={vendorRespond}/></div>
       <div style={{display:view==="account"?"block":"none"}}><VendorAccount vendor={vendor} allVendors={allVendors} onSvV={onSvV}/></div>
