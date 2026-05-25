@@ -53,6 +53,17 @@ function autoTarifa(email, vendors) {
 function isCleaning(cat){return CLEAN_CATS.indexOf(cat)>=0;}
 const INTERNAL_CATS = ["Administrativo","EPI Limpieza","EPI Mantenimiento"];
 
+/* ─── Convert any Google Drive URL to inline-displayable thumbnail */
+function driveThumb(url, size) {
+  if (!url||typeof url!=="string") return url;
+  if (url.startsWith("data:")) return url;
+  size = size || 400;
+  var m = url.match(/[?&]id=([a-zA-Z0-9_-]{20,})/) ||
+          url.match(/\/d\/([a-zA-Z0-9_-]{20,})\//);
+  if (!m) return url;
+  return "https://drive.google.com/thumbnail?id=" + m[1] + "&sz=w" + size;
+}
+
 function vendorDisplay(v) {
   if (!v) return "—";
   if (v.primerNombre) return [v.primerNombre, v.primerApellido].filter(Boolean).join(" ");
@@ -3594,7 +3605,15 @@ function ExecSummary({rep, vendors}) {
 
   function exportPDF() {
     function isP(v){return v&&typeof v==="string"&&(v.startsWith("http")||v.startsWith("data:"));}
-    function imgTag(src){return isP(src)?"<img src='"+src+"' style='max-width:150px;max-height:120px;object-fit:cover;border-radius:5px;border:1px solid #E2E2E0;margin:3px'/>":"";}
+    function imgTag(src){
+    if(!isP(src)) return "";
+    /* Use thumbnail URL for Drive images to render inline in PDF */
+    var dSrc=src;
+    var fm=src.match(/[?&/]id=([a-zA-Z0-9_-]{20,})/);
+    if(!fm)fm=src.match(/\/d\/([a-zA-Z0-9_-]{20,})\//);
+    if(fm)dSrc="https://drive.google.com/thumbnail?id="+fm[1]+"&sz=w300";
+    return "<img src='" + dSrc + "' style='max-width:150px;max-height:120px;object-fit:cover;border-radius:5px;border:1px solid #E2E2E0;margin:3px'/>";
+  }
     function sec(title,html){return "<h2 style='font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#8C8C8A;margin:24px 0 8px;border-bottom:1px solid #E2E2E0;padding-bottom:5px'>"+title+"</h2>"+html;}
     function row(label,val){return "<div style='display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F4F4F2;font-size:13px'><span style='color:#8C8C8A'>"+label+"</span><span>"+val+"</span></div>";}
     function badge(txt,green){return "<span style='padding:2px 10px;border-radius:100px;font-size:11px;font-weight:600;background:"+(green?"#EDF5EF":"#F5EDEC")+";color:"+(green?"#3d6b52":"#8a3030")+"'>"+txt+"</span>";}
@@ -3704,7 +3723,7 @@ function ExecSummary({rep, vendors}) {
           {rep.fotoUniforme&&(rep.fotoUniforme.startsWith("http")||rep.fotoUniforme.startsWith("data:")) ? (
             <div style={{display:"flex",gap:10,alignItems:"center",padding:"8px 12px",borderRadius:8,background:rep._gorraOk==="no"?"#FFF9E6":"#EDF5EF",border:"1px solid "+(rep._gorraOk==="no"?"#E6D88A":"#c8dfc8")}}>
               <a href={rep.fotoUniforme} target="_blank" rel="noopener noreferrer">
-                <img src={rep.fotoUniforme} alt="uniforme" style={{width:44,height:44,objectFit:"cover",borderRadius:6,border:"1px solid "+C.line,flexShrink:0}}/>
+                <img src={driveThumb(rep.fotoUniforme,200)} alt="uniforme" style={{width:44,height:44,objectFit:"cover",borderRadius:6,border:"1px solid "+C.line,flexShrink:0}} onError={function(e){e.target.src=rep.fotoUniforme;}}/>
               </a>
               <div>
                 <div style={{fontSize:12,fontWeight:700,color:rep._gorraOk==="no"?"#7a6000":C.green}}>
@@ -3736,6 +3755,7 @@ function ExecSummary({rep, vendors}) {
 
 /* ─── Cleaning Photo Gallery — shows all cleaning-specific photos in admin view */
 function CleaningPhotoGallery({rep}) {
+  const [light, setLight] = useState(null);
   /* Helper to check if a value is a valid photo URL */
   function isPhoto(v) { return v&&typeof v==="string"&&(v.startsWith("http")||v.startsWith("data:")); }
   function validArr(arr) { return Array.isArray(arr)?arr.filter(isPhoto):[]; }
@@ -3853,6 +3873,7 @@ function CleaningPhotoGallery({rep}) {
       )}
 
       {/* Gallery */}
+      {light&&<PhotoLightbox photos={light.photos} initialIdx={light.idx} onClose={function(){setLight(null);}}/>}
       {sections.map(function(sec,si) {
         return (
           <div key={si}>
@@ -3860,10 +3881,11 @@ function CleaningPhotoGallery({rep}) {
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
               {sec.photos.map(function(src,pi){
                 return (
-                  <a key={pi} href={src} target="_blank" rel="noopener noreferrer" style={{display:"block",textDecoration:"none"}}>
-                    <img src={src} alt={sec.title} style={{width:100,height:84,objectFit:"cover",borderRadius:7,border:"1px solid "+C.line,cursor:"zoom-in"}}
-                      onError={function(e){e.target.style.display="none";}}/>
-                  </a>
+                  <div key={pi} onClick={function(){setLight({photos:sec.photos.filter(function(x){return x&&(x.startsWith("http")||x.startsWith("data:"));}),idx:pi});}} style={{cursor:"zoom-in",flexShrink:0}}>
+                    <img src={driveThumb(src,300)} alt={sec.title}
+                      style={{width:100,height:84,objectFit:"cover",borderRadius:7,border:"1px solid "+C.line,cursor:"zoom-in",background:"#f0f0f0"}}
+                      onError={function(e){e.target.src=src;}}/>
+                  </div>
                 );
               })}
             </div>
@@ -4926,6 +4948,40 @@ function PhotoRecoveryTool() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+
+
+/* ─── Photo Lightbox — full screen photo viewer */
+function PhotoLightbox({photos, initialIdx, onClose}) {
+  const [idx, setIdx] = useState(initialIdx||0);
+  var total = photos.length;
+  function prev(e){e.stopPropagation();setIdx(function(i){return(i-1+total)%total;});}
+  function next(e){e.stopPropagation();setIdx(function(i){return(i+1)%total;});}
+  useEffect(function(){
+    function onKey(e){if(e.key==="Escape")onClose();if(e.key==="ArrowLeft")setIdx(function(i){return(i-1+total)%total;});if(e.key==="ArrowRight")setIdx(function(i){return(i+1)%total;});}
+    window.addEventListener("keydown",onKey);
+    return function(){window.removeEventListener("keydown",onKey);};
+  },[]);
+  var src = photos[idx];
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.92)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12}}>
+      <div style={{position:"absolute",top:16,right:20,color:"#fff",fontSize:24,cursor:"pointer",fontWeight:300,lineHeight:1}} onClick={onClose}>×</div>
+      <div style={{position:"relative",maxWidth:"90vw",maxHeight:"80vh",display:"flex",alignItems:"center",justifyContent:"center"}}>
+        {total>1&&<button onClick={prev} style={{position:"absolute",left:-48,background:"rgba(255,255,255,.15)",border:"none",color:"#fff",fontSize:28,width:40,height:40,borderRadius:"50%",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2}}>‹</button>}
+        <img
+          src={driveThumb(src,1200)}
+          alt={"foto "+(idx+1)}
+          style={{maxWidth:"85vw",maxHeight:"78vh",objectFit:"contain",borderRadius:8}}
+          onError={function(e){e.target.src=src;}}
+          onClick={function(e){e.stopPropagation();}}
+        />
+        {total>1&&<button onClick={next} style={{position:"absolute",right:-48,background:"rgba(255,255,255,.15)",border:"none",color:"#fff",fontSize:28,width:40,height:40,borderRadius:"50%",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2}}>›</button>}
+      </div>
+      <div style={{color:"rgba(255,255,255,.6)",fontSize:12,letterSpacing:".1em"}}>{idx+1} / {total}</div>
+      <a href={src} target="_blank" rel="noopener noreferrer" onClick={function(e){e.stopPropagation();}} style={{color:"rgba(255,255,255,.5)",fontSize:11,textDecoration:"none"}}>↗ Abrir en Drive</a>
     </div>
   );
 }
