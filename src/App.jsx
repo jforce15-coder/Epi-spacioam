@@ -285,13 +285,19 @@ async function processMedia(rep) {
   var r = Object.assign({}, rep);
   var id = r.id;
 
+  /* Upload in parallel batches of 3 to reduce total time */
   async function upArr(arr, prefix) {
     if (!arr||!arr.length) return arr||[];
-    var out = [];
-    for (var i=0;i<arr.length;i++) {
-      out.push(arr[i]&&arr[i].startsWith&&arr[i].startsWith("data:")
-        ? await uploadMedia(arr[i], prefix+"-"+id+"-"+i+".jpg", "image/jpeg")
-        : arr[i]);
+    var out = new Array(arr.length);
+    /* Batch size 3 — parallel within batch, sequential across batches */
+    for (var i=0;i<arr.length;i+=3) {
+      var batch = arr.slice(i,i+3);
+      var results = await Promise.all(batch.map(function(f,j){
+        return f&&f.startsWith&&f.startsWith("data:")
+          ? uploadMedia(f, prefix+"-"+id+"-"+(i+j)+".jpg","image/jpeg")
+          : Promise.resolve(f);
+      }));
+      for (var j=0;j<results.length;j++) out[i+j]=results[j];
     }
     return out;
   }
@@ -314,17 +320,21 @@ async function processMedia(rep) {
     r.factura = {name:r.factura.name, type:r.factura.type, data:fu};
   }
 
+  /* Upload single fields in parallel */
   var singleFields = ["fotoUniforme","fotoPisoGeneral","fotosRegadera","fotosDucha","fotosEstufa","fotosFregadero",
     "fotosMicroondas","fotosCafetera","fotosEcofiltro","fotosLavatrastos","fotosRefrigerador",
     "fotosTv","fotosSillon","fotosInsumos","fotosDebajoCama","fotosCloset",
     "fotosMicroondas2","fotosPlatos","fotosDetrasElect"];
-  for (var si=0;si<singleFields.length;si++) {
-    var sf=singleFields[si]; if(r[sf]) r[sf]=await upOne(r[sf],sf);
-  }
+  await Promise.all(singleFields.map(async function(sf){
+    if(r[sf]&&r[sf].startsWith&&r[sf].startsWith("data:"))
+      r[sf] = await upOne(r[sf],sf);
+  }));
+
+  /* Upload array fields in parallel */
   var arrFields = ["fotosHabitaciones","fotosDrenajes","fotosVentanas","fotosGavetas","fotosDetalle"];
-  for (var ai=0;ai<arrFields.length;ai++) {
-    var af=arrFields[ai]; if(r[af]) r[af]=await upArr(r[af],af);
-  }
+  await Promise.all(arrFields.map(async function(af){
+    if(r[af]) r[af]=await upArr(r[af],af);
+  }));
 
   if (r.fotosBanos&&r.fotosBanos.length) {
     var nb=[];
