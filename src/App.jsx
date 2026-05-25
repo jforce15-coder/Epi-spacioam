@@ -1852,6 +1852,10 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
       /* Auto-create damage report if damages were reported */
       if (form.hayDanios && form.danios && form.danios.length>0) {
         var dmgDesc = form.danios.map(function(d,i){return "Daño "+(i+1)+": "+d.desc;}).join(" | ");
+        /* Build damage report — strip base64 from fotos (photos already in cleaning report) */
+        var dmgDanios = (form.danios||[]).map(function(d){
+          return Object.assign({},d,{fotos:(d.fotos||[]).filter(function(f){return f&&f.startsWith("http");})});
+        });
         var dmgRep = {
           id: now+1, createdAt: now+1,
           categoria:"Reporte de Daños",
@@ -1859,12 +1863,13 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
           fecha: form.fecha,
           reportadoPor: form.reportadoPor,
           descripcion: dmgDesc||"Daños encontrados durante limpieza",
-          comentarios: "Generado automáticamente desde Limpieza Tradicional #"+now,
+          comentarios: "Generado automáticamente desde reporte de limpieza #"+now,
           total:"", paid:false, pagadoPor:"",
           fotoAntes:[], fotoDespues:[], factura:null,
-          danios: form.danios, hayDanios:true,
+          danios: dmgDanios, hayDanios:true,
+          _linkedToReport: String(now),
         };
-        await onSubmit(dmgRep);
+        try { await onSubmit(dmgRep); } catch(dmgErr) { console.error("Damage report failed:",dmgErr); }
       }
       setDone(true);
     } catch(e) {
@@ -3543,7 +3548,7 @@ function DamageSummary({danios}) {
               {d.fotos.map(function(src,pi){return (
                 src&&(src.startsWith("http")||src.startsWith("data:"))
                   ? <a key={pi} href={src} target="_blank" rel="noopener noreferrer">
-                      <img src={src} alt={"daño "+i+" foto "+pi} style={{width:80,height:70,objectFit:"cover",borderRadius:6,border:"1px solid "+C.line}}/>
+                      <img src={driveThumb(src,300)} alt={"daño "+i+" foto "+pi} style={{width:80,height:70,objectFit:"cover",borderRadius:6,border:"1px solid "+C.line}} onError={function(e){e.target.src=src;}}/>
                     </a>
                   : null
               );})}
