@@ -777,7 +777,7 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrl
       <ResponsiveHeader
         tab={tab} setTab={setTab}
         alertCount={alerts.length} pendingQA={pendingQA} sheetsOk={sheetsOk} adminLabel={adminVendor?vendorDisplay(adminVendor):"Admin"}
-        navItems={[["dash","Dashboard","◫"],["form","Formulario","✎"],["cfg","Config","⚙"]]}
+        navItems={[["dash","Dashboard","◫"],["form","Formulario","✎"],["sched","Programa","📅"],["qa","Calidad","★"],["cfg","Config","⚙"]]}
         onLogout={onLogout}
         role="Admin"
       />
@@ -1376,10 +1376,10 @@ function RepForm({vendors,props,company,onSubmit,defaultVendor,onSaveFeedback}) 
   var isEPILimpieza = vend&&vend.tipo==="interno"&&vend.categoria==="EPI Limpieza";
   var isEPIMant = vend&&vend.tipo==="interno"&&vend.categoria==="EPI Mantenimiento";
   var allowedCats = isEPILimpieza
-    ? ["Limpieza tradicional","Limpieza profunda","Reporte de Daños"]
+    ? ["Limpieza tradicional","Limpieza profunda","Ajuste","Reporte de Daños"]
     : isEPIMant
-    ? ["Mantenimiento","Ajuste","Nuevo Producto","Reporte de Daños"]
-    : CATS;
+    ? ["Mantenimiento","Nuevo Producto","Ajuste","Reporte de Daños"]
+    : CATS; /* Admin + Administrativo + External: all categories */
   /* Start with null (selector screen) so user always picks category first */
   const [cat,setCat] = useState(null);
   function goBack(){setCat(null);}
@@ -3111,9 +3111,9 @@ function VendorJobsView({reps, tot, cob, pnd, pendingCorrections, onNew, vendor,
                 var isEPIL = vendor&&vendor.tipo==="interno"&&vendor.categoria==="EPI Limpieza";
                 var isEPIM = vendor&&vendor.tipo==="interno"&&vendor.categoria==="EPI Mantenimiento";
                 var cats = isEPIL
-                  ? ["Todos","Limpieza tradicional","Limpieza profunda","Reporte de Daños"]
+                  ? ["Todos","Limpieza tradicional","Limpieza profunda","Ajuste","Reporte de Daños"]
                   : isEPIM
-                  ? ["Todos","Mantenimiento","Ajuste","Nuevo Producto","Reporte de Daños"]
+                  ? ["Todos","Mantenimiento","Nuevo Producto","Ajuste","Reporte de Daños"]
                   : ["Todos"].concat(CATS);
                 return cats.map(function(c){return <option key={c}>{c}</option>;});
               })()}
@@ -3412,7 +3412,7 @@ function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogou
           {!isMobile&&<span style={{fontSize:11,color:C.taupe,letterSpacing:".06em"}}>{adminLabel||role}</span>}
           {sheetsOk===false&&!isMobile&&<span style={{fontSize:9,fontWeight:700,background:"#F5EDEC",color:C.red,padding:"2px 6px",borderRadius:4,letterSpacing:".06em"}}>SIN SHEETS</span>}
           {sheetsOk===true&&!isMobile&&<span style={{fontSize:9,fontWeight:700,background:"#EDF5EF",color:C.green,padding:"2px 6px",borderRadius:4,letterSpacing:".06em"}}>● SHEETS</span>}
-          {alertCount>0&&<span style={{background:C.red,color:"#fff",fontSize:9,fontWeight:700,borderRadius:100,padding:"2px 6px"}}>{alertCount}</span>}{pendingQA>0&&<span style={{background:"#4a5a7a",color:"#fff",fontSize:9,fontWeight:700,borderRadius:100,padding:"2px 6px",marginLeft:2}}>{"✓ "+pendingQA}</span>}
+          {alertCount>0&&<button onClick={function(e){e.stopPropagation();setTab&&setTab("dash");}} title={alertCount+" trabajo"+(alertCount!==1?"s":"")+" con pago pendiente"} style={{background:C.red,color:"#fff",fontSize:9,fontWeight:700,borderRadius:100,padding:"2px 6px",border:"none",cursor:"pointer",lineHeight:1.4}}>{"⚠ "+alertCount}</button>}{pendingQA>0&&<button onClick={function(e){e.stopPropagation();setTab&&setTab("qa");}} title={pendingQA+" limpieza"+(pendingQA!==1?"s":"")+" pendiente"+(pendingQA!==1?"s":"")+" de revisión QA"} style={{background:"#4a5a7a",color:"#fff",fontSize:9,fontWeight:700,borderRadius:100,padding:"2px 6px",marginLeft:2,border:"none",cursor:"pointer",lineHeight:1.4}}>{"★ "+pendingQA}</button>}
         </div>
 
         {/* Desktop nav */}
