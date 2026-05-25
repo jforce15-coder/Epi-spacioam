@@ -894,16 +894,7 @@ function OpsDash({reps,vendors,onSelect,onMarkPaid,onRefresh}) {
           <div>
             <span style={LBL}>Categoría</span>
             <select value={fCat} onChange={function(e){setFCat(e.target.value);setShowAll(false);}} style={fCat!=="Todos"?IS_A:IS}>
-              {(function(){
-                var isEPIL = vendor&&vendor.tipo==="interno"&&vendor.categoria==="EPI Limpieza";
-                var isEPIM = vendor&&vendor.tipo==="interno"&&vendor.categoria==="EPI Mantenimiento";
-                var cats = isEPIL
-                  ? ["Todos","Limpieza tradicional","Limpieza profunda","Reporte de Daños"]
-                  : isEPIM
-                  ? ["Todos","Mantenimiento","Ajuste","Nuevo Producto","Reporte de Daños"]
-                  : ["Todos"].concat(CATS);
-                return cats.map(function(c){return <option key={c}>{c}</option>;});
-              })()}
+              {["Todos"].concat(CATS).map(function(c){return <option key={c}>{c}</option>;})}
             </select>
           </div>
           <div>
