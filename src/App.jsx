@@ -4820,6 +4820,25 @@ function PhotoRecoveryTool() {
     setLog(function(p){ return [...p, {msg:msg, type:type||"info", ts:new Date().toLocaleTimeString("es-GT")}]; });
   }
 
+  async function runTest() {
+    setStatus("scanning"); setLog([]);
+    addLog("Probando conexión con Drive…");
+    try {
+      var r = await apiCall("testDrive", {});
+      addLog("Carpeta Drive: " + (r.folderName||"?"), "detail");
+      addLog("Archivos directos en carpeta: " + (r.directFiles||0), "detail");
+      addLog("Subcarpetas: " + (r.subfolders||0), "detail");
+      addLog("Total archivos (incluyendo subfolders): " + (r.totalFiles||0), r.totalFiles>0?"success":"error");
+      if(r.samples&&r.samples.length) {
+        r.samples.forEach(function(s){ addLog("  → " + s, "detail"); });
+      }
+      setStatus("idle");
+    } catch(e) {
+      addLog("Error: " + (e&&e.message?e.message:String(e)), "error");
+      setStatus("error");
+    }
+  }
+
   async function runRecovery() {
     setStatus("scanning"); setLog([]); setResults(null);
     addLog("Iniciando recuperación de fotos…");
@@ -4855,6 +4874,13 @@ function PhotoRecoveryTool() {
           Esta herramienta escanea tu carpeta de Google Drive, identifica las fotos ya subidas y las vincula a sus reportes correspondientes en Google Sheets.
           <br/><span style={{fontSize:11.5,color:C.taupe}}>Útil para reportes que muestran 0% de fotos aunque las fotos sí llegaron a Drive.</span>
         </div>
+        <button
+          onClick={runTest}
+          disabled={status==="scanning"}
+          style={{width:"100%",padding:"10px",borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:status==="scanning"?"default":"pointer",marginBottom:8}}
+        >
+          🔌 Probar conexión con Drive primero
+        </button>
         <button
           onClick={runRecovery}
           disabled={status==="scanning"}
