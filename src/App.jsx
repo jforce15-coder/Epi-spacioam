@@ -387,17 +387,26 @@ async function saveReportFull(rep) {
   try { await apiCall("saveReport",{data:stub}); } catch(e) { console.error("Stub save failed:",e); throw e; }
 
   /* STEP 2: Upload media & update report (may take longer) */
-  try {
-    var processed = await processMedia(rep);
-    processed._uploading = false;
-    await apiCall("saveReport",{data:processed});
-    return processed;
-  } catch(e) {
-    console.error("Media upload failed, report saved without photos:",e);
-    stub._uploading = false;
-    stub._photoError = true;
-    try { await apiCall("saveReport",{data:stub}); } catch(_){}
-    return stub;
+  var maxRetries = 2;
+  for (var attempt=0; attempt<=maxRetries; attempt++) {
+    try {
+      var processed = await processMedia(rep);
+      processed._uploading = false;
+      processed._photoError = false;
+      await apiCall("saveReport",{data:processed});
+      console.log("Photos uploaded successfully on attempt", attempt+1);
+      return processed;
+    } catch(e) {
+      console.error("Photo upload attempt "+(attempt+1)+" failed:", e&&e.message?e.message:String(e));
+      if (attempt < maxRetries) {
+        await new Promise(function(r){setTimeout(r, 2000*(attempt+1));});
+        continue;
+      }
+      /* All retries exhausted — save stub without photos */
+      var failStub = Object.assign({},stub,{_uploading:false,_photoError:true});
+      try { await apiCall("saveReport",{data:failStub}); } catch(_){}
+      return failStub;
+    }
   }
 }
 
@@ -2005,18 +2014,36 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
 
         {/* STEP 12: Foto uniforme */}
         {step===12&&(
-          <WizStep title="Foto en uniforme" step={step} total={STEPS.length-2} onPrev={prev} onNext={next} canNext>
+          <WizStep title="Foto en uniforme" step={step} total={STEPS.length-2} onPrev={prev} onNext={function(){
+            if(!form.fotoUniforme){sf("_uniWarn","noPhoto");}
+            next();
+          }} canNext>
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
-              <div style={{background:C.surfaceWarm,borderRadius:8,padding:"12px 14px",border:"1px solid "+C.line,fontSize:13,color:C.earth,lineHeight:1.6}}>
-                📸 Tómate una selfie con tu uniforme de Spacio AM antes de salir del apartamento.
+              <div style={{background:"#EDF5EF",borderRadius:8,padding:"12px 14px",border:"1px solid #c8dfc8",fontSize:13,color:C.black,lineHeight:1.7,fontWeight:500}}>
+                📸 Tómate una foto con la <strong>cámara</strong> usando tu uniforme completo:<br/>
+                <span style={{fontSize:11.5,color:C.earth}}>✓ Playera Spacio AM &nbsp;·&nbsp; ✓ Gorra Spacio AM</span>
               </div>
               <SinglePhotoUp
                 foto={form.fotoUniforme}
                 accent={C.earth}
-                onAdd={function(f){compress(f).then(function(d){sf("fotoUniforme",d);});}}
+                cameraOnly={true}
+                label="Tomar foto con uniforme"
+                onAdd={function(f){compress(f).then(function(d){sf("fotoUniforme",d);sf("_uniWarn",null);});}}
                 onDel={function(){sf("fotoUniforme",null);}}
               />
-              <div style={{fontSize:11,color:C.taupe,textAlign:"center"}}>La foto es opcional pero recomendada.</div>
+              {form.fotoUniforme&&(
+                <div style={{background:"#FFF9E6",borderRadius:8,padding:"10px 14px",border:"1px solid #E6D88A"}}>
+                  <div style={{fontSize:12.5,fontWeight:700,color:"#7a6000",marginBottom:4}}>¿Llevas la gorra?</div>
+                  <div style={{display:"flex",gap:8}}>
+                    {[["si","✓ Sí, llevo gorra"],["no","✗ No llevo gorra"]].map(function(it){
+                      var sel=form._gorraOk===it[0];
+                      return <button key={it[0]} onClick={function(){sf("_gorraOk",it[0]);}} style={{flex:1,padding:"8px",borderRadius:7,border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:12,fontWeight:600,cursor:"pointer"}}>{it[1]}</button>;
+                    })}
+                  </div>
+                  {form._gorraOk==="no"&&<div style={{marginTop:8,fontSize:12,color:"#b5622a",fontWeight:600}}>⚠ Recuerda que el uniforme completo incluye playera <strong>y</strong> gorra Spacio AM. Por favor usa tu gorra para el siguiente trabajo.</div>}
+                </div>
+              )}
+              {!form.fotoUniforme&&<div style={{fontSize:11.5,color:"#b5622a",textAlign:"center",fontWeight:600}}>⚠ La foto es obligatoria antes de continuar</div>}
             </div>
           </WizStep>
         )}
@@ -2323,21 +2350,22 @@ function DaniosSection({form,sf}) {
   );
 }
 
-function SinglePhotoUp({foto,accent,onAdd,onDel}) {
+function SinglePhotoUp({foto,accent,onAdd,onDel,cameraOnly,label}) {
   var ref=useRef(null);
   return (
     <div>
       {foto
-        ?<div style={{position:"relative",width:"100%",maxWidth:280,borderRadius:12,overflow:"hidden",border:"2px solid "+(accent+"30")}}>
-          <img src={foto} alt="" style={{width:"100%",height:160,objectFit:"cover",display:"block"}}/>
-          <button onClick={onDel} style={{position:"absolute",top:8,right:8,width:26,height:26,borderRadius:"50%",border:"none",background:"rgba(0,0,0,.6)",color:"#fff",fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>×</button>
+        ?<div style={{position:"relative",width:"100%",maxWidth:280,borderRadius:12,overflow:"hidden"}}>
+          <img src={foto} alt="" style={{width:"100%",maxHeight:220,objectFit:"cover",display:"block"}}/>
+          <button onClick={onDel} style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,.6)",color:"#fff",border:"none",borderRadius:"50%",width:28,height:28,fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>×</button>
         </div>
-        :<button onClick={function(){if(ref.current)ref.current.click();}} style={{width:"100%",maxWidth:280,height:110,borderRadius:8,border:"1.5px dashed "+C.line,background:C.surface,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,cursor:"pointer",transition:"background .2s"}}>
-          <span style={{fontSize:28,color:accent}}>📷</span>
-          <span style={{fontSize:12,color:C.earth,fontWeight:600}}>Subir foto</span>
-        </button>
+        :<label style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",width:"100%",maxWidth:280,minHeight:130,borderRadius:12,border:"2px dashed "+(accent||C.earth),cursor:"pointer",background:C.surfaceWarm,gap:6}}>
+          <span style={{fontSize:26}}>📷</span>
+          <span style={{fontSize:12,color:C.earth,fontWeight:600,textAlign:"center",padding:"0 12px"}}>{label||"Toca para añadir foto"}</span>
+          {cameraOnly&&<span style={{fontSize:10,color:C.taupe}}>Solo cámara</span>}
+          <input ref={ref} type="file" accept="image/*" capture={cameraOnly?"environment":undefined} style={{display:"none"}} onChange={function(e){var f=e.target.files&&e.target.files[0];if(f)onAdd(f);e.target.value="";}}/>
+        </label>
       }
-      <input ref={ref} type="file" accept="image/*" style={{display:"none"}} onChange={function(e){if(e.target.files&&e.target.files[0])onAdd(e.target.files[0]);e.target.value="";}}/>
     </div>
   );
 }
@@ -2964,7 +2992,14 @@ function VendorApp({vendor,allVendors,reps,props,company,schedules,hospUrlDay,ho
       <ResponsiveHeader
         tab={view} setTab={setView}
         alertCount={0}
-        navItems={[["jobs","Mis trabajos","◫"],["new","Nuevo reporte","✎"],["sched","Programa","📅"],["hist","Calidad","★"],["account","Cuenta","◉"]]}
+        navItems={(function(){
+    var isInternal = vendor.tipo==="interno";
+    var navItems = [["jobs","Mis trabajos","◫"],["new","Nuevo reporte","✎"]];
+    if(isInternal) navItems.push(["sched","Programa","📅"]);
+    if(isInternal) navItems.push(["hist","Calidad","★"]);
+    navItems.push(["account","Cuenta","◉"]);
+    return navItems;
+  })()}
         onLogout={onLogout}
         role={vendorDisplay(vendor)}
       />
@@ -3589,6 +3624,30 @@ function ExecSummary({rep, vendors}) {
         <Tile label="Total"   value={rep.total?"Q"+rep.total:"—"} accent={!!rep.total}/>
         <Tile label="Pago"    value={rep.paid?"✓ Pagado":"● Pendiente"}/>
       </div>
+      {/* Uniform photo check — only for cleanings */}
+      {isCl&&(
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {rep.fotoUniforme&&(rep.fotoUniforme.startsWith("http")||rep.fotoUniforme.startsWith("data:")) ? (
+            <div style={{display:"flex",gap:10,alignItems:"center",padding:"8px 12px",borderRadius:8,background:rep._gorraOk==="no"?"#FFF9E6":"#EDF5EF",border:"1px solid "+(rep._gorraOk==="no"?"#E6D88A":"#c8dfc8")}}>
+              <a href={rep.fotoUniforme} target="_blank" rel="noopener noreferrer">
+                <img src={rep.fotoUniforme} alt="uniforme" style={{width:44,height:44,objectFit:"cover",borderRadius:6,border:"1px solid "+C.line,flexShrink:0}}/>
+              </a>
+              <div>
+                <div style={{fontSize:12,fontWeight:700,color:rep._gorraOk==="no"?"#7a6000":C.green}}>
+                  {rep._gorraOk==="no"?"⚠ Sin gorra en foto":"✓ Foto de uniforme"}
+                </div>
+                <div style={{fontSize:10.5,color:C.earth,marginTop:2}}>
+                  {rep._gorraOk==="no"?"Proveedor reportó no llevar gorra":"Uniforme documentado"}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div style={{padding:"8px 12px",borderRadius:8,background:"#F5EDEC",border:"1px solid #DBC8C4",fontSize:12,fontWeight:700,color:C.red}}>
+              ⚠ Sin foto de uniforme — proveedor no subió evidencia
+            </div>
+          )}
+        </div>
+      )}
       {isCl&&inv.length>0&&(
         <div style={{display:"flex",gap:8}}>
           {[[okItems.length,"OK","#EDF5EF",C.green],[badItems.length,"Faltantes","#F5EDEC",C.red],[danios.length,"Daños","#F5EDEC",C.red]].map(function(it,i){
@@ -4411,18 +4470,25 @@ function FeedbackCfg({feedback, onSave}) {
   );
 }
 
-/* Vendor: Schedule for today + week — with Hospitable fallback */
+/* Vendor: Schedule for today + week — custom table first, Hospitable as fallback */
 function VendorSchedule({vendor, schedules, hospUrlDay, hospUrlWeek}) {
   const [view, setView] = useState("today");
   var today    = todayStr();
   var weekEnd  = (function(){var d=new Date();d.setDate(d.getDate()+7);return d.toISOString().split("T")[0];})();
-  /* Match by vendorId OR by fuzzy name/email/phone match on vendorRaw */
+  /* Match by vendorId, OR by fuzzy name/email/phone on vendorRaw */
   var myScheds = (schedules||[]).filter(function(s){
-    if(s.vendorId===vendor.id) return true;
-    if(s.vendorRaw) {
+    if(!s) return false;
+    /* Exact vendorId match */
+    if(s.vendorId&&s.vendorId===vendor.id) return true;
+    /* Fuzzy match on vendorRaw text (name from Hospitable) */
+    if(s.vendorRaw&&s.vendorRaw.trim()) {
       var m = fuzzyMatchVendor(s.vendorRaw, [vendor]);
-      return m.score > 0.5;
+      if(m.score > 0.4) return true;
     }
+    /* Also match if vendor email appears in vendorRaw */
+    var vEmail = (vendor.email||"").toLowerCase();
+    var raw = (s.vendorRaw||"").toLowerCase();
+    if(vEmail&&raw&&raw.includes(vEmail.split("@")[0])) return true;
     return false;
   }).sort(function(a,b){return a.fecha>b.fecha?1:a.fecha<b.fecha?-1:a.hora>b.hora?1:-1;});
   var todayList = myScheds.filter(function(s){return s.fecha===today;});
@@ -4471,12 +4537,21 @@ function VendorSchedule({vendor, schedules, hospUrlDay, hospUrlWeek}) {
       <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
         {shown.length===0&&(
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
-            <div style={{textAlign:"center",padding:"20px",color:C.taupe,fontSize:13}}>
-              Sin turnos asignados {view==="today"?"para hoy":"esta semana"} en el sistema.
+            <div style={{textAlign:"center",padding:"16px",color:C.taupe,fontSize:13}}>
+              {(schedules||[]).length===0
+                ? "Sin turnos cargados en el sistema aún."
+                : "Sin turnos asignados "+(view==="today"?"para hoy":"esta semana")+"."}
             </div>
             {(function(){
+              /* Show iframe only when the system has no schedules loaded yet */
+              var hasSystemScheds = (schedules||[]).length > 0;
               var url = view==="today" ? hospUrlDay : hospUrlWeek;
               var lbl = view==="today" ? "Programa de hoy (Hospitable)" : "Programa semanal (Hospitable)";
+              if (hasSystemScheds && shown.length===0) return (
+                <div style={{padding:"12px 14px",borderRadius:8,background:C.surfaceWarm,fontSize:12.5,color:C.taupe,textAlign:"center",border:"1px dashed "+C.gray}}>
+                  No tienes turnos asignados {view==="today"?"hoy":"esta semana"}. Si crees que es un error, contacta al administrador.
+                </div>
+              );
               if (!url) return (
                 <div style={{padding:"14px",borderRadius:8,background:C.surfaceWarm,fontSize:12,color:C.taupe,textAlign:"center",border:"1px dashed "+C.gray}}>
                   El administrador puede configurar los enlaces de Hospitable en Configuración → Programación
