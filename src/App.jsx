@@ -2464,11 +2464,12 @@ function CfgView({vendors,props,adminPin,company,extCats,schedules,hospUrlDay,ho
     <div style={{maxWidth:640,margin:"0 auto",padding:"28px 18px 60px",fontFamily:"Montserrat,sans-serif"}}>
       <div style={{marginBottom:20}}><div style={{fontSize:9.5,fontWeight:600,color:C.earth,letterSpacing:".28em",textTransform:"uppercase",marginBottom:8}}>Configuración</div><div style={{fontFamily:"'Cormorant Garamond',serif",fontSize:28,fontWeight:400,color:C.black}}>Ajustes del sistema</div></div>
       <div style={{display:"flex",background:"#fff",borderRadius:10,padding:4,gap:3,marginBottom:18,border:"1px solid "+C.gray,flexWrap:"wrap"}}>
-        {[["vendors","Proveedores"],["props","Propiedades"],["company","Empresa"],["security","Seguridad"]].map(function(it){ var k=it[0],l=it[1]; return <button key={k} onClick={function(){setTab(k);}} style={{flex:1,minWidth:90,padding:"9px 6px",borderRadius:8,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,fontSize:12,letterSpacing:".06em",transition:"all .2s"}}>{l}</button>; })}
+        {[["vendors","Proveedores"],["props","Propiedades"],["sched","Programación"],["feedback","Feedback"],["recovery","📷 Recuperar fotos"],["company","Empresa"],["security","Seguridad"]].map(function(it){ var k=it[0],l=it[1]; return <button key={k} onClick={function(){setTab(k);}} style={{flex:1,minWidth:90,padding:"9px 6px",borderRadius:8,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,fontSize:12,letterSpacing:".06em",transition:"all .2s"}}>{l}</button>; })}
       </div>
       <div style={{display:tab==="vendors"  ?"block":"none"}}><VendorsCfg  vendors={vendors} extCats={extCats||[]} onSave={onSvV} onSaveExtCats={onSvExtCats}/></div>
       <div style={{display:tab==="sched"   ?"block":"none"}}><ScheduleCfg schedules={schedules||[]} vendors={vendors||[]} props={props||[]} hospUrlDay={hospUrlDay||""} hospUrlWeek={hospUrlWeek||""} onSave={onSvSchedules} onSaveHospUrlDay={onSvHospUrlDay} onSaveHospUrlWeek={onSvHospUrlWeek}/></div>
       <div style={{display:tab==="feedback"?"block":"none"}}><FeedbackCfg feedback={feedback||[]} onSave={onSvFeedback}/></div>
+      <div style={{display:tab==="recovery"?"block":"none"}}><PhotoRecoveryTool/></div>
       <div style={{display:tab==="props"   ?"block":"none"}}><PropsCfg    props={props}     onSave={onSvP}/></div>
       <div style={{display:tab==="company" ?"block":"none"}}><CompanyCfg  company={company} onSave={onSvCo}/></div>
       <div style={{display:tab==="security"?"block":"none"}}><SecurityCfg adminPin={adminPin} onSave={onSvPin}/></div>
@@ -4799,6 +4800,106 @@ function AdminQAPanel({reps, vendors, onQA, onSelect}) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+
+
+/* ═══════════════════════════════════════════════════════
+   PHOTO RECOVERY TOOL
+   Scans Drive folder, matches photos to reports by ID
+   and updates Sheets with the missing URLs
+   ═══════════════════════════════════════════════════════ */
+function PhotoRecoveryTool() {
+  const [status,   setStatus]   = useState("idle"); /* idle|scanning|done|error */
+  const [log,      setLog]      = useState([]);
+  const [results,  setResults]  = useState(null);
+
+  function addLog(msg, type) {
+    setLog(function(p){ return [...p, {msg:msg, type:type||"info", ts:new Date().toLocaleTimeString("es-GT")}]; });
+  }
+
+  async function runRecovery() {
+    setStatus("scanning"); setLog([]); setResults(null);
+    addLog("Iniciando recuperación de fotos…");
+    try {
+      addLog("Llamando al servidor para escanear Google Drive…");
+      var r = await apiCall("recoverPhotos", {});
+      addLog("Escaneo completado.", "success");
+      addLog("Archivos encontrados en Drive: " + (r.filesFound||0));
+      addLog("Reportes procesados: " + (r.reportsProcessed||0));
+      addLog("Reportes actualizados con fotos recuperadas: " + (r.reportsUpdated||0));
+      if(r.details&&r.details.length) {
+        r.details.forEach(function(d){ addLog("↳ " + d, "detail"); });
+      }
+      if(r.errors&&r.errors.length) {
+        r.errors.forEach(function(e){ addLog("⚠ " + e, "error"); });
+      }
+      setResults(r);
+      setStatus("done");
+      addLog("✓ Recuperación finalizada.", "success");
+    } catch(e) {
+      addLog("Error: " + (e&&e.message?e.message:String(e)), "error");
+      setStatus("error");
+    }
+  }
+
+  var logColors = {info:C.earth, success:C.green, error:C.red, detail:C.taupe};
+
+  return (
+    <div style={{maxWidth:600,margin:"0 auto",padding:"20px 16px",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{background:C.surfaceWarm,borderRadius:10,padding:"16px",border:"1px solid "+C.line}}>
+        <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",marginBottom:8}}>Herramienta de recuperación de fotos</div>
+        <div style={{fontSize:13,color:C.earth,lineHeight:1.7,marginBottom:14}}>
+          Esta herramienta escanea tu carpeta de Google Drive, identifica las fotos ya subidas y las vincula a sus reportes correspondientes en Google Sheets.
+          <br/><span style={{fontSize:11.5,color:C.taupe}}>Útil para reportes que muestran 0% de fotos aunque las fotos sí llegaron a Drive.</span>
+        </div>
+        <button
+          onClick={runRecovery}
+          disabled={status==="scanning"}
+          style={{width:"100%",padding:"13px",borderRadius:8,border:"none",background:status==="scanning"?C.gray:C.black,color:"#fff",fontSize:13,fontWeight:700,cursor:status==="scanning"?"default":"pointer",letterSpacing:".04em"}}
+        >
+          {status==="scanning"?"⏳ Escaneando Drive… (puede tardar 30-60 seg)":"🔍 Iniciar recuperación de fotos"}
+        </button>
+      </div>
+
+      {/* Log output */}
+      {log.length>0&&(
+        <div style={{background:"#1E1E1E",borderRadius:10,padding:"14px 16px",fontFamily:"monospace",fontSize:11.5,lineHeight:1.9,maxHeight:340,overflow:"auto",display:"flex",flexDirection:"column",gap:2}}>
+          {log.map(function(l,i){
+            return <div key={i} style={{color:l.type==="success"?"#7fba7f":l.type==="error"?"#e08080":l.type==="detail"?"#aaa":"#e0d8c8"}}>
+              <span style={{color:"#666",marginRight:8}}>[{l.ts}]</span>{l.msg}
+            </div>;
+          })}
+        </div>
+      )}
+
+      {/* Results summary */}
+      {results&&(
+        <div style={{background:"#EDF5EF",borderRadius:10,padding:"14px 16px",border:"1px solid #c8dfc8"}}>
+          <div style={{fontSize:13,fontWeight:700,color:C.green,marginBottom:8}}>Resultado de la recuperación</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+            <div style={{textAlign:"center",padding:"10px",background:"#fff",borderRadius:8}}>
+              <div style={{fontSize:22,fontWeight:700,color:C.black}}>{results.filesFound||0}</div>
+              <div style={{fontSize:10,color:C.taupe,textTransform:"uppercase",letterSpacing:".1em"}}>Fotos en Drive</div>
+            </div>
+            <div style={{textAlign:"center",padding:"10px",background:"#fff",borderRadius:8}}>
+              <div style={{fontSize:22,fontWeight:700,color:C.earth}}>{results.reportsProcessed||0}</div>
+              <div style={{fontSize:10,color:C.taupe,textTransform:"uppercase",letterSpacing:".1em"}}>Reportes revisados</div>
+            </div>
+            <div style={{textAlign:"center",padding:"10px",background:"#fff",borderRadius:8}}>
+              <div style={{fontSize:22,fontWeight:700,color:C.green}}>{results.reportsUpdated||0}</div>
+              <div style={{fontSize:10,color:C.taupe,textTransform:"uppercase",letterSpacing:".1em"}}>Reportes recuperados</div>
+            </div>
+          </div>
+          {results.reportsUpdated>0&&(
+            <div style={{marginTop:12,fontSize:12,color:C.earth,fontWeight:600}}>
+              ✓ Recarga el dashboard para ver las fotos recuperadas (botón ↻).
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
