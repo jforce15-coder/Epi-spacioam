@@ -692,7 +692,7 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
   }
 
   return (
-    <div style={{minHeight:"100vh",background:"#F7F7F7",display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"Montserrat,sans-serif",}}>
+    <div style={{minHeight:"100vh",background:C.alabaster,display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"Montserrat,sans-serif",}}>
       <GS/>
       {/* Sheets badge + hidden admin gear — top right, fixed */}
       <div style={{position:"fixed",top:14,right:14,display:"flex",alignItems:"center",gap:8,zIndex:200}}>
@@ -786,6 +786,29 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrl
       <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
       <div style={{display:tab==="sched"?"block":"none"}}>
         <ScheduleCfg schedules={schedules||[]} vendors={vendors||[]} props={props||[]} hospUrlDay={hospUrlDay||""} hospUrlWeek={hospUrlWeek||""} onSave={onSvSchedules} onSaveHospUrlDay={onSvHospUrlDay} onSaveHospUrlWeek={onSvHospUrlWeek}/>
+        {/* Hospitable iframes — reference view for admin */}
+        {(hospUrlDay||hospUrlWeek)&&(
+          <div style={{padding:"0 16px 60px",fontFamily:"Montserrat,sans-serif",maxWidth:700,margin:"0 auto"}}>
+            {hospUrlDay&&(
+              <div style={{marginBottom:20}}>
+                <div style={{fontSize:9.5,fontWeight:700,color:"#8C8C8A",letterSpacing:".18em",textTransform:"uppercase",marginBottom:8}}>Programa de hoy (Hospitable)</div>
+                <div style={{borderRadius:10,overflow:"hidden",border:"1px solid #E2E2E0"}}>
+                  <iframe src={hospUrlDay} title="Hoy" style={{width:"100%",height:420,border:"none",display:"block"}} sandbox="allow-scripts allow-same-origin allow-popups allow-forms"/>
+                </div>
+                <a href={hospUrlDay} target="_blank" rel="noopener noreferrer" style={{display:"block",textAlign:"center",marginTop:8,fontSize:11.5,color:"#8C8C8A",textDecoration:"none"}}>↗ Abrir en pantalla completa</a>
+              </div>
+            )}
+            {hospUrlWeek&&(
+              <div>
+                <div style={{fontSize:9.5,fontWeight:700,color:"#8C8C8A",letterSpacing:".18em",textTransform:"uppercase",marginBottom:8}}>Programa semanal (Hospitable)</div>
+                <div style={{borderRadius:10,overflow:"hidden",border:"1px solid #E2E2E0"}}>
+                  <iframe src={hospUrlWeek} title="Semana" style={{width:"100%",height:460,border:"none",display:"block"}} sandbox="allow-scripts allow-same-origin allow-popups allow-forms"/>
+                </div>
+                <a href={hospUrlWeek} target="_blank" rel="noopener noreferrer" style={{display:"block",textAlign:"center",marginTop:8,fontSize:11.5,color:"#8C8C8A",textDecoration:"none"}}>↗ Abrir en pantalla completa</a>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       <div style={{display:tab==="qa"?"block":"none"}}>
         <AdminQAPanel reps={reps} vendors={vendors} onQA={qaUpdate} onSelect={setDetail}/>
@@ -856,9 +879,16 @@ function OpsDash({reps,vendors,onSelect,onMarkPaid,onRefresh}) {
     return true;
   });
   var shown  = showAll ? fReps : fReps.slice(0,10);
-  var tot    = fReps.reduce(function(s,r){return s+parseFloat(r.total||0);},0);
-  var cob    = fReps.filter(function(r){return r.paid;}).reduce(function(s,r){return s+parseFloat(r.total||0);},0);
-  var unp    = fReps.filter(function(r){return r.total&&!r.paid;}).length;
+  /* Use auto-tariff as fallback when r.total is not yet saved */
+  function effT(r){
+    var t=parseFloat(r.total||0);
+    if(t>0) return t;
+    var at=autoTarifa(r.reportadoPor||"",vendors||[]);
+    return at.tarifa?parseFloat(at.tarifa)||0:0;
+  }
+  var tot    = fReps.reduce(function(s,r){return s+effT(r);},0);
+  var cob    = fReps.filter(function(r){return r.paid;}).reduce(function(s,r){return s+effT(r);},0);
+  var unp    = fReps.filter(function(r){return (r.total||autoTarifa(r.reportadoPor||"",vendors||[]).tarifa)&&!r.paid;}).length;
   /* Build vendor map: email → display name */
   var vMap = {};
   (vendors||[]).forEach(function(v){if(v.email)vMap[v.email]=vendorDisplay(v);});
@@ -3398,16 +3428,7 @@ function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogou
         <div style={{display:"flex",alignItems:"center",gap:isMobile?8:12}}>
           <img src={LOGO_MONOGRAM} alt="S" style={{width:isMobile?32:38,height:isMobile?32:38,objectFit:"contain",display:"block",borderRadius:4}}/>
           {IS_CLAUDE_SANDBOX&&<span style={{fontSize:9,fontWeight:700,background:"#F0EDE8",color:"#8C8C8A",padding:"2px 6px",borderRadius:4,letterSpacing:".08em",display:isMobile?"none":"block"}}>LOCAL</span>}
-          {!isMobile&&(
-            <div style={{display:"flex",flexDirection:"column",lineHeight:1.15}}>
-              <span style={{fontFamily:"'Cormorant Garamond',serif",fontSize:15,fontWeight:400,letterSpacing:".14em",color:C.black}}>SPACIO</span>
-              <div style={{display:"flex",alignItems:"center",gap:3}}>
-                <span style={{fontFamily:"'Cormorant Garamond',serif",fontSize:8.5,color:C.earth,letterSpacing:".1em"}}>A</span>
-                <div style={{width:22,height:.5,background:C.earth,opacity:.5}}/>
-                <span style={{fontFamily:"'Cormorant Garamond',serif",fontSize:8.5,color:C.earth,letterSpacing:".1em"}}>M</span>
-              </div>
-            </div>
-          )}
+          
           {!isMobile&&<div style={{width:1,height:20,background:C.line,margin:"0 6px"}}/>}
           {!isMobile&&<span style={{fontSize:11,color:C.taupe,letterSpacing:".06em"}}>{adminLabel||role}</span>}
           {sheetsOk===false&&!isMobile&&<span style={{fontSize:9,fontWeight:700,background:"#F5EDEC",color:C.red,padding:"2px 6px",borderRadius:4,letterSpacing:".06em"}}>SIN SHEETS</span>}
