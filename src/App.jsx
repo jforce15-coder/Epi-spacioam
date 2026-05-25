@@ -703,10 +703,12 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
 
       <div style={{width:"100%",maxWidth:400,padding:"0 4px"}}>
         {/* Logo — same as before */}
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:36,gap:10}}>
-          <LogoWordmark width={180}/>
-          <div style={{fontSize:9.5,color:C.earth,fontWeight:600,letterSpacing:".24em",textTransform:"uppercase",marginTop:4,textAlign:"center"}}>
-            App operativa para el Equipo de primera impresión (EPI)
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:36,gap:12}}>
+          <div style={{width:72,height:72,borderRadius:20,background:"#fff",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 12px rgba(0,0,0,.09)",border:"1px solid "+C.line}}>
+            <LogoMark size={44}/>
+          </div>
+          <div style={{fontSize:9.5,color:C.earth,fontWeight:600,letterSpacing:".22em",textTransform:"uppercase",marginTop:2,textAlign:"center",lineHeight:1.9}}>
+            App operativa para el<br/>Equipo de primera impresión (EPI)
           </div>
         </div>
 
@@ -784,6 +786,12 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrl
 
       <div style={{display:tab==="dash"?"block":"none"}}><DashView reps={reps} vendors={vendors} alerts={alerts} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh}/></div>
       <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
+      <div style={{display:tab==="sched"?"block":"none"}}>
+        <ScheduleCfg schedules={schedules||[]} vendors={vendors||[]} props={props||[]} hospUrlDay={hospUrlDay||""} hospUrlWeek={hospUrlWeek||""} onSave={onSvSchedules} onSaveHospUrlDay={onSvHospUrlDay} onSaveHospUrlWeek={onSvHospUrlWeek}/>
+      </div>
+      <div style={{display:tab==="qa"?"block":"none"}}>
+        <AdminQAPanel reps={reps} vendors={vendors} onQA={qaUpdate} onSelect={setDetail}/>
+      </div>
       <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  vendors={vendors} props={props} adminPin={adminPin} company={company} extCats={extCats||[]} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
 
       {detail&&<DetailModal rep={detail} vendors={vendors} props={props} onClose={function(){setDetail(null);}} onMarkPaid={function(p){markPaid(detail.id,p);setDetail(function(x){return Object.assign({},x,{paid:p});});}} onSave={function(r){onUpsert(r);setDetail(r);}} onQA={qaUpdate} onDelete={function(){setCDel(detail.id);}}/>}
@@ -888,7 +896,16 @@ function OpsDash({reps,vendors,onSelect,onMarkPaid,onRefresh}) {
           <div>
             <span style={LBL}>Categoría</span>
             <select value={fCat} onChange={function(e){setFCat(e.target.value);setShowAll(false);}} style={fCat!=="Todos"?IS_A:IS}>
-              {["Todos"].concat(CATS).map(function(c){return <option key={c}>{c}</option>;})}
+              {(function(){
+                var isEPIL = vendor&&vendor.tipo==="interno"&&vendor.categoria==="EPI Limpieza";
+                var isEPIM = vendor&&vendor.tipo==="interno"&&vendor.categoria==="EPI Mantenimiento";
+                var cats = isEPIL
+                  ? ["Todos","Limpieza tradicional","Limpieza profunda","Reporte de Daños"]
+                  : isEPIM
+                  ? ["Todos","Mantenimiento","Ajuste","Nuevo Producto","Reporte de Daños"]
+                  : ["Todos"].concat(CATS);
+                return cats.map(function(c){return <option key={c}>{c}</option>;});
+              })()}
             </select>
           </div>
           <div>
@@ -1374,9 +1391,9 @@ function RepForm({vendors,props,company,onSubmit,defaultVendor,onSaveFeedback}) 
     : isEPIMant
     ? ["Mantenimiento","Ajuste","Nuevo Producto","Reporte de Daños"]
     : CATS;
-  var defCat = allowedCats[0]||"Mantenimiento";
-  const [cat,setCat] = useState(defCat);
-  function goBack(){setCat(defCat);}
+  /* Start with null (selector screen) so user always picks category first */
+  const [cat,setCat] = useState(null);
+  function goBack(){setCat(null);}
   var shared = {vendors:vendors,props:props,company:company,onSubmit:onSubmit,defaultVendor:defaultVendor,onBack:goBack,onSaveFeedback:onSaveFeedback};
   if (cat==="Limpieza tradicional") return <LimpiezaTradForm {...shared}/>;
   if (cat==="Limpieza profunda")    return <LimpiezaProfForm  {...shared}/>;
@@ -3029,7 +3046,7 @@ function VendorApp({vendor,allVendors,reps,props,company,schedules,hospUrlDay,ho
         onLogout={onLogout}
         role={vendorDisplay(vendor)}
       />
-      <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}}/></div>
+      <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}} vendor={vendor} allVendors={allVendors}/></div>
       <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={allVendors||[]} props={props} company={company} defaultVendor={vendor.email} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
       <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek}/></div>
       <div style={{display:view==="hist"   ?"block":"none"}}><VendorHistory reps={cleaningReps} onRespond={vendorRespond}/></div>
@@ -3041,7 +3058,7 @@ function VendorApp({vendor,allVendors,reps,props,company,schedules,hospUrlDay,ho
 
 
 /* ─── Vendor Jobs View — with filters */
-function VendorJobsView({reps, tot, cob, pnd, pendingCorrections, onNew}) {
+function VendorJobsView({reps, tot, cob, pnd, pendingCorrections, onNew, vendor, allVendors}) {
   const [fCat,    setFCat]    = useState("Todos");
   const [fStatus, setFStatus] = useState("Todos");
   const [fDesde,  setFDesde]  = useState("");
@@ -3100,7 +3117,16 @@ function VendorJobsView({reps, tot, cob, pnd, pendingCorrections, onNew}) {
           <div>
             <span style={LBL}>Categoría</span>
             <select value={fCat} onChange={function(e){setFCat(e.target.value);setShowAll(false);}} style={fCat!=="Todos"?ISA:IS}>
-              {["Todos"].concat(CATS).map(function(c){return <option key={c}>{c}</option>;})}
+              {(function(){
+                var isEPIL = vendor&&vendor.tipo==="interno"&&vendor.categoria==="EPI Limpieza";
+                var isEPIM = vendor&&vendor.tipo==="interno"&&vendor.categoria==="EPI Mantenimiento";
+                var cats = isEPIL
+                  ? ["Todos","Limpieza tradicional","Limpieza profunda","Reporte de Daños"]
+                  : isEPIM
+                  ? ["Todos","Mantenimiento","Ajuste","Nuevo Producto","Reporte de Daños"]
+                  : ["Todos"].concat(CATS);
+                return cats.map(function(c){return <option key={c}>{c}</option>;});
+              })()}
             </select>
           </div>
           <div>
@@ -4664,6 +4690,94 @@ function QuickEditTotal({rep, vendors, onSave}) {
         {rep.total?"Q"+rep.total:at.tarifa?"Q"+at.tarifa:"—"}
       </span>
       <span style={{fontSize:9,color:C.gray}}>✏</span>
+    </div>
+  );
+}
+
+
+
+/* ─── Admin QA Panel — full quality review across all cleanings */
+function AdminQAPanel({reps, vendors, onQA, onSelect}) {
+  const [filter,   setFilter]   = useState("all"); /* all | pendiente | aprobada | correccion */
+  const [selVend,  setSelVend]  = useState("Todos");
+
+  var cleanReps = (reps||[]).filter(function(r){return isCleaning(r.categoria);});
+  var vMap = {};
+  (vendors||[]).forEach(function(v){if(v.email)vMap[v.email]=vendorDisplay(v);});
+  var vEmails = ["Todos"].concat(uniq(cleanReps.map(function(r){return r.reportadoPor;}).filter(Boolean)));
+
+  var filtered = cleanReps.filter(function(r){
+    if(filter!=="all"&&(r.qaStatus||"pendiente")!==filter) return false;
+    if(selVend!=="Todos"&&r.reportadoPor!==selVend) return false;
+    return true;
+  }).sort(function(a,b){return (b.createdAt||b.id)-(a.createdAt||a.id);});
+
+  var counts = {
+    pendiente:  cleanReps.filter(function(r){return !r.qaStatus||r.qaStatus==="pendiente";}).length,
+    aprobada:   cleanReps.filter(function(r){return r.qaStatus==="aprobada";}).length,
+    correccion: cleanReps.filter(function(r){return r.qaStatus==="correccion"||r.qaStatus==="corregido";}).length,
+  };
+
+  var IS = {border:"1px solid "+C.gray,borderRadius:6,padding:"7px 10px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",width:"100%"};
+
+  return (
+    <div style={{maxWidth:700,margin:"0 auto",padding:"16px 16px 100px",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:14}}>
+      {/* Summary stats */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        {[["all","Todas","#fff",C.black,cleanReps.length],["pendiente","En revisión",C.surfaceWarm,C.earth,counts.pendiente],["aprobada","Aprobadas","#EDF5EF",C.green,counts.aprobada],["correccion","Correcciones","#F5EDEC",C.red,counts.correccion]].map(function(it){
+          var k=it[0],l=it[1],bg=it[2],cl=it[3],n=it[4];
+          return (
+            <button key={k} onClick={function(){setFilter(k);}} style={{flex:1,minWidth:80,padding:"10px 8px",borderRadius:8,border:"1.5px solid "+(filter===k?cl:C.line),background:filter===k?bg:"#fff",cursor:"pointer",textAlign:"center"}}>
+              <div style={{fontSize:18,fontWeight:700,color:filter===k?cl:C.earth}}>{n}</div>
+              <div style={{fontSize:9.5,color:filter===k?cl:C.taupe,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase"}}>{l}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Vendor filter */}
+      <select value={selVend} onChange={function(e){setSelVend(e.target.value);}} style={IS}>
+        {vEmails.map(function(e){return <option key={e} value={e}>{e==="Todos"?"Todos los técnicos":(vMap[e]||e)}</option>;})}
+      </select>
+
+      {/* List */}
+      {filtered.length===0&&<div style={{textAlign:"center",padding:"32px",color:C.taupe,fontSize:13}}>Sin limpiezas en esta categoría.</div>}
+      {filtered.map(function(r,i){
+        var vn  = vMap[r.reportadoPor]||r.reportadoPor||"—";
+        var qs  = r.qaStatus||"pendiente";
+        var qcl = {pendiente:C.earth, aprobada:C.green, correccion:C.red, corregido:C.green, futuro:C.earth}[qs]||C.earth;
+        var qlbl= {pendiente:"En revisión",aprobada:"✓ Aprobada",correccion:"⚠ Corrección",corregido:"✓ Corregida",futuro:"→ Tomado en cuenta"}[qs]||qs;
+        return (
+          <div key={r.id} style={{background:"#fff",borderRadius:10,padding:"14px 16px",border:"1.5px solid "+(qs==="pendiente"?C.line:qs==="aprobada"?"#c8dfc8":"#DBC8C4"),display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:8}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:14,fontWeight:600,color:C.black}}>{r.propiedad}</div>
+                <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{vn} · {fmtDate(r.fecha)} · {r.categoria}</div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
+                <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:100,background:qs==="aprobada"?"#EDF5EF":qs==="correccion"?"#F5EDEC":C.surfaceWarm,color:qcl}}>{qlbl}</span>
+                <button onClick={function(){onSelect&&onSelect(r);}} style={{fontSize:11,padding:"4px 10px",borderRadius:5,border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",fontWeight:600}}>Ver detalle →</button>
+              </div>
+            </div>
+            {/* QA action buttons */}
+            {(qs==="pendiente"||qs==="corregido")&&(
+              <div style={{display:"flex",gap:8,marginTop:4}}>
+                <button onClick={function(){onQA&&onQA(r.id,"aprobada","");}} style={{flex:1,padding:"9px",borderRadius:7,border:"none",background:"#3d6b52",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>✓ Aprobar</button>
+                <button onClick={function(){var c=prompt("Comentario para el técnico:");if(c!==null)onQA&&onQA(r.id,"correccion",c);}} style={{flex:1,padding:"9px",borderRadius:7,border:"none",background:"#8a3030",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>⚠ Corrección</button>
+              </div>
+            )}
+            {qs==="aprobada"&&(
+              <div style={{fontSize:11.5,color:C.green,fontWeight:600}}>✓ Limpieza aprobada {r.qaFecha?("el "+fmtDate(r.qaFecha)):""}</div>
+            )}
+            {qs==="correccion"&&r.qaComentario&&(
+              <div style={{fontSize:11.5,color:C.red,background:"#F5EDEC",padding:"8px 12px",borderRadius:6}}>Corrección: {r.qaComentario}</div>
+            )}
+            {r.qaRespuesta&&(
+              <div style={{fontSize:11.5,color:C.earth,background:C.surfaceWarm,padding:"8px 12px",borderRadius:6}}>Respuesta: {r.qaRespuesta}</div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
