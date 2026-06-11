@@ -1,42 +1,35 @@
-# EPI-reportes
+# Spacio AM — EPI App
 
-A repository for EPI (Personal Protective Equipment) reports.
+App operativa del Equipo de Primera Impresión (EPI) de Spacio AM.
+Frontend en React + Vite. Los datos viven en Google Sheets vía Apps Script (URL configurada en `src/App.jsx` → `SCRIPT_URL`).
 
-## Description
+## Desarrollo local
 
-This project contains tools and resources for managing and generating EPI reports.
-
-## Getting Started
-
-### Prerequisites
-
-- Git
-- [Add any other prerequisites your project needs]
-
-### Installation
-
-1. Clone the repository:
 ```bash
-git clone https://github.com/spacioam/EPI-reportes.git
+npm install
+npm run dev
 ```
 
-2. Navigate to the project directory:
+## Build de producción
+
 ```bash
-cd EPI-reportes
+npm run build   # genera dist/
 ```
 
-## Usage
+## Deploy en Vercel
 
-[Add instructions on how to use this project]
+1. Sube este repositorio a GitHub.
+2. En Vercel: **New Project → Import** el repo.
+3. Framework preset: **Vite** (detectado automáticamente). Build: `npm run build`, Output: `dist`.
 
-## Contributing
+## Últimos cambios (jun 2026)
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-[Specify your license here, e.g., MIT, Apache 2.0, etc.]
-
-## Contact
-
-For questions or suggestions, please contact the repository maintainers.
+- Logo de login con fondo transparente.
+- Subida de fotos resiliente: nunca se pierden URLs ya subidas; reintentos automáticos.
+- "Reporte de Daños" ya no genera pago (solo seguimiento) y se crea siempre junto al reporte de limpieza.
+- Botón para extraer daños embebidos como reporte independiente.
+- Filtro "Semanas anteriores" en Período rápido.
+- Adelantos: editar cuota semanal y revertir cobros (total o parcial).
+- Inventario: conteo obligatorio de toallas/sábanas + foto si hay piezas en mal estado.
+- Fotos obligatorias: 1 por espacio en reportes de limpieza, con alerta y bloqueo de envío.
+- Dashboard: nombre del técnico en lugar del correo.
