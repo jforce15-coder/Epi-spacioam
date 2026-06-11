@@ -1,13 +1,31 @@
 <!DOCTYPE html>
 <html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#FAFAFA" />
-    <title>Spacio AM</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Spacio AM — EPI App</title>
+<style>
+  #__splash{position:fixed;inset:0;background:#FAFAFA;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;font-family:Montserrat,system-ui,sans-serif;z-index:9999;transition:opacity .4s}
+  #__splash .dot{width:34px;height:34px;border-radius:50%;border:2.5px solid #D8D4CE;border-top-color:#3E3F3F;animation:__sp 1s linear infinite}
+  #__splash .t{font-size:10.5px;letter-spacing:.3em;text-transform:uppercase;color:#938B8A}
+  @keyframes __sp{to{transform:rotate(360deg)}}
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.min.js"></script>
+<script>
+  if (typeof window.Recharts === "undefined") { var __noop=function(){return null;}; window.Recharts=new Proxy({},{get:function(){return __noop;}}); }
+</script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="__splash"><div class="dot"></div><div class="t">Spacio AM</div></div>
+<div id="root"></div>
+<script>
+  /* Quitar el splash cuando React monte */
+  (function(){var iv=setInterval(function(){var r=document.getElementById("root");if(r&&r.childNodes.length){var s=document.getElementById("__splash");if(s){s.style.opacity=0;setTimeout(function(){s.remove();},450);}clearInterval(iv);}},200);})();
+</script>
+<script type="text/babel" src="app.jsx"></script>
+</body>
 </html>
