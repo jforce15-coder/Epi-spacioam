@@ -18,7 +18,6 @@
 <script>
   if (typeof window.Recharts === "undefined") { var __noop=function(){return null;}; window.Recharts=new Proxy({},{get:function(){return __noop;}}); }
 </script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
 <div id="__splash">
@@ -28,19 +27,15 @@
 </div>
 <div id="root"></div>
 <script>
-  /* Mostrar errores de arranque en pantalla (en vez de quedarse cargando para siempre) */
   function __showErr(msg){
     var e=document.getElementById("__err");
     if(e){e.style.display="block";e.innerHTML="<b>No se pudo iniciar el app.</b><br>"+String(msg).slice(0,300)+"<br><br>Revisa tu conexi\u00f3n e intenta recargar la p\u00e1gina.";}
   }
   window.addEventListener("error",function(ev){ if(!document.getElementById("root").childNodes.length) __showErr(ev.message||"Error de carga"); });
   window.addEventListener("unhandledrejection",function(ev){ if(!document.getElementById("root").childNodes.length) __showErr((ev.reason&&ev.reason.message)||"Error de red"); });
-  /* Verificar que las librerías del CDN cargaron */
   window.addEventListener("DOMContentLoaded",function(){
     if(!window.React||!window.ReactDOM) __showErr("No cargaron las librer\u00edas (CDN bloqueado o sin internet).");
-    else if(!window.Babel) __showErr("No carg\u00f3 el compilador (CDN bloqueado).");
   });
-  /* Quitar el splash cuando React monte; aviso si tarda demasiado */
   (function(){
     var t0=Date.now();
     var iv=setInterval(function(){
@@ -56,6 +51,6 @@
     },200);
   })();
 </script>
-<script type="text/babel" data-presets="react" src="app.jsx"></script>
+<script src="app.js"></script>
 </body>
 </html>
