@@ -193,6 +193,7 @@ function scrapePortfolio_(url) {
   while ((m = re.exec(html)) !== null) {
     if (!seen[m[0]]) { seen[m[0]] = 1; fotos.push(m[0]); }
   }
+  fotos = fotos.slice(0, 6); /* máx 6 fotos por propiedad — evita pasar el límite de 50000 caracteres por celda del Sheet */
   return { cuartos: cuartos, banos: banos, fotos: fotos };
 }
 
