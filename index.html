@@ -17,6 +17,7 @@
 <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
 <script>
   if (typeof window.Recharts === "undefined") { var __noop=function(){return null;}; window.Recharts=new Proxy({},{get:function(){return __noop;}}); }
 </script>
@@ -53,6 +54,6 @@
     },200);
   })();
 </script>
-<script src="app.js?v=20260702d"></script>
+<script type="text/babel" data-presets="react" src="app.jsx?v=20260708a"></script>
 </body>
 </html>
