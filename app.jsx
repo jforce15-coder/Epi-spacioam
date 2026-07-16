@@ -591,7 +591,7 @@ async function loadAllData() {
     company: cfg.company || {name:"Spacio AM S.A.",nit:"118287796"},
     extcats: cfg.extcats || [],
     adelantos: Array.isArray(cfg.adelantos) ? cfg.adelantos : null,
-    pagos: Array.isArray(cfg.pagos) ? cfg.pagos : null,
+    pagos: pg_merge(cfg),
   };
 }
 
@@ -926,7 +926,23 @@ function App() {
       var mig=adv_migrate(advRaw, d.vendors||DEF_V);
       setAdelantos(mig.list);
       if(mig.changed || !(d.adelantos && d.adelantos.length)) { try{ adv_persist(mig.list); }catch(_){} }
-      setPagos((d.pagos && d.pagos.length) ? d.pagos : []);
+      /* Historial de pagos: combina lo del Sheet con cualquier comprobante local que aún no
+         se haya persistido (p.ej. pagos recién generados que no cupieron en la celda antigua).
+         Los que falten en el Sheet se re-guardan (ya con el formato repartido) para no perderlos. */
+      var pgSheet=(d.pagos && d.pagos.length) ? d.pagos : [];
+      var pgFinal=pgSheet;
+      if(!IS_CLAUDE_SANDBOX){
+        try{
+          var pgLocal=pg_load()||[];
+          var seen={}; pgSheet.forEach(function(p){ if(p&&(p.folio||p.id)!=null) seen[String(p.folio||p.id)]=true; });
+          var missing=pgLocal.filter(function(p){ return p&&(p.folio||p.id)!=null && !seen[String(p.folio||p.id)]; });
+          if(missing.length){
+            pgFinal=pgSheet.concat(missing).sort(function(a,b){return (b.createdAt||0)-(a.createdAt||0);});
+            try{ pg_persist(pgFinal); }catch(_){}
+          }
+        }catch(_){}
+      }
+      setPagos(pgFinal);
       setSheetsOk(!IS_CLAUDE_SANDBOX);
       setReady(true); setSyncing(false);
     }).catch(function(e){
@@ -7188,20 +7204,53 @@ function printContract(adv){
    subido por el administrador después del pago).
    ═════════════════════════════════════════════════════════════════ */
 function pg_load(){ try{var v=localStorage.getItem("sam_pagos");return v?JSON.parse(v):null;}catch(e){return null;} }
+/* El historial de pagos se guarda como JSON en la config del Sheet. Una sola celda de Google
+   Sheets tope ~50,000 caracteres; con el historial creciendo, un solo campo "pagos" se llena
+   y los pagos nuevos dejaban de guardarse en silencio (se veían en el dispositivo que los creó
+   pero no en los demás). Ahora el historial se reparte en varios campos ("pagos", "pagos_2", …)
+   con un contador "pagos_n", y al cargar se vuelven a unir. */
+var PG_SHARD_MAX=40000;
+function pg_lean(list){
+  return (list||[]).map(function(p){
+    if(p&&p.soporte&&p.soporte.data&&String(p.soporte.data).indexOf("data:")===0){
+      var s={name:p.soporte.name,type:p.soporte.type}; if(p.soporte.url)s.url=p.soporte.url;
+      return Object.assign({},p,{soporte:s});
+    }
+    return p;
+  });
+}
+function pg_shard(list){
+  var shards=[],cur=[];
+  (list||[]).forEach(function(p){
+    cur.push(p);
+    if(JSON.stringify(cur).length>PG_SHARD_MAX && cur.length>1){ cur.pop(); shards.push(cur); cur=[p]; }
+  });
+  if(cur.length||!shards.length) shards.push(cur);
+  return shards;
+}
+/* Une los pagos repartidos en varios campos de la config. Compatible con datos viejos
+   que solo tienen el campo "pagos". */
+function pg_merge(cfg){
+  if(!cfg) return null;
+  var base=Array.isArray(cfg.pagos)?cfg.pagos:null;
+  var n=parseInt(cfg.pagos_n,10);
+  if(!n||n<=1) return base;
+  var merged=Array.isArray(cfg.pagos)?cfg.pagos.slice():[];
+  for(var i=1;i<n;i++){ var arr=cfg["pagos_"+(i+1)]; if(Array.isArray(arr)) merged=merged.concat(arr); }
+  return merged.length?merged:base;
+}
 function pg_persist(list){
   try{ localStorage.setItem("sam_pagos", JSON.stringify(list)); }catch(e){}
   if(!IS_CLAUDE_SANDBOX){
     try{
       /* Nunca mandamos el base64 del soporte a la config (desborda la celda del Sheet).
          En la nube el soporte vive en Drive como URL; local guarda el base64 completo. */
-      var lean=(list||[]).map(function(p){
-        if(p&&p.soporte&&p.soporte.data&&String(p.soporte.data).indexOf("data:")===0){
-          var s={name:p.soporte.name,type:p.soporte.type}; if(p.soporte.url)s.url=p.soporte.url;
-          return Object.assign({},p,{soporte:s});
-        }
-        return p;
-      });
-      apiCall("saveConfig",{key:"pagos",value:lean});
+      var lean=pg_lean(list);
+      var shards=pg_shard(lean);
+      shards.forEach(function(sh,i){ apiCall("saveConfig",{key:i===0?"pagos":"pagos_"+(i+1),value:sh}); });
+      /* Vacía campos sobrantes por si el historial se acortó, y guarda el contador. */
+      for(var k=shards.length;k<shards.length+4;k++){ apiCall("saveConfig",{key:"pagos_"+(k+1),value:[]}); }
+      apiCall("saveConfig",{key:"pagos_n",value:shards.length});
     }catch(e){}
   }
 }
@@ -7532,6 +7581,8 @@ function PagoComprobanteModal({pago, company, isAdmin, focusEmail, onClose, onSv
   const supRef=useRef(null);
   const [upBusy,setUpBusy]=useState(false);
   const [shareBusy,setShareBusy]=useState("");
+  const [soporte,setSoporte]=useState(pago.soporte||null);
+  const [okMsg,setOkMsg]=useState(false);
   var techs=(pago.tecnicos||[]).filter(function(t){return !focusEmail || t.vendorEmail===focusEmail;});
   var gBruto=techs.reduce(function(s,t){return s+t.subtotal;},0);
   var gDesc =techs.reduce(function(s,t){return s+t.adelanto;},0);
@@ -7540,6 +7591,8 @@ function PagoComprobanteModal({pago, company, isAdmin, focusEmail, onClose, onSv
   var rango=(pago.rangoDesde||pago.rangoHasta)?(fmtDate(pago.rangoDesde)+(pago.rangoHasta&&pago.rangoHasta!==pago.rangoDesde?" — "+fmtDate(pago.rangoHasta):"")):"—";
 
   function saveSoporte(sop){
+    setSoporte(sop);
+    setOkMsg(!!sop);
     var next=(pagos||[]).map(function(p){return p.id===pago.id?Object.assign({},p,{soporte:sop}):p;});
     if(onSvPagos) onSvPagos(next);
   }
@@ -7622,11 +7675,12 @@ function PagoComprobanteModal({pago, company, isAdmin, focusEmail, onClose, onSv
           {/* support attachment */}
           <div style={{marginTop:20,borderTop:"1px solid "+C.gray,paddingTop:16}}>
             <div style={{fontSize:8.5,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",color:C.earth,marginBottom:10}}>Comprobante de transferencia</div>
-            {pago.soporte?(
+            {soporte?(
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                {(pago.soporte.type||"").indexOf("image/")===0
-                  ? <img src={pago.soporte.url?driveThumb(pago.soporte.url,1200):pago.soporte.data} alt="soporte" style={{maxWidth:"100%",borderRadius:10,border:"1px solid "+C.gray}}/>
-                  : <a href={pago.soporte.url||pago.soporte.data} target="_blank" rel="noopener" download={pago.soporte.url?undefined:pago.soporte.name} style={{display:"flex",alignItems:"center",gap:10,background:C.surfaceWarm,border:"1px solid "+C.gray,borderRadius:8,padding:"12px 14px",fontSize:13,color:C.black,textDecoration:"none",fontWeight:600}}><span style={{fontSize:18}}>📄</span>{pago.soporte.name||"Documento adjunto"}<span style={{marginLeft:"auto",fontSize:11,color:C.earth}}>{pago.soporte.url?"Ver":"Descargar"}</span></a>}
+                {okMsg&&<div style={{padding:"9px 13px",borderRadius:8,background:"#EDF5EF",color:C.green,fontSize:12.5,fontWeight:600}}>✓ Comprobante subido con éxito.</div>}
+                {(soporte.type||"").indexOf("image/")===0
+                  ? <img src={soporte.url?driveThumb(soporte.url,1200):soporte.data} alt="soporte" loading="lazy" style={{maxWidth:"100%",borderRadius:10,border:"1px solid "+C.gray,background:"#f0f0f0"}} onError={function(e){var raw=soporte.url||soporte.data;if(raw&&e.target.src!==raw)e.target.src=raw;}}/>
+                  : <a href={soporte.url||soporte.data} target="_blank" rel="noopener" download={soporte.url?undefined:soporte.name} style={{display:"flex",alignItems:"center",gap:10,background:C.surfaceWarm,border:"1px solid "+C.gray,borderRadius:8,padding:"12px 14px",fontSize:13,color:C.black,textDecoration:"none",fontWeight:600}}><span style={{fontSize:18}}>📄</span>{soporte.name||"Documento adjunto"}<span style={{marginLeft:"auto",fontSize:11,color:C.earth}}>{soporte.url?"Ver":"Descargar"}</span></a>}
                 {isAdmin&&<button onClick={function(){saveSoporte(null);}} style={{alignSelf:"flex-start",background:"none",border:"none",color:C.red,fontSize:11.5,fontWeight:600,cursor:"pointer",padding:0}}>Quitar soporte</button>}
               </div>
             ):(
@@ -8540,7 +8594,7 @@ function PicUp({label,max,photos,accent,onAdd,onDel}) {
     </div>
   );
 }
-function PicsRow({title,photos,accent}) { return <div><div style={{fontSize:10,color:accent||C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>{title}</div><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{photos.map(function(src,i){return <img key={i} src={src} alt="" style={{width:110,height:90,objectFit:"cover",borderRadius:9,border:"1px solid "+C.gray}}/>;})}</div></div>; }
+function PicsRow({title,photos,accent}) { return <div><div style={{fontSize:10,color:accent||C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>{title}</div><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{(photos||[]).map(function(src,i){ if(!src||typeof src!=="string"||!(src.startsWith("http")||src.startsWith("data:"))) return null; return <a key={i} href={src} target="_blank" rel="noopener noreferrer"><img src={driveThumb(src,400)} alt="" loading="lazy" style={{width:110,height:90,objectFit:"cover",borderRadius:9,border:"1px solid "+C.gray,background:"#f0f0f0"}} onError={function(e){if(e.target.src!==src)e.target.src=src;}}/></a>;})}</div></div>; }
 function InvoiceUp({factura,onAdd,onDel}) {
   var ref=useRef(null);
   return (
