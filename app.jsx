@@ -130,35 +130,33 @@ function orphanEmailList(reps, vendors) {
    identificar, se agrupan en una sola entrada "Sin técnico asignado".
    Cada entrada: {value, label, emails:[...], vendorIds:[...], primaryEmail}.
    `filterFn(rep)` limita el universo de reportes considerado (p.ej. solo limpiezas). */
-function techFilterGroups(reps, vendors, filterFn) {
+function techFilterGroups(reps, vendors, filterFn, includeEmpty) {
   var inScope = function(r){ return filterFn ? filterFn(r) : true; };
   var scoped = (reps||[]).filter(inScope);
   var groups = [];
   var byName = {};
   /* Crear un grupo candidato para CADA técnico —aunque todavía no tenga reportes que
      empaten directamente. Así un técnico cuyos reportes llegaron todos bajo un correo
-     distinto (un typo o un correo viejo) conserva un grupo al que ligar esos correos.
-     Al final se descartan los grupos que quedaron sin reportes. */
+     distinto (un typo o un correo viejo) conserva un grupo al que ligar esos correos. */
   (vendors||[]).forEach(function(v){
     var name = vendorDisplay(v);
     var nk = normalize(name) || ("id:"+(v.id||v.email||""));
     var g = byName[nk];
-    if(!g){ g={value:"g:"+nk, label:name, emails:[], vendorIds:[], primaryEmail:(v.email||vendorEmailSet(v)[0]||"")}; byName[nk]=g; groups.push(g); }
+    if(!g){ g={value:"g:"+nk, label:name, emails:[], vendorIds:[], primaryEmail:(v.email||vendorEmailSet(v)[0]||""), _active:false}; byName[nk]=g; groups.push(g); }
     vendorEmailSet(v).forEach(function(e){ if(g.emails.indexOf(e)<0) g.emails.push(e); });
     if(v.id && g.vendorIds.indexOf(v.id)<0) g.vendorIds.push(v.id);
     if(!g.primaryEmail && v.email) g.primaryEmail=v.email;
+    if(v.active!==false) g._active=true;
   });
   groups.sort(function(a,b){return a.label.localeCompare(b.label);});
-  /* Correos huérfanos → ligar por nombre o agrupar en "Sin técnico asignado" */
+  /* Correos huérfanos → ligar por nombre al técnico correcto cuando el correo lo permita. */
   var known={}; groups.forEach(function(g){g.emails.forEach(function(e){known[e]=true;});});
   var orphans = uniq(scoped.map(function(r){return (r.reportadoPor||"").toLowerCase().trim();}).filter(Boolean))
     .filter(function(e){return !known[e];});
-  var unassigned=null;
   orphans.forEach(function(e){
     var local = normalize(e.split("@")[0]);
     var best=null, bestScore=0;
     groups.forEach(function(g){
-      if(g.value==="g:__unassigned") return;
       var s = similarity(local, normalize(g.label));
       var toks = normalize(g.label).split(" ").filter(function(t){return t.length>=3;});
       if(toks.length && toks.every(function(t){return local.indexOf(t)>=0;})) s=Math.max(s,0.9);
@@ -166,20 +164,36 @@ function techFilterGroups(reps, vendors, filterFn) {
       if(s>bestScore){bestScore=s;best=g;}
     });
     if(best && bestScore>=0.7){ if(best.emails.indexOf(e)<0) best.emails.push(e); }
-    else {
-      if(!unassigned){ unassigned={value:"g:__unassigned", label:"Sin técnico asignado", emails:[], vendorIds:[], primaryEmail:""}; groups.push(unassigned); }
-      unassigned.emails.push(e);
-    }
   });
-  /* Conservar solo los grupos que realmente tienen reportes (por vendorId o por cualquiera
-     de sus correos, incluidos los huérfanos recién ligados por nombre). */
-  return groups.filter(function(g){
-    return scoped.some(function(r){return repInGroup(r,g);});
+  /* Conservar los grupos con reportes; con includeEmpty también los técnicos activos aún
+     sin reportes (para poder seleccionarlos aunque no tengan actividad). */
+  var kept = groups.filter(function(g){
+    if(scoped.some(function(r){return repInGroup(r,g);})) return true;
+    return includeEmpty && g._active;
   });
+  /* Grupo catch-all: cualquier reporte que no quedó atribuido a ningún técnico —correo
+     desconocido o vacío— para poder verlo y clasificarlo. */
+  var knownE={}, knownV={};
+  kept.forEach(function(g){ g.emails.forEach(function(e){knownE[e]=true;}); g.vendorIds.forEach(function(id){knownV[id]=true;}); });
+  var hasUnassigned = scoped.some(function(r){
+    var e=(r.reportadoPor||"").toLowerCase().trim();
+    return !(e&&knownE[e]) && !(r.vendorId&&knownV[r.vendorId]);
+  });
+  if(hasUnassigned){
+    kept.push({value:"g:__unassigned", label:"⚠ Sin técnico asignado", emails:[], vendorIds:[], primaryEmail:"", _catchAll:true, _knownE:knownE, _knownV:knownV});
+  }
+  return kept;
 }
-/* Un reporte pertenece a un grupo de técnicos (por vendorId o por cualquiera de sus correos) */
+/* Un reporte pertenece a un grupo de técnicos (por vendorId o por cualquiera de sus correos).
+   El grupo catch-all "Sin técnico asignado" acepta todo reporte no atribuido a ningún grupo. */
 function repInGroup(rep, g){
   if(!rep||!g) return false;
+  if(g._catchAll){
+    var ce=(rep.reportadoPor||"").toLowerCase().trim();
+    if(ce && g._knownE[ce]) return false;
+    if(rep.vendorId && g._knownV[rep.vendorId]) return false;
+    return true;
+  }
   if(rep.vendorId && g.vendorIds.indexOf(rep.vendorId)>=0) return true;
   var rp=(rep.reportadoPor||"").toLowerCase().trim();
   return !!rp && g.emails.indexOf(rp)>=0;
@@ -1441,7 +1455,7 @@ function OpsDash({reps,vendors,adelantos,onMarkPaidBatch,onSelect,onMarkPaid,onR
 
   function reset() { setFVend("Todos"); setFStatus("Todos"); setFCat("Todos"); setFPagador("Todos"); setFDesde(""); setFHasta(""); setShowAll(false); }
 
-  var techOpts = techFilterGroups(reps, vendors);
+  var techOpts = techFilterGroups(reps, vendors, null, true);
   var selGroup = (fVend!=="Todos") ? techOpts.find(function(o){return o.value===fVend;}) : null;
   var fReps = reps.filter(function(r) {
     if (fVend!=="Todos") {
