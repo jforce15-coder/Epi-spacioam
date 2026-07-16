@@ -132,10 +132,14 @@ function orphanEmailList(reps, vendors) {
    `filterFn(rep)` limita el universo de reportes considerado (p.ej. solo limpiezas). */
 function techFilterGroups(reps, vendors, filterFn) {
   var inScope = function(r){ return filterFn ? filterFn(r) : true; };
+  var scoped = (reps||[]).filter(inScope);
   var groups = [];
   var byName = {};
+  /* Crear un grupo candidato para CADA técnico —aunque todavía no tenga reportes que
+     empaten directamente. Así un técnico cuyos reportes llegaron todos bajo un correo
+     distinto (un typo o un correo viejo) conserva un grupo al que ligar esos correos.
+     Al final se descartan los grupos que quedaron sin reportes. */
   (vendors||[]).forEach(function(v){
-    if(!(reps||[]).some(function(r){return inScope(r)&&repMatchesVendor(r,v);})) return;
     var name = vendorDisplay(v);
     var nk = normalize(name) || ("id:"+(v.id||v.email||""));
     var g = byName[nk];
@@ -147,7 +151,7 @@ function techFilterGroups(reps, vendors, filterFn) {
   groups.sort(function(a,b){return a.label.localeCompare(b.label);});
   /* Correos huérfanos → ligar por nombre o agrupar en "Sin técnico asignado" */
   var known={}; groups.forEach(function(g){g.emails.forEach(function(e){known[e]=true;});});
-  var orphans = uniq((reps||[]).filter(inScope).map(function(r){return (r.reportadoPor||"").toLowerCase().trim();}).filter(Boolean))
+  var orphans = uniq(scoped.map(function(r){return (r.reportadoPor||"").toLowerCase().trim();}).filter(Boolean))
     .filter(function(e){return !known[e];});
   var unassigned=null;
   orphans.forEach(function(e){
@@ -167,7 +171,11 @@ function techFilterGroups(reps, vendors, filterFn) {
       unassigned.emails.push(e);
     }
   });
-  return groups;
+  /* Conservar solo los grupos que realmente tienen reportes (por vendorId o por cualquiera
+     de sus correos, incluidos los huérfanos recién ligados por nombre). */
+  return groups.filter(function(g){
+    return scoped.some(function(r){return repInGroup(r,g);});
+  });
 }
 /* Un reporte pertenece a un grupo de técnicos (por vendorId o por cualquiera de sus correos) */
 function repInGroup(rep, g){
