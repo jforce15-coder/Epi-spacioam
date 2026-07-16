@@ -549,6 +549,37 @@ function salvageArray(v){
   return null;
 }
 
+/* ─── Reparto de usuarios en varios campos de la config (mismo motivo que los pagos:
+   una celda de Google Sheets tope ~50,000 caracteres). Se guardan como "vendors",
+   "vendors_2", … con un contador "vendors_n"; al cargar se vuelven a unir.
+   Totalmente compatible con datos viejos que solo tienen el campo "vendors". */
+var V_SHARD_MAX=40000;
+function v_shard(list){
+  var shards=[],cur=[];
+  (list||[]).forEach(function(x){
+    cur.push(x);
+    if(JSON.stringify(cur).length>V_SHARD_MAX && cur.length>1){ cur.pop(); shards.push(cur); cur=[x]; }
+  });
+  if(cur.length||!shards.length) shards.push(cur);
+  return shards;
+}
+/* Une los usuarios repartidos. Devuelve {list, complete}. complete=false si faltó
+   parsear algún shard esperado (según vendors_n) → en ese caso NO se debe permitir
+   re-guardar, para no borrar usuarios que no se pudieron leer en esta carga. */
+function vendorsMerge(cfg){
+  var base=salvageArray(cfg&&cfg.vendors);
+  var n=parseInt(cfg&&cfg.vendors_n,10);
+  if(!n||n<=1) return {list:base, complete:!!(base&&base.length)};
+  if(!base||!base.length) return {list:base, complete:false};
+  var merged=base.slice(), complete=true;
+  for(var i=1;i<n;i++){
+    var arr=salvageArray(cfg["vendors_"+(i+1)]);
+    if(Array.isArray(arr)) merged=merged.concat(arr);
+    else complete=false; /* faltó un shard esperado */
+  }
+  return {list:merged, complete:complete};
+}
+
 async function loadAllData() {
   if (IS_CLAUDE_SANDBOX) {
     var d = ls_loadAll();
@@ -581,11 +612,13 @@ async function loadAllData() {
     }
   }
   var rd = await apiCall("getAll") || {};
-  var _vFinal = salvageArray(cfg.vendors);
+  var _vMerge = vendorsMerge(cfg);
+  var _vFinal = _vMerge.list;
   var _pFinal = salvageArray(cfg.props);
   return {
     reports: (rd.reports||[]).sort(function(a,b){return (b.createdAt||b.id)-(a.createdAt||a.id);}),
     vendors: (_vFinal && _vFinal.length) ? _vFinal : DEF_V,
+    vendorsComplete: !!(_vFinal && _vFinal.length) && _vMerge.complete,
     props:   (_pFinal && _pFinal.length) ? _pFinal : DEF_P,
     pin:     cfg.adminpin|| "spacio2024",
     company: cfg.company || {name:"Spacio AM S.A.",nit:"118287796"},
@@ -767,6 +800,21 @@ async function saveConfigItem(key, value) {
     return;
   }
   var km={vendors:"vendors",props:"props",pin:"adminpin",company:"company",extcats:"extcats"};
+  if(key==="vendors"){
+    /* Usuarios: guardar repartido en varios campos y espejar SIEMPRE a localStorage
+       (respaldo local), escribiendo el contador al final para lecturas consistentes. */
+    try{
+      var shards=v_shard(value);
+      for(var si=0; si<shards.length; si++){ await apiCall("saveConfig",{key:si===0?"vendors":"vendors_"+(si+1),value:shards[si]}); }
+      for(var sk=shards.length; sk<shards.length+4; sk++){ await apiCall("saveConfig",{key:"vendors_"+(sk+1),value:[]}); }
+      await apiCall("saveConfig",{key:"vendors_n",value:shards.length});
+      try{ ls_set("c:v",value); }catch(_){}
+    }catch(e){
+      console.error("saveConfig vendors failed:", e&&e.message);
+      try{ ls_set("c:v",value); }catch(_){}
+    }
+    return;
+  }
   try {
     await apiCall("saveConfig",{key:km[key]||key,value:value});
   } catch(e) {
@@ -910,9 +958,10 @@ function App() {
       clearTimeout(timeoutId);
       setReps(withAutoPagador(d.reports||[]));
       setVendors(d.vendors||DEF_V);
-      /* Conexión exitosa → permitir guardar usuarios. (Estando sin conexión el candado
-         queda en false y svV no guarda, para no borrar la lista real del Sheet.) */
-      VENDORS_SAFE = true;
+      /* Conexión exitosa → permitir guardar usuarios SOLO si la lista se leyó completa
+         (todos los shards). Si faltó algún shard, el candado queda en false para no
+         re-guardar una lista incompleta y borrar usuarios que no se pudieron leer. */
+      VENDORS_SAFE = (d.vendorsComplete !== false);
       setProps(d.props||DEF_P);
       setPin(d.pin||"spacio2024");
       setCompany(d.company||{name:"Spacio AM S.A.",nit:"118287796"});
@@ -1064,7 +1113,7 @@ function App() {
       var d = await loadAllData();
       setReps(withAutoPagador(d.reports));
       setVendors(d.vendors);
-      VENDORS_SAFE = true;
+      VENDORS_SAFE = (d.vendorsComplete !== false);
       setProps(d.props);
       setPin(d.pin);
       setCompany(d.company);
