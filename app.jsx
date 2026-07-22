@@ -3917,7 +3917,20 @@ function PropsCfg({props,onSave}) {
   const [msg,  setMsg]  = useState(null);
   const [impMsg, setImpMsg] = useState(null);
   const [impBusy,setImpBusy]= useState(false);
+  const [hospMsg, setHospMsg] = useState(null);
+  const [hospBusy,setHospBusy]= useState(false);
   const ref = useRef(null);
+  async function syncFromHospitable(){
+    if(IS_CLAUDE_SANDBOX){ setHospMsg("No se pudo sincronizar: la conexión con Hospitable solo funciona en la app publicada."); setTimeout(function(){setHospMsg(null);},6000); return; }
+    setHospBusy(true); setHospMsg(null);
+    try{
+      var d = await apiCall("syncListings");
+      if(d&&Array.isArray(d.props)) onSave(d.props);
+      var a=(d&&d.added)||0, u=(d&&d.updated)||0;
+      setHospMsg(a||u ? (a+" nuevas · "+u+" actualizadas desde Hospitable.") : "Todo al día — sin cambios desde Hospitable.");
+    }catch(e){ setHospMsg("No se pudo sincronizar: "+(e&&e.message?e.message:"error de conexión.")); }
+    finally{ setHospBusy(false); setTimeout(function(){setHospMsg(null);},8000); }
+  }
   async function importLinks(silent){
     setImpBusy(true);if(!silent)setImpMsg(null);
     try{
@@ -3975,6 +3988,16 @@ function PropsCfg({props,onSave}) {
           <button onClick={importLinks} disabled={impBusy} style={{padding:"10px 16px",borderRadius:9,border:"1.5px solid "+C.gray,background:impBusy?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:impBusy?"wait":"pointer",flexShrink:0}}>{impBusy?"Importando…":"↧ Importar enlaces"}</button>
         </div>
         {impMsg&&<div style={{marginTop:10,fontSize:12.5,fontWeight:600,color:impMsg.indexOf("No se")===0?C.red:C.green,background:impMsg.indexOf("No se")===0?"#F5EDEC":"#EDF5EF",padding:"9px 13px",borderRadius:9,lineHeight:1.5}}>{impMsg}</div>}
+      </div>
+      <div style={{background:"#fff",borderRadius:12,padding:14,border:"1px solid "+C.line}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+          <div style={{flex:"1 1 200px"}}>
+            <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>Sincronizar propiedades desde Hospitable</div>
+            <div style={{fontSize:11,color:C.taupe,marginTop:3,lineHeight:1.5}}>Trae la lista de propiedades directamente de Hospitable. Agrega las nuevas y actualiza nombre, enlace y dirección — conserva las fotos y los conteos de cuartos/baños que ya cargaste.</div>
+          </div>
+          <button onClick={syncFromHospitable} disabled={hospBusy} style={{padding:"10px 16px",borderRadius:9,border:"none",background:hospBusy?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:hospBusy?"wait":"pointer",flexShrink:0}}>{hospBusy?"Sincronizando…":"⟳ Sincronizar con Hospitable"}</button>
+        </div>
+        {hospMsg&&<div style={{marginTop:10,fontSize:12.5,fontWeight:600,color:hospMsg.indexOf("No se")===0?C.red:C.green,background:hospMsg.indexOf("No se")===0?"#F5EDEC":"#EDF5EF",padding:"9px 13px",borderRadius:9,lineHeight:1.5}}>{hospMsg}</div>}
       </div>
       {(function(){
         var problemas=props.filter(function(p){ return !p.listingUrl || refPhotosOf(p).length===0; });
