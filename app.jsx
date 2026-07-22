@@ -1382,6 +1382,13 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrl
   function pushComprobante(pago){
     var next=[pago].concat(pagos||[]);
     if(onSvPagos) onSvPagos(next);
+    try{
+      var _sem=(pago.rangoDesde||pago.rangoHasta)?(fmtDate(pago.rangoDesde)+(pago.rangoHasta&&pago.rangoHasta!==pago.rangoDesde?" al "+fmtDate(pago.rangoHasta):"")):"";
+      (pago.tecnicos||[]).forEach(function(t){
+        if(!t.vendorEmail) return;
+        notifyTemplate(t.vendorEmail, "comprobantePago", {tecnico:t.vendorName, semana:_sem, trabajos:(t.trabajos?t.trabajos.length:0)+" trabajos", subtotal:"Q"+(t.subtotal||0).toLocaleString(), descuento:"− Q"+(t.adelanto||0).toLocaleString(), total:"Q"+(t.neto||0).toLocaleString(), folio:pago.folio});
+      });
+    }catch(_){}
     setPagoDetail(pago);
   }
   /* Pago en LOTE: marca todos como pagados y genera UN comprobante con todos los técnicos. */
@@ -8118,6 +8125,7 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
     var adv = Object.assign({id:"adv_"+Date.now(), vendorEmail:vendor.email, status:"pendiente", createdAt:Date.now(), pausas:[], firmadoEn:Date.now()}, draft());
     adv.contractText = buildContractText(adv);
     try{ await onSvAdelantos([adv].concat(adelantos||[])); }catch(e){}
+    try{ notifyTemplate(adminEmails(ADV_VENDORS), "solicitudAdelanto", {tecnico:vendorDisplay(vendor), monto:"Q"+montoN.toLocaleString(), cuotas:cuotas+" semanas", cuota:"Q"+semanal.toLocaleString()}); }catch(_){}
     setBusy(false); setDpiPhoto(null); setDpiNum(""); setMonto(""); setCuotas(8); setFirma(null);
   }
 
@@ -8329,12 +8337,14 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
   function approve(a){
     var next=list.map(function(x){return x.id===a.id?Object.assign({},x,{status:"activo", fechaDeposito:x.fechaDeposito||todayStr(), fechaInicio:x.fechaInicio||x.fechaDeposito||todayStr()}):x;});
     var u=autoUnify(next, reps); onSvAdelantos(u.list);
+    try{ notifyTemplate([a.vendorEmail], "adelantoDepositado", {tecnico:a.vendorName, monto:"Q"+(a.monto||0).toLocaleString(), fecha:fmtDate(todayStr()), cuota:"Q"+(a.cobroSemanal||0).toLocaleString(), cuotas:(a.cuotas||"")+" semanas"}); }catch(_){}
   }
   /* Activar tras el depósito (adelanto iniciado por el admin y ya firmado por el técnico). */
   function activateDeposit(a){
     if(!advDeposits(a).length) return;
     var next=list.map(function(x){return x.id===a.id?Object.assign({},x,{status:"activo", fechaInicio:todayStr(), fechaDeposito:x.fechaDeposito||todayStr()}):x;});
     var u=autoUnify(next, reps); onSvAdelantos(u.list);
+    try{ notifyTemplate([a.vendorEmail], "adelantoDepositado", {tecnico:a.vendorName, monto:"Q"+(a.monto||0).toLocaleString(), fecha:fmtDate(todayStr()), cuota:"Q"+(a.cobroSemanal||0).toLocaleString(), cuotas:(a.cuotas||"")+" semanas"}); }catch(_){}
   }
   /* Guarda el comprobante de depósito (top-level, o en un sub-contrato si es unificado). */
   function setDeposit(a, receipt, contractIdx){
@@ -8575,6 +8585,7 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
       status:"pendiente_tecnico", createdAt:Date.now(), pausas:[], creadoPorAdmin:true};
     adv.contractText=buildContractText(adv);
     onCreate(adv);
+    try{ notifyTemplate(vendor.email, "adelantoFirma", {tecnico:vendorDisplay(vendor), monto:"Q"+montoN.toLocaleString(), cuotas:cuotas+" semanas", cuota:"Q"+semanal.toLocaleString()}); }catch(_){}
     onClose();
   }
   return (
