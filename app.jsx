@@ -7143,8 +7143,9 @@ function incomeLast8(reps, emails){
   });
   return s;
 }
-/* Límite dinámico de adelanto de un técnico = ½ de sus ingresos de las últimas 8 semanas. */
-function maxAdvanceForVendor(reps, vendor){ return Math.floor(incomeLast8(reps, vendorEmailSet(vendor))/2); }
+/* Límite dinámico de adelanto = (25% del promedio de ingreso semanal de las últimas
+   8 semanas) × 12 cuotas. 12 es el máximo de cuotas a solicitar. */
+function maxAdvanceForVendor(reps, vendor){ return maxWeeklyChargeForVendor(reps, vendor)*12; }
 /* Promedio de ingreso semanal (últimas 8 semanas, dividido entre 8 semanas fijas). */
 function avgWeekly8(reps, emails){ return incomeLast8(reps, emails)/8; }
 /* Tope de cuota semanal = 25% del promedio de ingreso semanal de las últimas 8 semanas. */
@@ -8083,7 +8084,7 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
   var semanal = cuotas>0 ? Math.ceil(montoN/cuotas) : 0;
   var mensual = Math.round(semanal*52/12);
   /* Mínimo de cuotas para que la cuota semanal no exceda el 25% del ingreso semanal. */
-  var minCuotas = (maxWeekly>0 && montoN>0) ? Math.min(16, Math.ceil(montoN/maxWeekly)) : 1;
+  var minCuotas = (maxWeekly>0 && montoN>0) ? Math.min(12, Math.ceil(montoN/maxWeekly)) : 1;
   var datosOk = !!dpiPhoto && nombre.trim() && dpiNum.trim();
   var montoOk = datosOk && montoN>0 && montoN<=disponible && (maxWeekly<=0 || semanal<=maxWeekly);
 
@@ -8193,9 +8194,9 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
                 <F label={"Monto a solicitar (máx. Q"+disponible.toLocaleString()+")"}><input type="number" inputMode="numeric" placeholder={"Ej. "+Math.min(500,disponible)} value={monto} onChange={function(e){setMonto(e.target.value);setErr("");}}/></F>
                 {montoN>disponible&&<div style={{fontSize:11,color:C.red,fontWeight:600,marginTop:-6}}>Excede tu disponible (Q{disponible.toLocaleString()}).</div>}
                 <div>
-                  <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:9}}>Cuotas semanales{minCuotas>1?" — mín. "+minCuotas:""} · máx. 16</div>
+                  <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:9}}>Cuotas semanales{minCuotas>1?" — mín. "+minCuotas:""} · máx. 12</div>
                   <div style={{display:"flex",alignItems:"center",gap:14}}>
-                    <input type="range" min={minCuotas} max="16" value={cuotas} onChange={function(e){setCuotas(parseInt(e.target.value));}} style={{flex:1,accentColor:C.peach}}/>
+                    <input type="range" min={minCuotas} max="12" value={cuotas} onChange={function(e){setCuotas(parseInt(e.target.value));}} style={{flex:1,accentColor:C.peach}}/>
                     <span style={{fontSize:15,fontWeight:700,color:C.black,minWidth:64,textAlign:"right"}}>{cuotas} sem.</span>
                   </div>
                   {maxWeekly>0&&<div style={{fontSize:10.5,color:C.earth,marginTop:8,lineHeight:1.5}}>La cuota semanal no puede superar Q{maxWeekly.toLocaleString()} (25% de tu ingreso semanal promedio de las últimas 8 semanas).</div>}
@@ -8542,14 +8543,14 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
   var vendor = internos.find(function(v){return v.id===vid;});
   var emails = vendor?vendorEmailSet(vendor):[];
   var sum8   = incomeLast8(reps, emails);
-  var maxTotal = Math.floor(sum8/2);
+  var maxWeekly = Math.floor(sum8/8*0.25);
+  var maxTotal = maxWeekly*12;
   var vigentes = (adelantos||[]).filter(function(a){return (a.status==="activo"||a.status==="pendiente") && emails.indexOf((a.vendorEmail||"").toLowerCase().trim())>=0;});
   var saldoVigente = vigentes.reduce(function(s,a){return s+(a.status==="activo"?advanceState(a,reps).saldo:(parseFloat(a.monto)||0));},0);
   var disponible = Math.max(0, maxTotal - saldoVigente);
   var montoN = parseFloat(monto||0)||0;
   /* Tope de cuota semanal: 25% del promedio de ingreso semanal (últimas 8 semanas). */
-  var maxWeekly = Math.floor(sum8/8*0.25);
-  var minCuotas = (maxWeekly>0 && montoN>0) ? Math.min(16, Math.ceil(montoN/maxWeekly)) : 1;
+  var minCuotas = (maxWeekly>0 && montoN>0) ? Math.min(12, Math.ceil(montoN/maxWeekly)) : 1;
   var semanal = cuotas>0?Math.ceil(montoN/cuotas):0;
   var ok = vendor && montoN>0 && montoN<=disponible && (maxWeekly<=0 || semanal<=maxWeekly);
   useEffect(function(){ if(cuotas<minCuotas) setCuotas(minCuotas); },[minCuotas]);
@@ -8580,13 +8581,13 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
           <div style={{background:C.black,borderRadius:14,padding:"14px 16px",color:"#fff"}}>
             <div style={{fontSize:9,fontWeight:600,letterSpacing:".2em",textTransform:"uppercase",opacity:.7,marginBottom:5}}>Disponible para este técnico</div>
             <div style={{fontSize:26,fontWeight:600,color:disponible>0?"#fff":C.peach}}>Q{disponible.toLocaleString()}</div>
-            <div style={{fontSize:10.5,opacity:.62,marginTop:6,lineHeight:1.6}}>Máx. (½ de últimas 8 semanas, Q{sum8.toLocaleString()}): <b style={{color:"#fff"}}>Q{maxTotal.toLocaleString()}</b>{saldoVigente>0?" · Vigente: Q"+saldoVigente.toLocaleString():""}</div>
+            <div style={{fontSize:10.5,opacity:.62,marginTop:6,lineHeight:1.6}}>Máx. (25% del ingreso semanal promedio × 12 cuotas; ingreso 8 sem. Q{sum8.toLocaleString()}): <b style={{color:"#fff"}}>Q{maxTotal.toLocaleString()}</b>{saldoVigente>0?" · Vigente: Q"+saldoVigente.toLocaleString():""}</div>
           </div>
           <F label={"Monto (máx. Q"+disponible.toLocaleString()+")"}><input type="number" inputMode="numeric" value={monto} placeholder={"Ej. "+Math.min(500,disponible||500)} onChange={function(e){setMonto(e.target.value);setErr("");}}/></F>
           <div>
-            <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:9}}>Cuotas semanales{minCuotas>1?" — mín. "+minCuotas:""} · máx. 16</div>
+            <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:9}}>Cuotas semanales{minCuotas>1?" — mín. "+minCuotas:""} · máx. 12</div>
             <div style={{display:"flex",alignItems:"center",gap:14}}>
-              <input type="range" min={minCuotas} max="16" value={cuotas} onChange={function(e){setCuotas(parseInt(e.target.value));}} style={{flex:1,accentColor:C.peach}}/>
+              <input type="range" min={minCuotas} max="12" value={cuotas} onChange={function(e){setCuotas(parseInt(e.target.value));}} style={{flex:1,accentColor:C.peach}}/>
               <span style={{fontSize:15,fontWeight:700,color:C.black,minWidth:64,textAlign:"right"}}>{cuotas} sem.</span>
             </div>
             {maxWeekly>0&&<div style={{fontSize:10.5,color:semanal>maxWeekly?C.red:C.earth,marginTop:8,lineHeight:1.5,fontWeight:semanal>maxWeekly?700:400}}>Cuota Q{semanal.toLocaleString()} · tope Q{maxWeekly.toLocaleString()} (25% del ingreso semanal promedio){semanal>maxWeekly?" — excede el tope":""}</div>}
