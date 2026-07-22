@@ -8199,14 +8199,10 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
                     <input type="range" min={minCuotas} max="12" value={cuotas} onChange={function(e){setCuotas(parseInt(e.target.value));}} style={{flex:1,accentColor:C.peach}}/>
                     <span style={{fontSize:15,fontWeight:700,color:C.black,minWidth:64,textAlign:"right"}}>{cuotas} sem.</span>
                   </div>
-                  {maxWeekly>0&&<div style={{fontSize:10.5,color:C.earth,marginTop:8,lineHeight:1.5}}>La cuota semanal no puede superar Q{maxWeekly.toLocaleString()} (25% de tu ingreso semanal promedio de las últimas 8 semanas).</div>}
                 </div>
                 {montoN>0&&(
-                  <div style={{background:C.peach12||"rgba(233,130,106,.12)",borderRadius:12,padding:"13px 15px",display:"flex",flexDirection:"column",gap:9}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:12,color:C.black,fontWeight:600}}>Descuento semanal</span><span style={{fontSize:17,fontWeight:700,color:C.peach}}>Q{semanal.toLocaleString()}</span></div>
-                    {maxWeekly>0&&<div style={{fontSize:10.5,color:semanal>maxWeekly?C.red:C.earth,fontWeight:semanal>maxWeekly?700:400}}>{Math.round(semanal/(sum8/8)*100)}% de tu ingreso semanal promedio{semanal>maxWeekly?" — supera el 25% permitido":""}</div>}
-                    <div style={{height:1,background:"rgba(62,63,63,.10)"}}/>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:12,color:C.black,fontWeight:600}}>Débito mensual aprox.</span><span style={{fontSize:14,fontWeight:700,color:C.black}}>Q{mensual.toLocaleString()}</span></div>
+                  <div style={{background:C.peach12||"rgba(233,130,106,.12)",borderRadius:12,padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:12.5,color:C.black,fontWeight:600}}>Pagarás cada semana</span><span style={{fontSize:19,fontWeight:700,color:C.peach}}>Q{semanal.toLocaleString()}</span>
                   </div>
                 )}
               </div>
@@ -8594,7 +8590,7 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
           </div>
           <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
             <div style={{flex:1,minWidth:150}}><F label="Fecha del depósito"><input type="date" value={fecha} onChange={function(e){setFecha(e.target.value);}}/></F></div>
-            <div style={{flex:1,minWidth:150}}><F label="DPI (opcional)"><input value={dpiNum} onChange={function(e){setDpiNum(e.target.value);}} placeholder="0000 00000 0000" inputMode="numeric"/></F></div>
+            <div style={{flex:1,minWidth:150}}><F label="DPI (opcional)"><input value={dpiNum} onChange={function(e){setDpiNum(e.target.value);setErr("");}} placeholder="0000 00000 0000" inputMode="numeric"/></F></div>
           </div>
           {montoN>0&&(
             <div style={{background:C.peach12||"rgba(233,130,106,.12)",borderRadius:12,padding:"12px 15px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
