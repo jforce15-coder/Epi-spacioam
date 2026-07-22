@@ -464,17 +464,67 @@ function supervisorEmails(vendors, exceptEmail){
 function adminEmails(vendors){
   return (vendors||[]).filter(function(v){return v.isAdmin&&v.active&&v.email;}).map(function(v){return v.email;});
 }
+/* ─── PREFERENCIAS DE NOTIFICACIONES
+   Config "notifprefs": { [tipo]: { tecnico, supervisores, adminPrincipal, adminSecundarios, extra } }.
+   NOTIF_PREFS (global) se mantiene sincronizado con el estado para que los disparadores
+   (repartidos por toda la app) resuelvan destinatarios sin recibir el objeto por props. */
+var NOTIF_PREFS = {};
+var NOTIF_META = [
+  {id:"limpiezaAprobada",   label:"Limpieza aprobada",          desc:"Cuando QA aprueba una limpieza"},
+  {id:"correccionInmediata",label:"Corrección inmediata",         desc:"Corrección urgente para hoy"},
+  {id:"correccionFutura",   label:"Corrección para el futuro",    desc:"Observación para próximas limpiezas"},
+  {id:"listaSupervision",   label:"Lista para supervisión",       desc:"Una limpieza terminó y espera revisión"},
+  {id:"correccionAtendida", label:"Corrección atendida",          desc:"El técnico confirmó que corrigió"},
+  {id:"danoUrgente",        label:"Daño urgente",                 desc:"Se clasificó un daño de urgencia alta"},
+  {id:"solicitudAdelanto",  label:"Nueva solicitud de adelanto",  desc:"Un técnico solicitó un adelanto"},
+  {id:"adelantoFirma",      label:"Adelanto por firmar",          desc:"El admin inició un adelanto para el técnico"},
+  {id:"adelantoDepositado", label:"Adelanto depositado",          desc:"Se activó o depositó un adelanto"},
+  {id:"comprobantePago",    label:"Comprobante de pago",          desc:"Se generó el comprobante semanal"}
+];
+var NOTIF_DEFAULTS = {
+  limpiezaAprobada:{tecnico:1}, correccionInmediata:{tecnico:1}, correccionFutura:{tecnico:1},
+  listaSupervision:{supervisores:1}, correccionAtendida:{supervisores:1,adminPrincipal:1,adminSecundarios:1},
+  danoUrgente:{adminPrincipal:1,adminSecundarios:1}, solicitudAdelanto:{adminPrincipal:1,adminSecundarios:1},
+  adelantoFirma:{tecnico:1}, adelantoDepositado:{tecnico:1}, comprobantePago:{tecnico:1}
+};
+function notifPrefFor(type){ var p=NOTIF_PREFS&&NOTIF_PREFS[type]; return p?p:(NOTIF_DEFAULTS[type]||{}); }
+/* Admin principal: el marcado con adminPrincipal, o (por defecto) el usuario "Juan Ovalle". */
+function adminPrincipalEmails(vendors){
+  var flagged=(vendors||[]).filter(function(v){return v.isAdmin&&v.active&&v.email&&v.adminPrincipal;});
+  var list=flagged.length?flagged:(vendors||[]).filter(function(v){return v.isAdmin&&v.active&&v.email&&normNm(vendorDisplay(v))==="juan ovalle";});
+  return list.map(function(v){return v.email;});
+}
+function adminSecundarioEmails(vendors){
+  var prin={}; adminPrincipalEmails(vendors).forEach(function(e){prin[String(e).toLowerCase()]=1;});
+  return (vendors||[]).filter(function(v){return v.isAdmin&&v.active&&v.email&&!prin[String(v.email).toLowerCase()];}).map(function(v){return v.email;});
+}
+function isAdminPrincipalVendor(v, vendors){
+  if(!v||!v.isAdmin) return false;
+  var em=adminPrincipalEmails(vendors||ADV_VENDORS).map(function(e){return String(e).toLowerCase();});
+  return em.indexOf(String(v.email||"").toLowerCase())>=0;
+}
+/* Resuelve la lista de correos para un tipo, según las preferencias guardadas. */
+function resolveNotifRecipients(type, vendors, tecnicoEmails){
+  var pf=notifPrefFor(type); var out=[];
+  if(pf.tecnico){ (Array.isArray(tecnicoEmails)?tecnicoEmails:[tecnicoEmails]).forEach(function(e){ if(e) out.push(e); }); }
+  if(pf.supervisores)    out=out.concat(supervisorEmails(vendors));
+  if(pf.adminPrincipal)  out=out.concat(adminPrincipalEmails(vendors));
+  if(pf.adminSecundarios)out=out.concat(adminSecundarioEmails(vendors));
+  if(pf.extra)           out=out.concat(String(pf.extra).split(/[,;\s]+/));
+  var seen={},res=[]; out.forEach(function(e){ var k=String(e||"").toLowerCase().trim(); if(k&&k.indexOf("@")>0&&!seen[k]){seen[k]=1;res.push(String(e).trim());} });
+  return res;
+}
 function notifyQAResult(rep, status, comment, vendors){
   if(!rep||!rep.reportadoPor) return;
   var tecnico=vendorNameByEmail(vendors, rep.reportadoPor);
   var base={tecnico:tecnico, propiedad:rep.propiedad, fecha:fmtDate(rep.fecha)};
   if(status==="aprobada"){
-    notifyTemplate(rep.reportadoPor, "limpiezaAprobada", base);
+    notifyTemplate(resolveNotifRecipients("limpiezaAprobada", vendors, [rep.reportadoPor]), "limpiezaAprobada", base);
   } else if(status==="correccion"){
     if(rep.qaTipo==="inmediata"){
-      notifyTemplate(rep.reportadoPor, "correccionInmediata", Object.assign({}, base, {detalle:comment||""}));
+      notifyTemplate(resolveNotifRecipients("correccionInmediata", vendors, [rep.reportadoPor]), "correccionInmediata", Object.assign({}, base, {detalle:comment||""}));
     } else {
-      notifyTemplate(rep.reportadoPor, "correccionFutura", Object.assign({}, base, {detalle:comment||""}));
+      notifyTemplate(resolveNotifRecipients("correccionFutura", vendors, [rep.reportadoPor]), "correccionFutura", Object.assign({}, base, {detalle:comment||""}));
     }
   }
 }
@@ -535,12 +585,13 @@ function ls_loadAll(){
     hospurlday:  ls_get("c:hospday")||null,
     hospurlweek: ls_get("c:hospweek")||null,
     feedback:  ls_get("c:fb")||null,
+    notifprefs: ls_get("c:notif")||null,
   };
   return {reports:reps.sort(function(a,b){return (b.createdAt||b.id)-(a.createdAt||a.id);}), ...cfg};
 }
 function ls_saveReport(rep){ls_set("m:"+rep.id,rep);}
 function ls_deleteReport(id){ls_del("m:"+id);}
-function ls_saveConfig(key,value){var km={vendors:"c:v",props:"c:p",adminpin:"c:pin",company:"c:co",extcats:"c:ec"};ls_set(km[key]||key,value);}
+function ls_saveConfig(key,value){var km={vendors:"c:v",props:"c:p",adminpin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif"};ls_set(km[key]||key,value);}
 
 /* Rescate de arreglos JSON dañados. Si una celda de Config quedó con JSON válido
    seguido de basura (p.ej. una restauración que dejó '...]" por "[...]'), extrae el
@@ -608,6 +659,7 @@ async function loadAllData() {
       feedback:  d.feedback  || [],
       adelantos: adv_load(),
       pagos:     pg_load(),
+      notifprefs: d.notifprefs || {},
     };
   }
   /* Carga SECUENCIAL (no Promise.all): el Apps Script ocasionalmente mezcla las
@@ -639,6 +691,7 @@ async function loadAllData() {
     extcats: cfg.extcats || [],
     adelantos: Array.isArray(cfg.adelantos) ? cfg.adelantos : null,
     pagos: pg_merge(cfg),
+    notifprefs: (cfg.notifprefs && typeof cfg.notifprefs==="object") ? cfg.notifprefs : {},
   };
 }
 
@@ -809,7 +862,7 @@ async function deleteReportById(id) {
 
 async function saveConfigItem(key, value) {
   if(IS_CLAUDE_SANDBOX){
-    var ls_km={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec"};
+    var ls_km={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif"};
     ls_set(ls_km[key]||key,value);
     return;
   }
@@ -834,7 +887,7 @@ async function saveConfigItem(key, value) {
   } catch(e) {
     console.error("saveConfig failed for key "+key+":", e.message);
     /* Fallback to localStorage so data isn't lost */
-    var ls_km2={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec"};
+    var ls_km2={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif"};
     ls_set(ls_km2[key]||key,value);
   }
 }
@@ -932,12 +985,15 @@ function App() {
   const [retryQ,   setRetryQ]   = useState([]);
   const [adelantos, setAdelantos] = useState([]);
   const [pagos, setPagos] = useState([]);
+  const [notifPrefs, setNotifPrefs] = useState({});
 
   /* Adelantos (advances): se cargan vía loadAllData (localStorage en demo, Sheets en vivo)
      y se migran/ligan a su técnico en el .then de carga. */
   async function svAdelantos(v){ setAdelantos(v); adv_persist(v); }
   /* Comprobantes de pago — historial consultable por admin y técnico. */
   async function svPagos(v){ setPagos(v); pg_persist(v); }
+  /* Preferencias de notificaciones — qué perfiles reciben cada tipo de correo. */
+  async function svNotifPrefs(v){ setNotifPrefs(v); NOTIF_PREFS=v; saveConfigItem("notifprefs", v); }
 
   useEffect(function(){
     /* Restore session from localStorage */
@@ -1006,6 +1062,7 @@ function App() {
         }catch(_){}
       }
       setPagos(pgFinal);
+      setNotifPrefs(d.notifprefs||{}); NOTIF_PREFS=d.notifprefs||{};
       setSheetsOk(!IS_CLAUDE_SANDBOX);
       setReady(true); setSyncing(false);
     }).catch(function(e){
@@ -1050,6 +1107,7 @@ function App() {
   /* Mantener ADV_VENDORS sincronizado: el cálculo de adelantos debe reconocer todos
      los correos de cada técnico (incluye los anteriores tras un cambio de correo). */
   useEffect(function(){ ADV_VENDORS = vendors || []; },[vendors]);
+  useEffect(function(){ NOTIF_PREFS = notifPrefs || {}; },[notifPrefs]);
 
   /* Unificación automática (una sola vez tras la carga): si un técnico tiene ≥2 adelantos
      ACTIVOS, se combinan en uno solo con saldo y control unificados. */
@@ -1131,6 +1189,7 @@ function App() {
       setProps(d.props);
       setPin(d.pin);
       setCompany(d.company);
+      if(d.notifprefs){ setNotifPrefs(d.notifprefs); NOTIF_PREFS=d.notifprefs; }
       if(d.extcats)   setExtCats(d.extcats);
       if(d.schedules) setSchedules(d.schedules);
       if(d.hospurlday)  setHospUrlDay(d.hospurlday||"");
@@ -1162,7 +1221,7 @@ function App() {
     try{ if(localStorage.getItem("epi_onboard_done_"+freshV.id)) needsOnb=false; }catch(_){}
     inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
   } else {
-    inner = <AdminApp reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout}/>;
+    inner = <AdminApp reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
   }
   return <ErrorBoundary>{inner}</ErrorBoundary>;
 }
@@ -1370,14 +1429,76 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
   );
 }
 
+/* ═══ NOTIFICACIONES — quién recibe cada tipo de correo (solo admin principal) */
+function NotifCfg({prefs, vendors, onSave, readOnly}){
+  var cols=[["tecnico","Técnico"],["supervisores","Supervisores"],["adminPrincipal","Admin principal"],["adminSecundarios","Admin secundarios"]];
+  function prefOf(id){ return (prefs&&prefs[id])?prefs[id]:(NOTIF_DEFAULTS[id]||{}); }
+  function commit(id, mut){
+    if(readOnly) return;
+    var cur=Object.assign({}, prefOf(id)); mut(cur);
+    var next=Object.assign({}, prefs||{}); next[id]=cur; onSave(next);
+  }
+  function toggle(id,key){ commit(id,function(c){ c[key]=c[key]?0:1; }); }
+  function setExtra(id,val){ commit(id,function(c){ c.extra=val; }); }
+  var prinEmail=adminPrincipalEmails(vendors)[0]||"";
+  var prinV=(vendors||[]).find(function(x){return (x.email||"").toLowerCase()===prinEmail.toLowerCase();});
+  var prinName=prinV?vendorDisplay(prinV):"Juan Ovalle";
+  var secCount=adminSecundarioEmails(vendors).length;
+  var supCount=(vendors||[]).filter(function(v){return v.isSupervisor&&v.active&&v.email;}).length;
+  function Chk({on,label}){
+    return (
+      <div style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0"}}>
+        <span style={{width:20,height:20,borderRadius:6,flexShrink:0,border:"1.5px solid "+(on?C.peach:C.gray),background:on?C.peach:"#fff",display:"inline-flex",alignItems:"center",justifyContent:"center"}}>{on&&<Icon name="check" size={13} stroke="#fff"/>}</span>
+        <span style={{fontSize:12.5,color:C.black,fontWeight:on?600:400}}>{label}</span>
+      </div>
+    );
+  }
+  return (
+    <div style={{maxWidth:920,margin:"0 auto",padding:"6px 2px 40px"}}>
+      <div style={{fontSize:9.5,fontWeight:700,letterSpacing:".24em",textTransform:"uppercase",color:C.earth,marginBottom:6}}>Configuración</div>
+      <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:30,color:C.black,marginBottom:6}}>Notificaciones</div>
+      <div style={{fontSize:13,color:C.earth,lineHeight:1.7,marginBottom:18,maxWidth:640}}>Elige qué perfiles reciben cada tipo de correo. El <b style={{color:C.black}}>técnico</b> siempre es la persona del evento (quien hizo la limpieza, pidió el adelanto, etc.).</div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:10,marginBottom:22}}>
+        <span style={{fontSize:11.5,color:C.earth,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:100,padding:"6px 13px"}}>Admin principal: <b style={{color:C.black}}>{prinName}</b></span>
+        <span style={{fontSize:11.5,color:C.earth,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:100,padding:"6px 13px"}}>Admin secundarios: <b style={{color:C.black}}>{secCount}</b></span>
+        <span style={{fontSize:11.5,color:C.earth,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:100,padding:"6px 13px"}}>Supervisores: <b style={{color:C.black}}>{supCount}</b></span>
+      </div>
+      {readOnly&&<div style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"12px 15px",fontSize:12.5,color:C.earth,lineHeight:1.6,marginBottom:20}}>Solo el administrador principal ({prinName}) puede modificar esta configuración. La estás viendo en modo lectura.</div>}
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        {NOTIF_META.map(function(m){
+          var pf=prefOf(m.id);
+          return (
+            <div key={m.id} style={{background:"#fff",border:"1px solid "+C.line,borderRadius:16,padding:"16px 18px",boxShadow:"0 3px 12px rgba(62,63,63,.03)",opacity:readOnly?.85:1}}>
+              <div style={{fontSize:14.5,fontWeight:700,color:C.black,marginBottom:2}}>{m.label}</div>
+              <div style={{fontSize:12,color:C.earth,marginBottom:10}}>{m.desc}</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:"0 18px",borderTop:"1px solid "+C.line,paddingTop:6}}>
+                {cols.map(function(c){
+                  return <div key={c[0]} onClick={function(){toggle(m.id,c[0]);}} style={{cursor:readOnly?"default":"pointer"}}><Chk on={!!pf[c[0]]} label={c[1]}/></div>;
+                })}
+              </div>
+              <div style={{marginTop:10}}>
+                <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:6}}>Correos extra (opcional)</div>
+                <input value={pf.extra||""} disabled={readOnly} onChange={function(e){setExtra(m.id, e.target.value);}} placeholder="contabilidad@spacioam.com, otro@correo.com" style={{width:"100%",boxSizing:"border-box",padding:"10px 12px",borderRadius:10,border:"1px solid "+C.gray,fontSize:12.5,color:C.black,fontFamily:"inherit",background:readOnly?C.surfaceWarm:"#fff"}}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ═══ ADMIN */
-function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout}) {
+function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
   const [tab,    setTab]    = useState("dash");
   const [detail, setDetail] = useState(null);
   const [cDel,   setCDel]   = useState(null);
   const [pagoDetail, setPagoDetail] = useState(null);
 
   var adminName = adminVendor ? vendorDisplay(adminVendor) : "Admin";
+  /* Solo el admin principal (o el acceso por PIN maestro, sin identidad de usuario) edita
+     las preferencias de notificaciones; los demás admin ni siquiera ven la pestaña. */
+  var canNotif = !adminVendor || isAdminPrincipalVendor(adminVendor, vendors);
   /* Registra un comprobante nuevo en el historial y lo abre. */
   function pushComprobante(pago){
     var next=[pago].concat(pagos||[]);
@@ -1386,7 +1507,7 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrl
       var _sem=(pago.rangoDesde||pago.rangoHasta)?(fmtDate(pago.rangoDesde)+(pago.rangoHasta&&pago.rangoHasta!==pago.rangoDesde?" al "+fmtDate(pago.rangoHasta):"")):"";
       (pago.tecnicos||[]).forEach(function(t){
         if(!t.vendorEmail) return;
-        notifyTemplate(t.vendorEmail, "comprobantePago", {tecnico:t.vendorName, semana:_sem, trabajos:(t.trabajos?t.trabajos.length:0)+" trabajos", subtotal:"Q"+(t.subtotal||0).toLocaleString(), descuento:"− Q"+(t.adelanto||0).toLocaleString(), total:"Q"+(t.neto||0).toLocaleString(), folio:pago.folio});
+        notifyTemplate(resolveNotifRecipients("comprobantePago", vendors, [t.vendorEmail]), "comprobantePago", {tecnico:t.vendorName, semana:_sem, trabajos:(t.trabajos?t.trabajos.length:0)+" trabajos", subtotal:"Q"+(t.subtotal||0).toLocaleString(), descuento:"− Q"+(t.adelanto||0).toLocaleString(), total:"Q"+(t.neto||0).toLocaleString(), folio:pago.folio});
       });
     }catch(_){}
     setPagoDetail(pago);
@@ -1460,7 +1581,7 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrl
       <ResponsiveHeader
         tab={tab} setTab={setTab}
         alertCount={alerts.length} pendingQA={pendingQA} sheetsOk={sheetsOk} adminLabel={adminVendor?vendorDisplay(adminVendor):"Admin"}
-        navItems={[["dash","Dashboard","dash"],["form","Formulario","edit"],["sched","Programa","calendar"],["qa","Calidad","star"],["adv","Adelantos","coins"],["cfg","Config","settings"]]}
+        navItems={(function(){ var n=[["dash","Dashboard","dash"],["form","Formulario","edit"],["sched","Programa","calendar"],["qa","Calidad","star"],["adv","Adelantos","coins"]]; if(canNotif) n.push(["notif","Notificaciones","bell"]); n.push(["cfg","Config","settings"]); return n; })()}
         onLogout={onLogout}
         role="Admin"
       />
@@ -1497,6 +1618,7 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrl
         <AdminQAPanel reps={reps} vendors={vendors} onQA={qaUpdate} onSelect={setDetail} onUpdate={onUpsert} isAdmin={true} me={adminVendor}/>
       </div>
       <div style={{display:tab==="adv"?"block":"none"}}><AdvancesAdmin adelantos={adelantos} reps={reps} vendors={vendors} onSvAdelantos={onSvAdelantos}/></div>
+      {canNotif&&<div style={{display:tab==="notif"?"block":"none"}}><NotifCfg prefs={notifPrefs} vendors={vendors} onSave={onSvNotifPrefs} readOnly={false}/></div>}
       <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  reps={reps} vendors={vendors} props={props} adminPin={adminPin} company={company} extCats={extCats||[]} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
 
       {detail&&<DetailModal rep={detail} vendors={vendors} props={props} hasLinkedDmg={reps.some(function(x){return isDanos(x.categoria)&&String(x._linkedToReport||"")===String(detail.id);})} onExtract={extractDanios} onClose={function(){setDetail(null);}} onMarkPaid={function(p){markPaid(detail.id,p);setDetail(function(x){return Object.assign({},x,{paid:p});});}} onSave={function(r){onUpsert(r);setDetail(r);}} onQA={qaUpdate} onDelete={function(){setCDel(detail.id);}}/>}
@@ -2710,9 +2832,9 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
       /* Notificar a supervisión: limpieza terminada, requiere revisión */
       try{
         var supsT=supervisorEmails(vendors, form.reportadoPor);
-        if(supsT.length){
+        var recSupT=resolveNotifRecipients("listaSupervision", vendors, [form.reportadoPor]); if(recSupT.length){
           var tnT=(vendors.find(function(v){return v.email===form.reportadoPor;})||{}).name||form.reportadoPor;
-          notifyTemplate(supsT, "listaSupervision", {tecnico:tnT, propiedad:form.propiedad, fecha:fmtDate(form.fecha), tipoLimpieza:"Limpieza estándar"});
+          notifyTemplate(recSupT, "listaSupervision", {tecnico:tnT, propiedad:form.propiedad, fecha:fmtDate(form.fecha), tipoLimpieza:"Limpieza estándar"});
         }
       }catch(_){}
       /* Auto-crear SIEMPRE el reporte de daños independiente cuando se reportó daño */
@@ -3206,9 +3328,9 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack}) {
       await onSubmit(rep);
       try{
         var supsP=supervisorEmails(vendors, form.reportadoPor);
-        if(supsP.length){
+        var recSupP=resolveNotifRecipients("listaSupervision", vendors, [form.reportadoPor]); if(recSupP.length){
           var tnP=(vendors.find(function(v){return v.email===form.reportadoPor;})||{}).name||form.reportadoPor;
-          notifyTemplate(supsP, "listaSupervision", {tecnico:tnP, propiedad:form.propiedad, fecha:fmtDate(form.fecha), tipoLimpieza:"Limpieza profunda"});
+          notifyTemplate(recSupP, "listaSupervision", {tecnico:tnP, propiedad:form.propiedad, fecha:fmtDate(form.fecha), tipoLimpieza:"Limpieza profunda"});
         }
       }catch(_){}
       setDone(true);
@@ -4511,7 +4633,7 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,hospU
     if(onUpdate) await onUpdate(upd);
     /* Avisar a supervisión y admin que el técnico respondió una corrección inmediata */
     if(r.qaTipo==="inmediata"&&response==="corregido"){
-      try{ notifyTemplate(supervisorEmails(allVendors,vendor.email).concat(adminEmails(allVendors)), "correccionAtendida", {tecnico:vendorDisplay(vendor), propiedad:r.propiedad, fecha:fmtDate(r.fecha)}); }catch(_){}
+      try{ notifyTemplate(resolveNotifRecipients("correccionAtendida", allVendors, [vendor.email]), "correccionAtendida", {tecnico:vendorDisplay(vendor), propiedad:r.propiedad, fecha:fmtDate(r.fecha)}); }catch(_){}
     }
   }
   return (
@@ -5012,6 +5134,7 @@ var ICONS = {
   camera:"M4 8h3l1.5-2h7L17 8h3a1 1 0 011 1v9a1 1 0 01-1 1H4a1 1 0 01-1-1V9a1 1 0 011-1zM12 17a3.5 3.5 0 100-7 3.5 3.5 0 000 7z",
   user:"M12 12a4 4 0 100-8 4 4 0 000 8zM4.5 20a7.5 7.5 0 0115 0",
   clip:"M21 11.5l-8.6 8.6a5 5 0 01-7-7l8.5-8.5a3.3 3.3 0 014.7 4.7l-8.5 8.5a1.7 1.7 0 01-2.4-2.4l7.8-7.8",
+  bell:"M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0",
 };
 function Icon({name, size, stroke, width, style}) {
   var d = ICONS[name] || "";
@@ -6678,7 +6801,7 @@ function DamageBoard({reps, vendors, me, isAdmin, onUpdate, onSelect}) {
   function setUrg(r,u){
     upd(r,{urgencia:u});
     if(u==="alta"){
-      try{ notifyTemplate(adminEmails(vendors), "danoUrgente", {propiedad:r.propiedad, fecha:fmtDate(r.fecha), detalle:(r.descripcion||""), clasificadoPor:(me?vendorDisplay(me):"Administración")}); }catch(_){}
+      try{ notifyTemplate(resolveNotifRecipients("danoUrgente", vendors, [r.reportadoPor]), "danoUrgente", {propiedad:r.propiedad, fecha:fmtDate(r.fecha), detalle:(r.descripcion||""), clasificadoPor:(me?vendorDisplay(me):"Administración")}); }catch(_){}
     }
   }
   function addCom(r){
@@ -8125,7 +8248,7 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
     var adv = Object.assign({id:"adv_"+Date.now(), vendorEmail:vendor.email, status:"pendiente", createdAt:Date.now(), pausas:[], firmadoEn:Date.now()}, draft());
     adv.contractText = buildContractText(adv);
     try{ await onSvAdelantos([adv].concat(adelantos||[])); }catch(e){}
-    try{ notifyTemplate(adminEmails(ADV_VENDORS), "solicitudAdelanto", {tecnico:vendorDisplay(vendor), monto:"Q"+montoN.toLocaleString(), cuotas:cuotas+" semanas", cuota:"Q"+semanal.toLocaleString()}); }catch(_){}
+    try{ notifyTemplate(resolveNotifRecipients("solicitudAdelanto", ADV_VENDORS, [vendor.email]), "solicitudAdelanto", {tecnico:vendorDisplay(vendor), monto:"Q"+montoN.toLocaleString(), cuotas:cuotas+" semanas", cuota:"Q"+semanal.toLocaleString()}); }catch(_){}
     setBusy(false); setDpiPhoto(null); setDpiNum(""); setMonto(""); setCuotas(8); setFirma(null);
   }
 
@@ -8337,14 +8460,14 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
   function approve(a){
     var next=list.map(function(x){return x.id===a.id?Object.assign({},x,{status:"activo", fechaDeposito:x.fechaDeposito||todayStr(), fechaInicio:x.fechaInicio||x.fechaDeposito||todayStr()}):x;});
     var u=autoUnify(next, reps); onSvAdelantos(u.list);
-    try{ notifyTemplate([a.vendorEmail], "adelantoDepositado", {tecnico:a.vendorName, monto:"Q"+(a.monto||0).toLocaleString(), fecha:fmtDate(todayStr()), cuota:"Q"+(a.cobroSemanal||0).toLocaleString(), cuotas:(a.cuotas||"")+" semanas"}); }catch(_){}
+    try{ notifyTemplate(resolveNotifRecipients("adelantoDepositado", vendors, [a.vendorEmail]), "adelantoDepositado", {tecnico:a.vendorName, monto:"Q"+(a.monto||0).toLocaleString(), fecha:fmtDate(todayStr()), cuota:"Q"+(a.cobroSemanal||0).toLocaleString(), cuotas:(a.cuotas||"")+" semanas"}); }catch(_){}
   }
   /* Activar tras el depósito (adelanto iniciado por el admin y ya firmado por el técnico). */
   function activateDeposit(a){
     if(!advDeposits(a).length) return;
     var next=list.map(function(x){return x.id===a.id?Object.assign({},x,{status:"activo", fechaInicio:todayStr(), fechaDeposito:x.fechaDeposito||todayStr()}):x;});
     var u=autoUnify(next, reps); onSvAdelantos(u.list);
-    try{ notifyTemplate([a.vendorEmail], "adelantoDepositado", {tecnico:a.vendorName, monto:"Q"+(a.monto||0).toLocaleString(), fecha:fmtDate(todayStr()), cuota:"Q"+(a.cobroSemanal||0).toLocaleString(), cuotas:(a.cuotas||"")+" semanas"}); }catch(_){}
+    try{ notifyTemplate(resolveNotifRecipients("adelantoDepositado", vendors, [a.vendorEmail]), "adelantoDepositado", {tecnico:a.vendorName, monto:"Q"+(a.monto||0).toLocaleString(), fecha:fmtDate(todayStr()), cuota:"Q"+(a.cobroSemanal||0).toLocaleString(), cuotas:(a.cuotas||"")+" semanas"}); }catch(_){}
   }
   /* Guarda el comprobante de depósito (top-level, o en un sub-contrato si es unificado). */
   function setDeposit(a, receipt, contractIdx){
@@ -8585,7 +8708,7 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
       status:"pendiente_tecnico", createdAt:Date.now(), pausas:[], creadoPorAdmin:true};
     adv.contractText=buildContractText(adv);
     onCreate(adv);
-    try{ notifyTemplate(vendor.email, "adelantoFirma", {tecnico:vendorDisplay(vendor), monto:"Q"+montoN.toLocaleString(), cuotas:cuotas+" semanas", cuota:"Q"+semanal.toLocaleString()}); }catch(_){}
+    try{ notifyTemplate(resolveNotifRecipients("adelantoFirma", ADV_VENDORS, [vendor.email]), "adelantoFirma", {tecnico:vendorDisplay(vendor), monto:"Q"+montoN.toLocaleString(), cuotas:cuotas+" semanas", cuota:"Q"+semanal.toLocaleString()}); }catch(_){}
     onClose();
   }
   return (
