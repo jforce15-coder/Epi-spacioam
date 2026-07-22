@@ -7145,6 +7145,10 @@ function incomeLast8(reps, emails){
 }
 /* Límite dinámico de adelanto de un técnico = ½ de sus ingresos de las últimas 8 semanas. */
 function maxAdvanceForVendor(reps, vendor){ return Math.floor(incomeLast8(reps, vendorEmailSet(vendor))/2); }
+/* Promedio de ingreso semanal (últimas 8 semanas, dividido entre 8 semanas fijas). */
+function avgWeekly8(reps, emails){ return incomeLast8(reps, emails)/8; }
+/* Tope de cuota semanal = 25% del promedio de ingreso semanal de las últimas 8 semanas. */
+function maxWeeklyChargeForVendor(reps, vendor){ return Math.floor(avgWeekly8(reps, vendorEmailSet(vendor))*0.25); }
 function isInternalVendor(v){ return !!v && v.tipo==="interno"; }
 /* Pago semanal promedio del técnico (semanas con trabajos) — para el % de adelanto */
 function avgWeekPay(reps,email){
@@ -8060,6 +8064,8 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
   /* Suma de saldos vigentes (activos por su saldo, solicitudes pendientes por su monto) */
   var saldoVigente = vigentes.reduce(function(s,a){ return s + (a.status==="activo" ? advanceState(a,reps).saldo : (parseFloat(a.monto)||0)); },0);
   var disponible = Math.max(0, maxTotal - saldoVigente);
+  /* Tope de cuota semanal: 25% del promedio de ingreso semanal (últimas 8 semanas). */
+  var maxWeekly = Math.floor(sum8/8*0.25);
 
   const [dpiPhoto,setDpiPhoto] = useState(null);
   const [nombre,setNombre] = useState(vendorDisplay(vendor)||"");
@@ -8076,10 +8082,14 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
   var montoN = parseFloat(monto||0)||0;
   var semanal = cuotas>0 ? Math.ceil(montoN/cuotas) : 0;
   var mensual = Math.round(semanal*52/12);
+  /* Mínimo de cuotas para que la cuota semanal no exceda el 25% del ingreso semanal. */
+  var minCuotas = (maxWeekly>0 && montoN>0) ? Math.min(16, Math.ceil(montoN/maxWeekly)) : 1;
   var datosOk = !!dpiPhoto && nombre.trim() && dpiNum.trim();
-  var montoOk = datosOk && montoN>0 && montoN<=disponible;
+  var montoOk = datosOk && montoN>0 && montoN<=disponible && (maxWeekly<=0 || semanal<=maxWeekly);
 
   async function pickDpi(file){ if(!file) return; try{ var d=await compress(file); setDpiPhoto(d); }catch(e){} }
+  /* Sube automáticamente las cuotas si la cuota semanal superaría el 25% del ingreso. */
+  useEffect(function(){ if(cuotas<minCuotas) setCuotas(minCuotas); },[minCuotas]);
   function draft(){ return {vendorName:nombre,dpiNumber:dpiNum,monto:montoN,cuotas:cuotas,cobroSemanal:semanal,fechaDeposito:fecha,fechaInicio:fecha,dpiPhoto:dpiPhoto,firma:firma}; }
 
   async function submit(){
@@ -8183,15 +8193,17 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
                 <F label={"Monto a solicitar (máx. Q"+disponible.toLocaleString()+")"}><input type="number" inputMode="numeric" placeholder={"Ej. "+Math.min(500,disponible)} value={monto} onChange={function(e){setMonto(e.target.value);setErr("");}}/></F>
                 {montoN>disponible&&<div style={{fontSize:11,color:C.red,fontWeight:600,marginTop:-6}}>Excede tu disponible (Q{disponible.toLocaleString()}).</div>}
                 <div>
-                  <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:9}}>Cuotas semanales — máx. 16</div>
+                  <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:9}}>Cuotas semanales{minCuotas>1?" — mín. "+minCuotas:""} · máx. 16</div>
                   <div style={{display:"flex",alignItems:"center",gap:14}}>
-                    <input type="range" min="1" max="16" value={cuotas} onChange={function(e){setCuotas(parseInt(e.target.value));}} style={{flex:1,accentColor:C.peach}}/>
+                    <input type="range" min={minCuotas} max="16" value={cuotas} onChange={function(e){setCuotas(parseInt(e.target.value));}} style={{flex:1,accentColor:C.peach}}/>
                     <span style={{fontSize:15,fontWeight:700,color:C.black,minWidth:64,textAlign:"right"}}>{cuotas} sem.</span>
                   </div>
+                  {maxWeekly>0&&<div style={{fontSize:10.5,color:C.earth,marginTop:8,lineHeight:1.5}}>La cuota semanal no puede superar Q{maxWeekly.toLocaleString()} (25% de tu ingreso semanal promedio de las últimas 8 semanas).</div>}
                 </div>
                 {montoN>0&&(
                   <div style={{background:C.peach12||"rgba(233,130,106,.12)",borderRadius:12,padding:"13px 15px",display:"flex",flexDirection:"column",gap:9}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:12,color:C.black,fontWeight:600}}>Descuento semanal</span><span style={{fontSize:17,fontWeight:700,color:C.peach}}>Q{semanal.toLocaleString()}</span></div>
+                    {maxWeekly>0&&<div style={{fontSize:10.5,color:semanal>maxWeekly?C.red:C.earth,fontWeight:semanal>maxWeekly?700:400}}>{Math.round(semanal/(sum8/8)*100)}% de tu ingreso semanal promedio{semanal>maxWeekly?" — supera el 25% permitido":""}</div>}
                     <div style={{height:1,background:"rgba(62,63,63,.10)"}}/>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:12,color:C.black,fontWeight:600}}>Débito mensual aprox.</span><span style={{fontSize:14,fontWeight:700,color:C.black}}>Q{mensual.toLocaleString()}</span></div>
                   </div>
@@ -8535,8 +8547,12 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
   var saldoVigente = vigentes.reduce(function(s,a){return s+(a.status==="activo"?advanceState(a,reps).saldo:(parseFloat(a.monto)||0));},0);
   var disponible = Math.max(0, maxTotal - saldoVigente);
   var montoN = parseFloat(monto||0)||0;
+  /* Tope de cuota semanal: 25% del promedio de ingreso semanal (últimas 8 semanas). */
+  var maxWeekly = Math.floor(sum8/8*0.25);
+  var minCuotas = (maxWeekly>0 && montoN>0) ? Math.min(16, Math.ceil(montoN/maxWeekly)) : 1;
   var semanal = cuotas>0?Math.ceil(montoN/cuotas):0;
-  var ok = vendor && montoN>0 && montoN<=disponible;
+  var ok = vendor && montoN>0 && montoN<=disponible && (maxWeekly<=0 || semanal<=maxWeekly);
+  useEffect(function(){ if(cuotas<minCuotas) setCuotas(minCuotas); },[minCuotas]);
   function crear(){
     setErr("");
     if(!vendor) return setErr("Elige un técnico interno.");
@@ -8568,11 +8584,12 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
           </div>
           <F label={"Monto (máx. Q"+disponible.toLocaleString()+")"}><input type="number" inputMode="numeric" value={monto} placeholder={"Ej. "+Math.min(500,disponible||500)} onChange={function(e){setMonto(e.target.value);setErr("");}}/></F>
           <div>
-            <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:9}}>Cuotas semanales — máx. 16</div>
+            <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:9}}>Cuotas semanales{minCuotas>1?" — mín. "+minCuotas:""} · máx. 16</div>
             <div style={{display:"flex",alignItems:"center",gap:14}}>
-              <input type="range" min="1" max="16" value={cuotas} onChange={function(e){setCuotas(parseInt(e.target.value));}} style={{flex:1,accentColor:C.peach}}/>
+              <input type="range" min={minCuotas} max="16" value={cuotas} onChange={function(e){setCuotas(parseInt(e.target.value));}} style={{flex:1,accentColor:C.peach}}/>
               <span style={{fontSize:15,fontWeight:700,color:C.black,minWidth:64,textAlign:"right"}}>{cuotas} sem.</span>
             </div>
+            {maxWeekly>0&&<div style={{fontSize:10.5,color:semanal>maxWeekly?C.red:C.earth,marginTop:8,lineHeight:1.5,fontWeight:semanal>maxWeekly?700:400}}>Cuota Q{semanal.toLocaleString()} · tope Q{maxWeekly.toLocaleString()} (25% del ingreso semanal promedio){semanal>maxWeekly?" — excede el tope":""}</div>}
           </div>
           <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
             <div style={{flex:1,minWidth:150}}><F label="Fecha del depósito"><input type="date" value={fecha} onChange={function(e){setFecha(e.target.value);}}/></F></div>
