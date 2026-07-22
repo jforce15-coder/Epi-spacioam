@@ -2179,7 +2179,7 @@ function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendo
         </Card>
         <Card title="Propiedad">
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
-            <F label="Propiedad"><select value={form.propiedad} onChange={function(e){setF("propiedad",e.target.value);}}><option value="">Seleccionar…</option>{props.map(function(p){return <option key={p.id}>{p.name}</option>;})}</select></F>
+            <F label="Propiedad"><select value={form.propiedad} onChange={function(e){setF("propiedad",e.target.value);}}><option value="">Seleccionar…</option>{visibleProps(props).map(function(p){return <option key={p.id}>{p.name}</option>;})}</select></F>
             <F label="Fecha"><input type="date" value={form.fecha} onChange={function(e){setF("fecha",e.target.value);}}/></F>
           </div>
         </Card>
@@ -2280,7 +2280,7 @@ function NuevoProductoForm({vendors,props,onSubmit,defaultVendor,onBack}) {
             <F label="Propiedad / Apartamento donde va">
               <select value={prop} onChange={function(e){setProp(e.target.value);}}>
                 <option value="">Sin asignar (general)</option>
-                {props.map(function(p){return <option key={p.id}>{p.name}</option>;})}
+                {visibleProps(props).map(function(p){return <option key={p.id}>{p.name}</option>;})}
               </select>
             </F>
             <F label="Fecha de compra">
@@ -2375,7 +2375,7 @@ function AjusteForm({vendors,props,onSubmit,defaultVendor,onBack}) {
         </Card>
         <Card title="Detalles">
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
-            <F label="Apartamento"><select value={prop} onChange={function(e){setProp(e.target.value);}}><option value="">Seleccionar…</option>{props.map(function(p){return <option key={p.id}>{p.name}</option>;})}</select></F>
+            <F label="Apartamento"><select value={prop} onChange={function(e){setProp(e.target.value);}}><option value="">Seleccionar…</option>{visibleProps(props).map(function(p){return <option key={p.id}>{p.name}</option>;})}</select></F>
             <F label="Fecha"><input type="date" value={fecha} onChange={function(e){setFecha(e.target.value);}}/></F>
             <F label="Monto (Q)"><input type="number" placeholder="Ej. 120" value={monto} onChange={function(e){setMonto(e.target.value);}}/></F>
           </div>
@@ -2429,7 +2429,7 @@ function DanosFormSolo({vendors,props,onSubmit,defaultVendor,onBack}) {
               ?<div style={{fontSize:14,fontWeight:600,color:C.black,background:C.surfaceWarm,padding:"11px 14px",borderRadius:10}}>{vendors.find(function(v){return v.email===defaultVendor;})?vendorDisplay(vendors.find(function(v){return v.email===defaultVendor;})):defaultVendor}</div>
               :<F label="Quien reporta"><select value={resp} onChange={function(e){setResp(e.target.value);}}><option value="">Seleccionar…</option>{vendors.filter(function(v){return v.active;}).map(function(v){return <option key={v.id} value={v.email}>{v.name}</option>;})}</select></F>
             }
-            <F label="Propiedad"><select value={prop} onChange={function(e){setProp(e.target.value);}}><option value="">Seleccionar…</option>{props.map(function(p){return <option key={p.id}>{p.name}</option>;})}</select></F>
+            <F label="Propiedad"><select value={prop} onChange={function(e){setProp(e.target.value);}}><option value="">Seleccionar…</option>{visibleProps(props).map(function(p){return <option key={p.id}>{p.name}</option>;})}</select></F>
             <F label="Fecha"><input type="date" value={fecha} onChange={function(e){setFecha(e.target.value);}}/></F>
           </div>
         </Card>
@@ -2794,7 +2794,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
         {step===4&&(
           <WizStep title="¿Qué propiedad estás limpiando?" step={step} total={STEPS.length-2} onPrev={prev} onNext={next} canNext={!!form.propiedad&&(refPhotosOf(propObj).length===0?true:refAck.gallery)}>
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
-              <F label="Propiedad"><select value={form.propiedad} onChange={function(e){sf("propiedad",e.target.value);}}><option value="">Seleccionar…</option>{props.map(function(p){return <option key={p.id}>{p.name}</option>;})}</select></F>
+              <F label="Propiedad"><select value={form.propiedad} onChange={function(e){sf("propiedad",e.target.value);}}><option value="">Seleccionar…</option>{visibleProps(props).map(function(p){return <option key={p.id}>{p.name}</option>;})}</select></F>
               <F label="Fecha de limpieza"><input type="date" value={form.fecha} onChange={function(e){sf("fecha",e.target.value);}}/></F>
             </div>
             {form.propiedad&&<RefGallery propObj={propObj} acked={refAck.gallery} onAck={function(){setRefAck(function(p){return Object.assign({},p,{gallery:true});});}}/>}
@@ -3234,7 +3234,7 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack}) {
                 ?<div style={{fontSize:14,fontWeight:600,color:C.black,background:C.beige,padding:"11px 14px",borderRadius:10,marginBottom:4}}>{vendors.find(function(v){return v.email===defaultVendor;})?vendors.find(function(v){return v.email===defaultVendor;}).name:defaultVendor}</div>
                 :<F label="Responsable"><select value={form.reportadoPor} onChange={function(e){sf("reportadoPor",e.target.value);}}><option value="">Seleccionar…</option>{vendors.filter(function(v){return v.active;}).map(function(v){return <option key={v.id} value={v.email}>{v.name}</option>;})}</select></F>
               }
-              <F label="Propiedad"><select value={form.propiedad} onChange={function(e){sf("propiedad",e.target.value);}}><option value="">Seleccionar…</option>{props.map(function(p){return <option key={p.id}>{p.name}</option>;})}</select></F>
+              <F label="Propiedad"><select value={form.propiedad} onChange={function(e){sf("propiedad",e.target.value);}}><option value="">Seleccionar…</option>{visibleProps(props).map(function(p){return <option key={p.id}>{p.name}</option>;})}</select></F>
               <F label="Fecha"><input type="date" value={form.fecha} onChange={function(e){sf("fecha",e.target.value);}}/></F>
             </div>
           </WizStep>
@@ -3809,6 +3809,7 @@ function PropList({props, onSave}) {
   return (
     <div style={{display:"flex",flexDirection:"column",gap:8}}>
       {props.map(function(p,i){
+        if(p.hidden) return null;
         var isConfirming = confirmId===p.id;
         return (
           <div key={p.id} style={{background:"#fff",borderRadius:10,padding:"12px 16px",border:"1px solid "+(isConfirming?"#DBC8C4":C.line)}}>
@@ -3816,9 +3817,14 @@ function PropList({props, onSave}) {
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:isConfirming?10:8}}>
               <span style={{fontSize:13.5,fontWeight:500,color:C.black,flex:1}}>{p.name}</span>
               {!isConfirming&&(
-                <button onClick={function(){setConfirmId(p.id);}} style={{flexShrink:0,padding:"5px 12px",borderRadius:6,border:"1px solid #DBC8C4",background:"#FFF9F9",color:C.red,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
-                  Eliminar
-                </button>
+                <div style={{display:"flex",gap:6,flexShrink:0}}>
+                  <button onClick={function(){onSave(props.map(function(x){return x.id===p.id?Object.assign({},x,{hidden:true}):x;}));}} style={{padding:"5px 12px",borderRadius:6,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
+                    Ocultar
+                  </button>
+                  <button onClick={function(){setConfirmId(p.id);}} style={{padding:"5px 12px",borderRadius:6,border:"1px solid #DBC8C4",background:"#FFF9F9",color:C.red,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
+                    Eliminar
+                  </button>
+                </div>
               )}
             </div>
 
@@ -3911,14 +3917,44 @@ async function fetchOwnerListings(){
   }
   return map;
 }
+/* Lista cruda del dashboard de propietarios (nombre + enlace), sin normalizar,
+   para las verificaciones. */
+async function fetchOwnerRaw(){
+  var url="https://docs.google.com/spreadsheets/d/"+OWNER_SHEET_ID+"/gviz/tq?tqx=out:csv&sheet="+encodeURIComponent("SETUP");
+  var res=await fetch(url);
+  if(!res.ok) throw new Error("No se pudo leer el dashboard ("+res.status+")");
+  var rows=parseCSVrows(await res.text()); if(!rows.length) return [];
+  var head=rows[0].map(function(h){return (h||"").trim();});
+  var iName=head.indexOf("property_name"), iLink=head.indexOf("Listing link");
+  if(iName<0) throw new Error("El dashboard no tiene la columna property_name");
+  var out=[],seen={};
+  for(var r=1;r<rows.length;r++){ var nm=(rows[r][iName]||"").trim(); if(!nm) continue; var k=normNm(nm); if(seen[k])continue; seen[k]=1; out.push({name:nm,link:iLink>=0?(rows[r][iLink]||"").trim():""}); }
+  return out;
+}
+function VBlock({title,hint,children}){
+  return (
+    <div style={{marginTop:14}}>
+      <div style={{fontSize:11,fontWeight:700,color:C.black,marginBottom:hint?3:8}}>{title}</div>
+      {hint&&<div style={{fontSize:10.5,color:C.taupe,lineHeight:1.5,marginBottom:8}}>{hint}</div>}
+      <div style={{display:"flex",flexDirection:"column",gap:7}}>{children}</div>
+    </div>
+  );
+}
+function VRow({name}){ return <div style={{background:C.beige,borderRadius:8,padding:"9px 12px",fontSize:12.5,color:C.black}}>{name}</div>; }
+function CopyChip({label,onClick}){ return <button onClick={onClick} style={{flexShrink:0,padding:"4px 11px",borderRadius:20,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:10.5,fontWeight:700,letterSpacing:".04em",cursor:"pointer",whiteSpace:"nowrap"}}>{label}</button>; }
 
 function PropsCfg({props,onSave}) {
   const [newP, setNewP] = useState("");
   const [msg,  setMsg]  = useState(null);
-  const [impMsg, setImpMsg] = useState(null);
-  const [impBusy,setImpBusy]= useState(false);
   const [hospMsg, setHospMsg] = useState(null);
   const [hospBusy,setHospBusy]= useState(false);
+  const [hospList,setHospList]= useState(function(){ try{return JSON.parse(localStorage.getItem("epi_hospList")||"[]");}catch(_){return [];} });
+  const [ownerList,setOwnerList]= useState([]);
+  const [ownerErr,setOwnerErr]= useState(null);
+  const [copiedKey,setCopiedKey]= useState(null);
+  const [v1Open,setV1Open]= useState(false);
+  const [v2Open,setV2Open]= useState(false);
+  const [hidOpen,setHidOpen]= useState(false);
   const ref = useRef(null);
   async function syncFromHospitable(){
     if(IS_CLAUDE_SANDBOX){ setHospMsg("No se pudo sincronizar: la conexión con Hospitable solo funciona en la app publicada."); setTimeout(function(){setHospMsg(null);},6000); return; }
@@ -3926,36 +3962,18 @@ function PropsCfg({props,onSave}) {
     try{
       var d = await apiCall("syncListings");
       if(d&&Array.isArray(d.props)) onSave(d.props);
+      if(d&&Array.isArray(d.hospitable)){ setHospList(d.hospitable); try{localStorage.setItem("epi_hospList",JSON.stringify(d.hospitable));}catch(_){} }
       var a=(d&&d.added)||0, u=(d&&d.updated)||0;
       setHospMsg(a||u ? (a+" nuevas · "+u+" actualizadas desde Hospitable.") : "Todo al día — sin cambios desde Hospitable.");
     }catch(e){ setHospMsg("No se pudo sincronizar: "+(e&&e.message?e.message:"error de conexión.")); }
     finally{ setHospBusy(false); setTimeout(function(){setHospMsg(null);},8000); }
   }
-  async function importLinks(silent){
-    setImpBusy(true);if(!silent)setImpMsg(null);
-    try{
-      var map=await fetchOwnerListings();
-      var matched=0;
-      var merged=props.map(function(p){
-        var lk=map[normNm(p.name)];
-        if(lk&&p.listingUrl!==lk){matched++;return Object.assign({},p,{listingUrl:lk});}
-        return p;
-      });
-      if(matched>0) onSave(merged);
-      try{ localStorage.setItem("epi_lastLinkImport", String(Date.now())); }catch(_){}
-      if(!silent) setImpMsg(matched>0?(matched+" enlaces de anuncios importados del dashboard de propietarios."):"No se encontraron enlaces nuevos (revisa que los nombres de las propiedades coincidan con los del dashboard).");
-    }catch(e){ if(!silent) setImpMsg("No se pudo importar: "+(e&&e.message?e.message:"error de lectura.")); }
-    finally{ setImpBusy(false); if(!silent) setTimeout(function(){setImpMsg(null);},7000); }
-  }
-  /* Importación recurrente: si pasó más de 3 días desde la última, vuelve a
-     traer los enlaces automáticamente al abrir esta pestaña (silencioso). */
+  /* Trae la lista del dashboard de propietarios para las verificaciones. */
   useEffect(function(){
     if(IS_CLAUDE_SANDBOX) return;
-    try{
-      var last=parseInt(localStorage.getItem("epi_lastLinkImport")||"0",10);
-      if(Date.now()-last > 3*86400000){ importLinks(true); }
-    }catch(_){}
+    fetchOwnerRaw().then(function(list){ setOwnerList(list); setOwnerErr(null); }).catch(function(e){ setOwnerErr(e&&e.message?e.message:"error de lectura"); });
   }, []);
+  function copyName(name,key){ try{ navigator.clipboard.writeText(name); }catch(_){} setCopiedKey(key); setTimeout(function(){setCopiedKey(null);},1500); }
   function handleTxt(e) {
     var file=e.target.files&&e.target.files[0]; if(!file) return;
     var reader=new FileReader();
@@ -3978,17 +3996,7 @@ function PropsCfg({props,onSave}) {
         <input ref={ref} type="file" accept=".txt,text/plain" style={{display:"none"}} onChange={handleTxt}/>
         {msg&&<div style={{marginTop:10,fontSize:13,fontWeight:600,color:C.green,background:"#EDF5EF",padding:"9px 13px",borderRadius:9}}>{msg}</div>}
       </div>
-      <div style={{fontSize:10.5,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",paddingLeft:2}}>Lista — {props.length} propiedades</div>
-      <div style={{background:"#fff",borderRadius:12,padding:14,border:"1px solid "+C.line}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
-          <div style={{flex:"1 1 200px"}}>
-            <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>Enlaces de anuncios (dashboard de propietarios)</div>
-            <div style={{fontSize:11,color:C.taupe,marginTop:3,lineHeight:1.5}}>Trae automáticamente el enlace del anuncio de cada propiedad desde el dashboard de propietarios, emparejando por nombre.</div>
-          </div>
-          <button onClick={importLinks} disabled={impBusy} style={{padding:"10px 16px",borderRadius:9,border:"1.5px solid "+C.gray,background:impBusy?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:impBusy?"wait":"pointer",flexShrink:0}}>{impBusy?"Importando…":"↧ Importar enlaces"}</button>
-        </div>
-        {impMsg&&<div style={{marginTop:10,fontSize:12.5,fontWeight:600,color:impMsg.indexOf("No se")===0?C.red:C.green,background:impMsg.indexOf("No se")===0?"#F5EDEC":"#EDF5EF",padding:"9px 13px",borderRadius:9,lineHeight:1.5}}>{impMsg}</div>}
-      </div>
+      <div style={{fontSize:10.5,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",paddingLeft:2}}>Lista — {visibleProps(props).length} propiedades</div>
       <div style={{background:"#fff",borderRadius:12,padding:14,border:"1px solid "+C.line}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
           <div style={{flex:"1 1 200px"}}>
@@ -3999,15 +4007,123 @@ function PropsCfg({props,onSave}) {
         </div>
         {hospMsg&&<div style={{marginTop:10,fontSize:12.5,fontWeight:600,color:hospMsg.indexOf("No se")===0?C.red:C.green,background:hospMsg.indexOf("No se")===0?"#F5EDEC":"#EDF5EF",padding:"9px 13px",borderRadius:9,lineHeight:1.5}}>{hospMsg}</div>}
       </div>
+
+      {/* ── VERIFICACIÓN 1 — Hospitable ↔ Dashboard de propietarios ── */}
       {(function(){
-        var problemas=props.filter(function(p){ return !p.listingUrl || refPhotosOf(p).length===0; });
+        var hospByKey={}, ownByKey={};
+        hospList.forEach(function(h){ if(h&&h.name) hospByKey[matchKey(h.name)]=h.name; });
+        ownerList.forEach(function(o){ if(o&&o.name) ownByKey[matchKey(o.name)]=o.name; });
+        var soloHosp=[], soloOwn=[], difFormato=[];
+        Object.keys(hospByKey).forEach(function(k){
+          if(ownByKey[k]==null) soloHosp.push(hospByKey[k]);
+          else if(hospByKey[k]!==ownByKey[k]) difFormato.push({hosp:hospByKey[k],own:ownByKey[k]});
+        });
+        Object.keys(ownByKey).forEach(function(k){ if(hospByKey[k]==null) soloOwn.push(ownByKey[k]); });
+        var total=soloHosp.length+soloOwn.length+difFormato.length;
+        var ready=hospList.length>0 && !ownerErr;
+        return (
+          <div style={{background:"#fff",borderRadius:12,border:"1px solid "+C.line,overflow:"hidden"}}>
+            <button onClick={function(){setV1Open(!v1Open);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"13px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+              <div>
+                <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>Verificación · Hospitable ↔ Dashboard de propietarios</div>
+                <div style={{fontSize:10.5,color:C.taupe,marginTop:2}}>{!ready?"Sincroniza con Hospitable para comparar":(total===0?"Todo coincide entre ambas fuentes":total+" diferencia"+(total===1?"":"s")+" por revisar")}</div>
+              </div>
+              <span style={{flexShrink:0,display:"inline-flex",alignItems:"center",gap:8}}>
+                {ready&&total>0&&<span style={{background:"#FBEEE9",color:"#B45B43",fontSize:11,fontWeight:700,padding:"2px 9px",borderRadius:20}}>{total}</span>}
+                <span style={{color:C.taupe,fontSize:13,transform:v1Open?"rotate(180deg)":"none"}}>⌄</span>
+              </span>
+            </button>
+            {v1Open&&<div style={{padding:"0 16px 16px",borderTop:"1px solid "+C.line}}>
+              {ownerErr&&<div style={{marginTop:12,fontSize:11.5,color:C.red}}>No se pudo leer el dashboard: {ownerErr}</div>}
+              {!ready&&!ownerErr&&<div style={{marginTop:12,fontSize:11.5,color:C.taupe,lineHeight:1.55}}>Primero pulsa “Sincronizar con Hospitable” arriba. Luego aquí verás qué propiedades faltan en una de las dos fuentes y cuáles tienen el nombre escrito distinto.</div>}
+              {ready&&total===0&&<div style={{marginTop:12,fontSize:11.5,color:C.green,fontWeight:600}}>✓ Las {Object.keys(hospByKey).length} propiedades de Hospitable coinciden con el dashboard.</div>}
+              {ready&&difFormato.length>0&&<VBlock title={"Mismo lugar, nombre distinto ("+difFormato.length+")"} hint="Difieren en tildes, espacios o guiones. Copia el nombre correcto y edítalo a mano en la fuente que quieras unificar.">
+                {difFormato.map(function(d,i){return (
+                  <div key={"df"+i} style={{display:"flex",flexDirection:"column",gap:6,background:C.beige,borderRadius:8,padding:"9px 11px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}><span style={{fontSize:10,fontWeight:700,color:C.taupe,letterSpacing:".1em"}}>HOSPITABLE</span><CopyChip label={copiedKey==="h"+i?"Copiado":"Copiar"} onClick={function(){copyName(d.hosp,"h"+i);}}/></div>
+                    <span style={{fontSize:12.5,color:C.black,fontWeight:500}}>{d.hosp}</span>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginTop:2}}><span style={{fontSize:10,fontWeight:700,color:C.taupe,letterSpacing:".1em"}}>DASHBOARD</span><CopyChip label={copiedKey==="o"+i?"Copiado":"Copiar"} onClick={function(){copyName(d.own,"o"+i);}}/></div>
+                    <span style={{fontSize:12.5,color:C.black,fontWeight:500}}>{d.own}</span>
+                  </div>
+                );})}
+              </VBlock>}
+              {ready&&soloHosp.length>0&&<VBlock title={"Solo en Hospitable — falta en el dashboard ("+soloHosp.length+")"}>
+                {soloHosp.map(function(n,i){return <VRow key={"sh"+i} name={n}/>; })}
+              </VBlock>}
+              {ready&&soloOwn.length>0&&<VBlock title={"Solo en el dashboard — falta en Hospitable ("+soloOwn.length+")"}>
+                {soloOwn.map(function(n,i){return <VRow key={"so"+i} name={n}/>; })}
+              </VBlock>}
+            </div>}
+          </div>
+        );
+      })()}
+
+      {/* ── VERIFICACIÓN 2 — Hospitable ↔ propiedades ya importadas (merge) ── */}
+      {(function(){
+        var groups={};
+        props.forEach(function(p){ var k=matchKey(p.name); (groups[k]=groups[k]||[]).push(p); });
+        var dups=Object.keys(groups).map(function(k){return groups[k];}).filter(function(g){return g.length>1;});
+        var hospByKey={}; hospList.forEach(function(h){ if(h&&h.name) hospByKey[matchKey(h.name)]=h.name; });
+        var fmt=[];
+        props.forEach(function(p){ var hn=hospByKey[matchKey(p.name)]; if(hn&&hn!==p.name) fmt.push({prop:p,hosp:hn}); });
+        var total=dups.length+fmt.length;
+        function mergeGroup(g){
+          var best=g.slice().sort(function(a,b){return completeness(b)-completeness(a);})[0];
+          var merged=Object.assign({},best);
+          g.forEach(function(p){ if(p===best)return; ["listingUrl","address","hospId","cuartos","banos"].forEach(function(f){ if(!merged[f]&&p[f])merged[f]=p[f]; }); if(p.refImagenes){ merged.refImagenes=Object.assign({},p.refImagenes,merged.refImagenes||{}); } });
+          var drop={}; g.forEach(function(p){ if(p!==best)drop[p.id]=1; });
+          onSave(props.filter(function(p){return !drop[p.id];}).map(function(p){return p.id===best.id?merged:p;}));
+        }
+        return (
+          <div style={{background:"#fff",borderRadius:12,border:"1px solid "+C.line,overflow:"hidden"}}>
+            <button onClick={function(){setV2Open(!v2Open);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"13px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+              <div>
+                <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>Verificación · duplicados y nombres en tu lista</div>
+                <div style={{fontSize:10.5,color:C.taupe,marginTop:2}}>{total===0?"Sin duplicados ni diferencias de nombre":total+" por revisar"}</div>
+              </div>
+              <span style={{flexShrink:0,display:"inline-flex",alignItems:"center",gap:8}}>
+                {total>0&&<span style={{background:"#FBEEE9",color:"#B45B43",fontSize:11,fontWeight:700,padding:"2px 9px",borderRadius:20}}>{total}</span>}
+                <span style={{color:C.taupe,fontSize:13,transform:v2Open?"rotate(180deg)":"none"}}>⌄</span>
+              </span>
+            </button>
+            {v2Open&&<div style={{padding:"0 16px 16px",borderTop:"1px solid "+C.line}}>
+              {total===0&&<div style={{marginTop:12,fontSize:11.5,color:C.green,fontWeight:600}}>✓ Sin propiedades repetidas ni nombres divergentes.</div>}
+              {dups.length>0&&<VBlock title={"Posibles duplicados ("+dups.length+")"} hint="Parecen la misma propiedad escrita distinto. Combinar conserva la ficha más completa (fotos, enlace, cuartos/baños) y elimina la repetida.">
+                {dups.map(function(g,i){return (
+                  <div key={"dup"+i} style={{background:C.beige,borderRadius:8,padding:"10px 11px"}}>
+                    <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:9}}>
+                      {g.map(function(p){return <div key={p.id} style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:12.5,color:C.black,fontWeight:500}}>{p.name}</span>{p.hidden&&<span style={{fontSize:9.5,color:C.taupe}}>(oculta)</span>}</div>;})}
+                    </div>
+                    <button onClick={function(){mergeGroup(g);}} style={{padding:"7px 14px",borderRadius:7,border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Combinar</button>
+                  </div>
+                );})}
+              </VBlock>}
+              {fmt.length>0&&<VBlock title={"Nombre distinto al de Hospitable ("+fmt.length+")"} hint="El mismo lugar aparece con otro texto en Hospitable. Usa el nombre de Hospitable en tu lista, o copia para unificar la fuente a mano.">
+                {fmt.map(function(d,i){return (
+                  <div key={"fm"+i} style={{background:C.beige,borderRadius:8,padding:"10px 11px",display:"flex",flexDirection:"column",gap:7}}>
+                    <div><span style={{fontSize:10,fontWeight:700,color:C.taupe,letterSpacing:".1em"}}>TU LISTA</span><div style={{fontSize:12.5,color:C.black,fontWeight:500}}>{d.prop.name}</div></div>
+                    <div><span style={{fontSize:10,fontWeight:700,color:C.taupe,letterSpacing:".1em"}}>HOSPITABLE</span><div style={{fontSize:12.5,color:C.black,fontWeight:500}}>{d.hosp}</div></div>
+                    <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                      <button onClick={function(){onSave(props.map(function(p){return p.id===d.prop.id?Object.assign({},p,{name:d.hosp}):p;}));}} style={{padding:"7px 12px",borderRadius:7,border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Usar nombre de Hospitable</button>
+                      <CopyChip label={copiedKey==="f"+i?"Copiado":"Copiar nombre"} onClick={function(){copyName(d.prop.name,"f"+i);}}/>
+                    </div>
+                  </div>
+                );})}
+              </VBlock>}
+            </div>}
+          </div>
+        );
+      })()}
+
+      {(function(){
+        var problemas=visibleProps(props).filter(function(p){ return !p.listingUrl || refPhotosOf(p).length===0; });
         if(!problemas.length) return null;
         return (
           <div style={{background:"#FFF9F2",borderRadius:12,padding:14,border:"1px solid #E6C9A8"}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
               <span style={{fontSize:13,fontWeight:700,color:"#9a6b2f"}}>⚠ Propiedades por completar ({problemas.length})</span>
             </div>
-            <div style={{fontSize:11.5,color:C.earth,lineHeight:1.55,marginBottom:10}}>Estas propiedades aún no tienen enlace de anuncio o foto de referencia. Sin esto, el técnico no ve la referencia al limpiar. Resuélvelo importando los enlaces, sincronizando con Hospitable, o subiendo las fotos en cada propiedad.</div>
+            <div style={{fontSize:11.5,color:C.earth,lineHeight:1.55,marginBottom:10}}>Estas propiedades aún no tienen enlace de anuncio o foto de referencia. Sin esto, el técnico no ve la referencia al limpiar. Resuélvelo sincronizando con Hospitable o subiendo las fotos en cada propiedad.</div>
             <div style={{display:"flex",flexDirection:"column",gap:6}}>
               {problemas.map(function(p){
                 var falta=[]; if(!p.listingUrl)falta.push("enlace del anuncio"); if(refPhotosOf(p).length===0)falta.push("foto de referencia");
@@ -4021,6 +4137,29 @@ function PropsCfg({props,onSave}) {
         );
       })()}
       <PropList props={props} onSave={onSave}/>
+
+      {/* ── Propiedades ocultas ── */}
+      {(function(){
+        var hid=props.filter(function(p){return p.hidden;});
+        if(!hid.length) return null;
+        return (
+          <div style={{background:"#fff",borderRadius:12,border:"1px solid "+C.line,overflow:"hidden"}}>
+            <button onClick={function(){setHidOpen(!hidOpen);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"13px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+              <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>Propiedades ocultas ({hid.length})</div>
+              <span style={{color:C.taupe,fontSize:13,transform:hidOpen?"rotate(180deg)":"none"}}>⌄</span>
+            </button>
+            {hidOpen&&<div style={{padding:"0 16px 16px",borderTop:"1px solid "+C.line,display:"flex",flexDirection:"column",gap:6,paddingTop:12}}>
+              <div style={{fontSize:11,color:C.taupe,lineHeight:1.5,marginBottom:2}}>No aparecen en los selectores de formularios ni en las listas. Los reportes ya creados no se ven afectados.</div>
+              {hid.map(function(p){return (
+                <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:C.beige,borderRadius:8,padding:"9px 12px"}}>
+                  <span style={{fontSize:12.5,color:C.black}}>{p.name}</span>
+                  <button onClick={function(){onSave(props.map(function(x){return x.id===p.id?Object.assign({},x,{hidden:false}):x;}));}} style={{flexShrink:0,padding:"5px 12px",borderRadius:6,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer"}}>Mostrar</button>
+                </div>
+              );})}
+            </div>}
+          </div>
+        );
+      })()}
       <div style={{background:"#fff",borderRadius:12,padding:14,border:"1.5px dashed "+C.gray}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"end"}}>
           <F label="Agregar propiedad"><input placeholder="Ej. Torre Norte – Apto 304" value={newP} onChange={function(e){setNewP(e.target.value);}}/></F>
@@ -6944,6 +7083,11 @@ function adv_persist(list){
   if(!IS_CLAUDE_SANDBOX){ try{ apiCall("saveConfig",{key:"adelantos",value:list}); }catch(e){} }
 }
 function normNm(s){ return (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim(); }
+/* Clave de coincidencia SEGURA: tras normNm (tildes/espacios/mayúsculas) además
+   unifica separadores (– — - · | /) para detectar el mismo lugar escrito distinto. */
+function matchKey(s){ return normNm(s).replace(/[\u2013\u2014\-·|/]+/g," ").replace(/\s+/g," ").trim(); }
+function visibleProps(list){ return (list||[]).filter(function(p){return !p.hidden;}); }
+function completeness(p){ var n=0; if(!p)return 0; if(p.listingUrl)n++; if(p.address)n++; if(p.hospId)n++; if((p.cuartos||0)>0)n++; if((p.banos||0)>0)n++; if(p.refImagenes)n+=Object.keys(p.refImagenes).length; return n; }
 /* Todos los adelantos legacy iniciaron el 1 de junio 2026 */
 var ADV_DEFAULT_START = "2026-06-01";
 function advStart(adv){ return adv.fechaInicio || adv.fechaDeposito || ADV_DEFAULT_START; }
