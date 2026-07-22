@@ -443,6 +443,21 @@ function notifyEmail(to, subject, body) {
     console.warn("Notificación no enviada (agrega la acción 'notify' al Apps Script):", e&&e.message);
   });
 }
+/* Notificación con plantilla de marca: el Apps Script arma el HTML + texto plano
+   a partir de { type, data }. Fire-and-forget. */
+function notifyTemplate(to, type, data) {
+  var list = (Array.isArray(to)?to:[to]).filter(Boolean);
+  if (!list.length) return;
+  apiCall("notify",{to:list, type:type, data:data||{}}).catch(function(e){
+    console.warn("Notificación no enviada (actualiza el Apps Script con el módulo de correos):", e&&e.message);
+  });
+}
+/* Nombre para saludar en los correos, resolviendo el correo del reporte al técnico. */
+function vendorNameByEmail(vendors, email){
+  var e=(email||"").toLowerCase().trim();
+  var v=(vendors||[]).find(function(x){ return vendorEmailSet(x).indexOf(e)>=0; });
+  return v?vendorDisplay(v):"";
+}
 function supervisorEmails(vendors, exceptEmail){
   return (vendors||[]).filter(function(v){return v.isSupervisor&&v.active&&v.email&&v.email!==exceptEmail;}).map(function(v){return v.email;});
 }
@@ -451,16 +466,15 @@ function adminEmails(vendors){
 }
 function notifyQAResult(rep, status, comment, vendors){
   if(!rep||!rep.reportadoPor) return;
+  var tecnico=vendorNameByEmail(vendors, rep.reportadoPor);
+  var base={tecnico:tecnico, propiedad:rep.propiedad, fecha:fmtDate(rep.fecha)};
   if(status==="aprobada"){
-    notifyEmail(rep.reportadoPor, "✓ Limpieza aprobada — "+rep.propiedad,
-      "Hola,\n\nTu limpieza en "+rep.propiedad+" del "+fmtDate(rep.fecha)+" fue APROBADA. ¡Buen trabajo!\n\nEPI App — Spacio AM");
+    notifyTemplate(rep.reportadoPor, "limpiezaAprobada", base);
   } else if(status==="correccion"){
     if(rep.qaTipo==="inmediata"){
-      notifyEmail(rep.reportadoPor, "🔴 CORRECCIÓN INMEDIATA — "+rep.propiedad,
-        "Hola,\n\nTu limpieza en "+rep.propiedad+" del "+fmtDate(rep.fecha)+" necesita una CORRECCIÓN INMEDIATA (urgente):\n\n"+(comment||"(ver detalle en el app)")+"\n\nDebes atenderla HOY y confirmar en la pestaña ★ Calidad del app cuando esté corregida.\n\nEPI App — Spacio AM");
+      notifyTemplate(rep.reportadoPor, "correccionInmediata", Object.assign({}, base, {detalle:comment||""}));
     } else {
-      notifyEmail(rep.reportadoPor, "⚠ Corrección para el futuro — "+rep.propiedad,
-        "Hola,\n\nTu limpieza en "+rep.propiedad+" del "+fmtDate(rep.fecha)+" tiene una observación para tus PRÓXIMAS limpiezas:\n\n"+(comment||"(ver detalle en el app)")+"\n\nConfírmala en la pestaña ★ Calidad del app.\n\nEPI App — Spacio AM");
+      notifyTemplate(rep.reportadoPor, "correccionFutura", Object.assign({}, base, {detalle:comment||""}));
     }
   }
 }
@@ -2691,7 +2705,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
         var supsT=supervisorEmails(vendors, form.reportadoPor);
         if(supsT.length){
           var tnT=(vendors.find(function(v){return v.email===form.reportadoPor;})||{}).name||form.reportadoPor;
-          notifyEmail(supsT, "Limpieza lista para supervisión — "+form.propiedad, tnT+" terminó una limpieza en "+form.propiedad+" ("+fmtDate(form.fecha)+").\n\nEntra a la pestaña Supervisión del app para revisarla.\n\nEPI App — Spacio AM");
+          notifyTemplate(supsT, "listaSupervision", {tecnico:tnT, propiedad:form.propiedad, fecha:fmtDate(form.fecha), tipoLimpieza:"Limpieza estándar"});
         }
       }catch(_){}
       /* Auto-crear SIEMPRE el reporte de daños independiente cuando se reportó daño */
@@ -3187,7 +3201,7 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack}) {
         var supsP=supervisorEmails(vendors, form.reportadoPor);
         if(supsP.length){
           var tnP=(vendors.find(function(v){return v.email===form.reportadoPor;})||{}).name||form.reportadoPor;
-          notifyEmail(supsP, "Limpieza profunda lista para supervisión — "+form.propiedad, tnP+" terminó una limpieza profunda en "+form.propiedad+" ("+fmtDate(form.fecha)+").\n\nEntra a la pestaña Supervisión del app para revisarla.\n\nEPI App — Spacio AM");
+          notifyTemplate(supsP, "listaSupervision", {tecnico:tnP, propiedad:form.propiedad, fecha:fmtDate(form.fecha), tipoLimpieza:"Limpieza profunda"});
         }
       }catch(_){}
       setDone(true);
@@ -4490,7 +4504,7 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,hospU
     if(onUpdate) await onUpdate(upd);
     /* Avisar a supervisión y admin que el técnico respondió una corrección inmediata */
     if(r.qaTipo==="inmediata"&&response==="corregido"){
-      try{ notifyEmail(supervisorEmails(allVendors,vendor.email).concat(adminEmails(allVendors)), "✓ Corrección inmediata atendida — "+r.propiedad, vendorDisplay(vendor)+" confirmó la corrección inmediata en "+r.propiedad+" ("+fmtDate(r.fecha)+").\n\nEPI App — Spacio AM"); }catch(_){}
+      try{ notifyTemplate(supervisorEmails(allVendors,vendor.email).concat(adminEmails(allVendors)), "correccionAtendida", {tecnico:vendorDisplay(vendor), propiedad:r.propiedad, fecha:fmtDate(r.fecha)}); }catch(_){}
     }
   }
   return (
@@ -6657,8 +6671,7 @@ function DamageBoard({reps, vendors, me, isAdmin, onUpdate, onSelect}) {
   function setUrg(r,u){
     upd(r,{urgencia:u});
     if(u==="alta"){
-      try{ notifyEmail(adminEmails(vendors), "🔴 Daño URGENTE — "+r.propiedad,
-        "Se clasificó como URGENCIA ALTA el daño en "+r.propiedad+" ("+fmtDate(r.fecha)+"):\n\n"+(r.descripcion||"")+"\n\nClasificado por: "+(me?vendorDisplay(me):"Administración")+"\n\nRevisa Calidad → Daños en el app.\n\nEPI App — Spacio AM"); }catch(_){}
+      try{ notifyTemplate(adminEmails(vendors), "danoUrgente", {propiedad:r.propiedad, fecha:fmtDate(r.fecha), detalle:(r.descripcion||""), clasificadoPor:(me?vendorDisplay(me):"Administración")}); }catch(_){}
     }
   }
   function addCom(r){
