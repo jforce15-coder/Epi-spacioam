@@ -5,7 +5,12 @@ function doOptions(e) {
 
 var SPREADSHEET_ID   = "1-SfKC-evkK24qfOrrvIrcDs6ckGAmRzSLS_IYB8cYZg";
 var FOLDER_ID        = "11odF5bZPpxh_boSg1Emtfh8gA67yFL1j";
-var HOSPITABLE_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiI5YTYyNGRmMC0xMmYxLTQ0OGUtYjg4NC00MzY3ODBhNWQzY2QiLCJqdGkiOiIyYmM4ZjU4ZWZiYzcwN2IxZDVmMzhhNzk1NTJjNWRlODIwNzllZjZjNWQxMDc5OWY5N2Q2Mzc1NWY0MTk2YWFjODZhZjQ0N2RlOTRiYjJiNyIsImlhdCI6MTc3OTI5NTc3Mi45MzM0ODUsIm5iZiI6MTc3OTI5NTc3Mi45MzM0ODksImV4cCI6MTgxMDgzMTc3Mi45MzA2NTIsInN1YiI6IjY1NzkwIiwic2NvcGVzIjpbInBhdDpyZWFkIiwicGF0OndyaXRlIl19.Vaqwyxcr2zkV-6OoTMyVJrqTnzRMafrxHYFLq7-0wKBoHCFm5R6Cfv5LUOYYpi7KcrfFN_C3LTBxCDbS764FlMmErB1spDreg2cm9Dg7ZdcX6ch9nyFZsjdo_7I_peb0rgk9ux_Gp4REqG5_Vg4oCIx9yNm8K-gjcbve5TYQxeYyZiDVyY_PcLuGixUQ-GYLTkWHOciHnhO_ibuZowp_HyW0x6a5jMRdUaOihOF4t3mxGNFGU_oBJHkjvHsP6J7PNI442u_fLa7FnxW0xcI0y-Uv9F3nRhIwTVvu9UMMJ_JpJfhQw7yZoo0sn48owacfwr9_5J6P4r5VL0w8mQJNlnbAQ_23cOFR6ADkegpj8z2N8UYSucYN8kyn43tZu4USNcOCtKbfRaJB6u7QULEHX9tDXXsXURs-qlnBnpTzUfBbX6Eou97ytTjIMnw87-xRvH20baLOqLbYhdgImoigiqE181rf_cfl9jgEZ8lUU6Vqb7YPcAQ6HkepZMT5ttWRkYgCI-ApeuXwmfqOEwbCS3ElfEIwH0FXUFApdPj423N20kRwPVG3Z_hvZrdeodPmin3EdezgTvAxvKHojAbLRVJ4EATPByxdjEWJg9bIVrIK9WWLTA0LDL7VrmouMS2ISJi37nQgD0LmVYSdgqdK_juKNPwewINswMVLyR2qIzg";
+/* El token de Hospitable vive SOLO en Propiedades del script (nunca en el código).
+   ⚙️ Configuración del proyecto → Propiedades del script → Agregar propiedad:
+     HOSPITABLE_TOKEN = <tu token>
+   Mientras no exista la propiedad, las funciones que usan Hospitable devuelven
+   un error claro en vez de romperse. */
+var HOSPITABLE_TOKEN = PropertiesService.getScriptProperties().getProperty("HOSPITABLE_TOKEN") || "";
 
 /* ID del Sheet del dashboard de propietarios (mi-spacioam) — lectura pública.
    De aquí se trae el "Listing link" de cada propiedad. */
@@ -26,6 +31,7 @@ function route(e) {
     else if (p.action === "uploadFile")     r = uploadFile(p.b64, p.name, p.mime, p.subfolder);
     else if (p.action === "syncHospitable") r = syncHospitable(p.days || 14);
     else if (p.action === "syncProperties") r = syncPropertiesFull_();
+    else if (p.action === "syncListings")   r = syncListingsFull_();
     else if (p.action === "testDrive")      r = testDrive();
     else if (p.action === "recoverPhotos")  r = recoverPhotos();
     else if (p.action === "notify")         r = notify(p);
@@ -173,6 +179,133 @@ function syncPropertiesFull_() {
 
   if (changed > 0) saveConfig("props", props);
   return { ok: true, changed: changed, propiedades: props.length };
+}
+
+/* ═══ NUEVO — Sincroniza la LISTA de propiedades desde la API de Hospitable ═══
+   Trae todas las propiedades de la cuenta y las fusiona con la config "props":
+     • AGREGA las que no existían (con cuartos/baños de Hospitable como base).
+     • ACTUALIZA nombre, enlace del anuncio y dirección de las que ya existen.
+     • CONSERVA intactas las fotos de referencia (refFotos/refImagenes) y los
+       conteos de cuartos/baños que ya se cargaron a mano.
+   Nunca borra ni renombra a la fuerza. El enlace del anuncio se toma primero del
+   dashboard de propietarios (mismo origen que "Importar enlaces") y, si no está
+   ahí, del que exponga la propia API. */
+function syncListingsFull_() {
+  var listings = fetchHospitableListings_();
+  if (!listings.ok) return { ok: false, error: listings.error, added: 0, updated: 0 };
+  var links = getOwnerListingLinks_();
+  var cfg   = getConfig();
+  var props = Array.isArray(cfg.props) ? cfg.props : [];
+
+  var byHosp = {}, byName = {};
+  props.forEach(function (p, i) {
+    if (p.hospId) byHosp[String(p.hospId)] = i;
+    byName[normName_(p.name)] = i;
+  });
+
+  var added = 0, updated = 0;
+  listings.data.forEach(function (l) {
+    var idx = (l.id && byHosp[String(l.id)] != null) ? byHosp[String(l.id)]
+            : (byName[normName_(l.name)] != null ? byName[normName_(l.name)] : -1);
+    var link = links[normName_(l.name)] || l.listingUrl || "";
+    if (idx >= 0) {
+      var p = props[idx], np = Object.assign({}, p), ch = false;
+      if (!p.hospId && l.id)              { np.hospId = String(l.id); ch = true; }
+      if (l.name && p.name !== l.name)    { np.name = l.name; ch = true; }
+      if (link && p.listingUrl !== link)  { np.listingUrl = link; ch = true; }
+      if (l.address && p.address !== l.address) { np.address = l.address; ch = true; }
+      /* cuartos/baños/fotos: NO se tocan — son manuales/enriquecidos aparte */
+      if (ch) { props[idx] = np; updated++; }
+    } else {
+      props.push({
+        id: "p" + Date.now() + "_" + added,
+        hospId: l.id ? String(l.id) : "",
+        name: l.name,
+        listingUrl: link,
+        address: l.address || "",
+        cuartos: l.bedrooms || 1,
+        banos: l.bathrooms || 1
+      });
+      byName[normName_(l.name)] = props.length - 1;
+      added++;
+    }
+  });
+
+  if (added > 0 || updated > 0) saveConfig("props", props);
+  return {
+    ok: true, added: added, updated: updated, total: props.length, props: props,
+    /* Lista CRUDA de Hospitable — la usa el front para las verificaciones
+       (Hospitable ↔ dashboard y Hospitable ↔ lista importada). */
+    hospitable: listings.data.map(function (l) {
+      return { name: l.name, listingUrl: l.listingUrl || "", address: l.address || "" };
+    })
+  };
+}
+
+/* Trae TODAS las propiedades de Hospitable (API pública v2, paginada). */
+function fetchHospitableListings_() {
+  var token = HOSPITABLE_TOKEN || PropertiesService.getScriptProperties().getProperty("HOSPITABLE_TOKEN") || "";
+  if (!token) return { ok: false, error: "Falta HOSPITABLE_TOKEN en Propiedades del script." };
+  var out = [], page = 1, guard = 0;
+  while (guard++ < 25) {
+    var res = UrlFetchApp.fetch("https://public.api.hospitable.com/v2/properties?per_page=100&page=" + page, {
+      method: "get",
+      headers: { "Authorization": "Bearer " + token, "Accept": "application/json" },
+      muteHttpExceptions: true
+    });
+    var code = res.getResponseCode(), j = {};
+    try { j = JSON.parse(res.getContentText()); } catch (e) {}
+    if (code !== 200) return { ok: false, error: "Hospitable HTTP " + code + ": " + String((j && (j.message || j.error)) || "").slice(0, 140) };
+    var data = j.data || j.properties || [];
+    for (var i = 0; i < data.length; i++) out.push(normListing_(data[i]));
+    var last = j.meta && (j.meta.last_page || (j.meta.pagination && j.meta.pagination.total_pages));
+    if (!data.length || !last || page >= last) break;
+    page++;
+  }
+  return { ok: true, data: out };
+}
+
+/* Normaliza una propiedad de Hospitable → {id,name,listingUrl,address,bedrooms,bathrooms}.
+   Rutas defensivas: distintas cuentas exponen los campos distinto. */
+function normListing_(p) {
+  p = p || {};
+  var name = p.name || p.public_name || p.private_name || p.nickname || p.internal_name || String(p.id || "");
+  var caps = p.capacity || {};
+  var bedrooms  = num_(p.bedrooms  != null ? p.bedrooms  : (caps.bedrooms  != null ? caps.bedrooms  : (p.rooms && p.rooms.bedrooms)));
+  var bathrooms = num_(p.bathrooms != null ? p.bathrooms : (caps.bathrooms != null ? caps.bathrooms : (p.rooms && p.rooms.bathrooms)));
+  var a = p.address || {};
+  var address = (typeof a === "string") ? a
+    : [a.street, a.line1, a.line2, a.apartment, a.city, a.state, a.country]
+        .filter(function (x) { return x && String(x).trim(); }).join(", ");
+  return {
+    id: p.id ? String(p.id) : "",
+    name: name,
+    listingUrl: scanListingUrl_(p),
+    address: address,
+    bedrooms: bedrooms ? Math.round(bedrooms) : 0,
+    bathrooms: bathrooms ? Math.ceil(bathrooms) : 0
+  };
+}
+function num_(v) { var n = parseFloat(v); return (isFinite(n) && n > 0) ? n : 0; }
+function scanListingUrl_(o) {
+  function ok(u) { return typeof u === "string" && /^https?:\/\//.test(u); }
+  var direct = o.public_url || o.listing_url || o.url;
+  if (ok(direct)) return direct;
+  var arrs = [o.listings, o.channels, o.channel_listings];
+  for (var a = 0; a < arrs.length; a++) {
+    var arr = arrs[a];
+    if (Array.isArray(arr)) for (var i = 0; i < arr.length; i++) {
+      var u = arr[i] && (arr[i].url || arr[i].public_url || arr[i].listing_url || arr[i].link);
+      if (ok(u)) return u;
+    }
+  }
+  return "";
+}
+
+/* Cron opcional — sincroniza la lista de propiedades una vez al día.
+   Crea el activador: ⏰ Activadores → cronSyncListings · por día · 3-4 a.m. */
+function cronSyncListings() {
+  try { syncListingsFull_(); } catch (e) { console.error("cronSyncListings:", e); }
 }
 
 /* Raspa UNA página de portafolio → {cuartos, banos, fotos[]} */
@@ -341,7 +474,27 @@ function saveConfig(key, value) {
   var val  = (typeof value === "object") ? JSON.stringify(value) : String(value);
   var data = sheet.getDataRange().getValues();
   for (var i = 0; i < data.length; i++) {
-    if (data[i][0] === key) { sheet.getRange(i + 1, 2).setValue(val); return { saved: true }; }
+    if (data[i][0] === key) {
+      /* ═══ CANDADO ANTI-BORRADO ═══
+         No permitir que "vendors" (usuarios) ni "props" (propiedades) pasen de una
+         lista grande a una diminuta. Esto es el síntoma de un guardado hecho con los
+         datos de respaldo mientras la app estaba sin conexión — la causa del borrado
+         de usuarios. Un borrado real de uno o pocos sigue permitido; colapsar la lista
+         (p.ej. de 20 a 3) se rechaza. Si alguna vez es intencional, edita el Sheet a mano. */
+      if (key === "vendors" || key === "props") {
+        var prevArr = null, newArr = null;
+        try { prevArr = JSON.parse(String(data[i][1] || "[]")); } catch (e) { prevArr = null; }
+        try { newArr = (typeof value === "object") ? value : JSON.parse(val); } catch (e) { newArr = null; }
+        if (Array.isArray(prevArr) && Array.isArray(newArr) &&
+            prevArr.length >= 5 && newArr.length < Math.max(2, prevArr.length * 0.5)) {
+          throw new Error("Guardado bloqueado: intento de reducir '" + key + "' de " +
+            prevArr.length + " a " + newArr.length + " elementos. Protección anti-borrado. " +
+            "Si es intencional, edita la celda del Sheet directamente.");
+        }
+      }
+      sheet.getRange(i + 1, 2).setValue(val);
+      return { saved: true };
+    }
   }
   sheet.appendRow([key, val]);
   return { saved: true };
