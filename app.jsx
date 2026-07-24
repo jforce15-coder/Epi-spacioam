@@ -1581,7 +1581,8 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrl
       <ResponsiveHeader
         tab={tab} setTab={setTab}
         alertCount={alerts.length} pendingQA={pendingQA} sheetsOk={sheetsOk} adminLabel={adminVendor?vendorDisplay(adminVendor):"Admin"}
-        navItems={(function(){ var n=[["dash","Dashboard","dash"],["form","Formulario","edit"],["sched","Programa","calendar"],["qa","Calidad","star"],["adv","Adelantos","coins"]]; if(canNotif) n.push(["notif","Notificaciones","bell"]); n.push(["cfg","Config","settings"]); return n; })()}
+        navItems={[["dash","Dashboard","dash"],["form","Formulario","edit"],["sched","Programa","calendar"],["qa","Calidad","star"],["adv","Adelantos","coins"]]}
+        onConfig={function(){setTab("cfg");}} configActive={tab==="cfg"}
         onLogout={onLogout}
         role="Admin"
       />
@@ -1618,8 +1619,7 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrl
         <AdminQAPanel reps={reps} vendors={vendors} onQA={qaUpdate} onSelect={setDetail} onUpdate={onUpsert} isAdmin={true} me={adminVendor}/>
       </div>
       <div style={{display:tab==="adv"?"block":"none"}}><AdvancesAdmin adelantos={adelantos} reps={reps} vendors={vendors} onSvAdelantos={onSvAdelantos}/></div>
-      {canNotif&&<div style={{display:tab==="notif"?"block":"none"}}><NotifCfg prefs={notifPrefs} vendors={vendors} onSave={onSvNotifPrefs} readOnly={false}/></div>}
-      <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  reps={reps} vendors={vendors} props={props} adminPin={adminPin} company={company} extCats={extCats||[]} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
+      <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  reps={reps} vendors={vendors} props={props} adminPin={adminPin} company={company} extCats={extCats||[]} notifPrefs={notifPrefs} canNotif={canNotif} onSvNotifPrefs={onSvNotifPrefs} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
 
       {detail&&<DetailModal rep={detail} vendors={vendors} props={props} hasLinkedDmg={reps.some(function(x){return isDanos(x.categoria)&&String(x._linkedToReport||"")===String(detail.id);})} onExtract={extractDanios} onClose={function(){setDetail(null);}} onMarkPaid={function(p){markPaid(detail.id,p);setDetail(function(x){return Object.assign({},x,{paid:p});});}} onSave={function(r){onUpsert(r);setDetail(r);}} onQA={qaUpdate} onDelete={function(){setCDel(detail.id);}}/>}
       {cDel&&<Overlay><ConfirmDel onCancel={function(){setCDel(null);}} onConfirm={function(){onDelete(cDel);setCDel(null);setDetail(null);}}/></Overlay>}
@@ -3730,18 +3730,19 @@ function OrphanEmailLinker({reps, vendors, onSvV}) {
 }
 
 /* ─── Config */
-function CfgView({reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback}) {
+function CfgView({reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,notifPrefs,canNotif,onSvNotifPrefs,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback}) {
   const [tab,setTab] = useState("vendors");
   return (
     <div style={{maxWidth:640,margin:"0 auto",padding:"28px 18px 60px",fontFamily:"Montserrat,sans-serif"}}>
       <div style={{marginBottom:20}}><div style={{fontSize:9.5,fontWeight:600,color:C.earth,letterSpacing:".28em",textTransform:"uppercase",marginBottom:8}}>Configuración</div><div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:28,fontWeight:400,color:C.black}}>Ajustes del sistema</div></div>
       <div style={{display:"flex",background:"#fff",borderRadius:10,padding:4,gap:3,marginBottom:18,border:"1px solid "+C.gray,flexWrap:"wrap"}}>
-        {[["vendors","Equipo"],["props","Propiedades"],["feedback","Sugerencias"],["company","Empresa"],["security","Seguridad"]].map(function(it){ var k=it[0],l=it[1]; return <button key={k} onClick={function(){setTab(k);}} style={{flex:1,minWidth:90,padding:"9px 6px",borderRadius:8,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,fontSize:12,letterSpacing:".06em",transition:"all .2s"}}>{l}</button>; })}
+        {[["vendors","Equipo"],["props","Propiedades"]].concat(canNotif?[["notif","Notificaciones"]]:[]).concat([["feedback","Sugerencias"],["company","Empresa"],["security","Seguridad"]]).map(function(it){ var k=it[0],l=it[1]; return <button key={k} onClick={function(){setTab(k);}} style={{flex:1,minWidth:90,padding:"9px 6px",borderRadius:8,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,fontSize:12,letterSpacing:".06em",transition:"all .2s"}}>{l}</button>; })}
       </div>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:18,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:8,padding:"9px 13px",fontSize:11.5,color:C.earth,lineHeight:1.5}}>
         ℹ La <strong>programación</strong> se gestiona en su propia pestaña. La <strong>recuperación de fotos</strong> ahora es automática (3 min después de cada limpieza y revisión periódica).
       </div>
       <div style={{display:tab==="vendors"  ?"block":"none"}}><VendorsCfg  vendors={vendors} extCats={extCats||[]} onSave={onSvV} onSaveExtCats={onSvExtCats}/><OrphanEmailLinker reps={reps} vendors={vendors} onSvV={onSvV}/></div>
+      {canNotif&&<div style={{display:tab==="notif"?"block":"none"}}><NotifCfg prefs={notifPrefs} vendors={vendors} onSave={onSvNotifPrefs} readOnly={false}/></div>}
       <div style={{display:tab==="feedback"?"block":"none"}}><FeedbackCfg feedback={feedback||[]} onSave={onSvFeedback}/></div>
       <div style={{display:tab==="props"   ?"block":"none"}}><PropsCfg    props={props}     onSave={onSvP}/></div>
       <div style={{display:tab==="company" ?"block":"none"}}><CompanyCfg  company={company} onSave={onSvCo}/></div>
@@ -5246,7 +5247,7 @@ function HeaderFeedback({vendor, onSaveFeedback, isMobile}) {
 }
 
 /* ─── Responsive Header Component */
-function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogout, role, sheetsOk, adminLabel, feedbackVendor, onSaveFeedback}) {
+function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogout, onConfig, configActive, role, sheetsOk, adminLabel, feedbackVendor, onSaveFeedback}) {
   var sc = useScreen();
   var isMobile = sc.mobile;
 
@@ -5278,22 +5279,36 @@ function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogou
           </nav>
         )}
 
-        {/* Logout */}
-        <button onClick={onLogout} style={{background:"none",border:"none",color:C.earth,fontSize:isMobile?12:11.5,cursor:"pointer",fontWeight:500,letterSpacing:".04em",padding:"8px 0"}}>Salir</button>
+        {/* Configuración + Salir */}
+        <div style={{display:"flex",alignItems:"center",gap:isMobile?4:8}}>
+          {onConfig&&<button onClick={onConfig} title="Configuración" style={{display:"flex",alignItems:"center",gap:6,background:configActive?C.black:"transparent",border:"1px solid "+(configActive?C.black:C.line),borderRadius:100,color:configActive?"#fff":C.earth,cursor:"pointer",padding:isMobile?"7px 9px":"7px 13px",fontSize:11.5,fontWeight:600,letterSpacing:".04em"}}><Icon name="settings" size={16} stroke={configActive?"#fff":C.earth}/>{!isMobile&&"Configuración"}</button>}
+          <button onClick={onLogout} style={{background:"none",border:"none",color:C.earth,fontSize:isMobile?12:11.5,cursor:"pointer",fontWeight:500,letterSpacing:".04em",padding:"8px 4px"}}>Salir</button>
+        </div>
       </header>
 
-      {/* Mobile bottom tab bar */}
-      {isMobile&&(
-        <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:50,background:"#fff",borderTop:"1px solid "+C.line,display:"flex",height:56,paddingBottom:"env(safe-area-inset-bottom)"}}>
-          {navItems.map(function(it){ var k=it[0],l=it[1],ic=it[2]; return (
-            <button key={k} onClick={function(){setTab(k);}} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,border:"none",background:"transparent",cursor:"pointer",padding:"6px 0",transition:"all .15s"}}>
-              <Icon name={ic} size={20} stroke={tab===k?C.black:C.taupe}/>
-              <span style={{fontSize:9,fontWeight:tab===k?700:500,letterSpacing:".08em",color:tab===k?C.black:C.taupe,textTransform:"uppercase",transition:"all .15s"}}>{l.split(" ")[0]}</span>
-              {tab===k&&<div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:24,height:2,background:C.black,borderRadius:100}}/>}
+      {/* Mobile bottom tab bar — Dashboard aislado y protagónico al centro */}
+      {isMobile&&(function(){
+        function tabBtn(it){ var k=it[0],l=it[1],ic=it[2]; return (
+          <button key={k} onClick={function(){setTab(k);}} style={{flex:1,position:"relative",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,border:"none",background:"transparent",cursor:"pointer",padding:"6px 0"}}>
+            <Icon name={ic} size={20} stroke={tab===k?C.black:C.taupe}/>
+            <span style={{fontSize:9,fontWeight:tab===k?700:500,letterSpacing:".06em",color:tab===k?C.black:C.taupe,textTransform:"uppercase"}}>{l.split(" ")[0]}</span>
+            {tab===k&&<div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:24,height:2,background:C.black,borderRadius:100}}/>}
+          </button>
+        ); }
+        function bar(children){ return <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:50,background:"#fff",borderTop:"1px solid "+C.line,display:"flex",alignItems:"stretch",height:60,paddingBottom:"env(safe-area-inset-bottom)"}}>{children}</div>; }
+        var di=navItems.findIndex(function(x){return x[0]==="dash";});
+        if(di<0) return bar(navItems.map(tabBtn));
+        var rest=navItems.filter(function(_,i){return i!==di;});
+        var half=Math.ceil(rest.length/2);
+        var dashBtn=(
+          <div key="__dash" style={{flex:"0 0 auto",width:76,display:"flex",alignItems:"flex-start",justifyContent:"center"}}>
+            <button onClick={function(){setTab("dash");}} aria-label="Dashboard" style={{marginTop:-20,width:62,height:62,borderRadius:"50%",border:"4px solid #fff",background:C.peach,boxShadow:"0 6px 18px rgba(233,130,106,.35)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",outline:tab==="dash"?"2px solid "+C.black:"none",outlineOffset:2}}>
+              <Icon name="dash" size={26} stroke="#fff"/>
             </button>
-          ); })}
-        </div>
-      )}
+          </div>
+        );
+        return bar([].concat(rest.slice(0,half).map(tabBtn),[dashBtn],rest.slice(half).map(tabBtn)));
+      })()}
     </>
   );
 }
@@ -8195,10 +8210,15 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
   var vigentes = mine.filter(function(a){return a.status==="activo"||a.status==="pendiente"||a.status==="pendiente_tecnico"||a.status==="por_depositar";});
   /* Solicitudes que el ADMIN inició para este técnico y que él debe completar (DPI + firma). */
   var adminReqs = mine.filter(function(a){return a.status==="pendiente_tecnico";});
-  function completeAdminReq(adv, data){
+  async function completeAdminReq(adv, data){
+    var dpiUrl=data.dpiPhoto, firmaUrl=data.firma;
+    if(!IS_CLAUDE_SANDBOX){
+      try{ dpiUrl=await uploadMedia(data.dpiPhoto,"dpi-"+adv.id+".jpg","image/jpeg","adelantos"); }catch(_){}
+      try{ firmaUrl=await uploadMedia(data.firma,"firma-"+adv.id+".png","image/png","adelantos"); }catch(_){}
+    }
     var updated=Object.assign({}, adv, {
-      dpiPhoto:data.dpiPhoto, vendorName:(data.nombre||adv.vendorName), dpiNumber:(data.dpiNumber||adv.dpiNumber),
-      firma:data.firma, firmadoEn:Date.now(), status:"por_depositar",
+      dpiPhoto:dpiUrl, vendorName:(data.nombre||adv.vendorName), dpiNumber:(data.dpiNumber||adv.dpiNumber),
+      firma:firmaUrl, firmadoEn:Date.now(), status:"por_depositar",
     });
     updated.contractText=buildContractText(updated);
     return onSvAdelantos((adelantos||[]).map(function(a){return a.id===adv.id?updated:a;}));
@@ -8245,7 +8265,17 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
     if(montoN>disponible)  return setErr("El monto excede tu disponible (Q"+disponible.toLocaleString()+").");
     if(!firma)         return setErr("Firma el contrato para enviar la solicitud.");
     setBusy(true);
-    var adv = Object.assign({id:"adv_"+Date.now(), vendorEmail:vendor.email, status:"pendiente", createdAt:Date.now(), pausas:[], firmadoEn:Date.now()}, draft());
+    var advId="adv_"+Date.now();
+    /* Sube DPI y firma a Drive ANTES de guardar: si quedaran como base64 dentro
+       de la config "adelantos" (una sola celda del Sheet, tope 50 000 caracteres),
+       la solicitud no se sincroniza al admin aunque el correo sí se envíe. */
+    var dpiUrl=dpiPhoto, firmaUrl=firma;
+    if(!IS_CLAUDE_SANDBOX){
+      try{ dpiUrl=await uploadMedia(dpiPhoto,"dpi-"+advId+".jpg","image/jpeg","adelantos"); }catch(_){}
+      try{ firmaUrl=await uploadMedia(firma,"firma-"+advId+".png","image/png","adelantos"); }catch(_){}
+    }
+    var adv = Object.assign({id:advId, vendorEmail:vendor.email, status:"pendiente", createdAt:Date.now(), pausas:[], firmadoEn:Date.now()}, draft());
+    adv.dpiPhoto=dpiUrl; adv.firma=firmaUrl;
     adv.contractText = buildContractText(adv);
     try{ await onSvAdelantos([adv].concat(adelantos||[])); }catch(e){}
     try{ notifyTemplate(resolveNotifRecipients("solicitudAdelanto", ADV_VENDORS, [vendor.email]), "solicitudAdelanto", {tecnico:vendorDisplay(vendor), monto:"Q"+montoN.toLocaleString(), cuotas:cuotas+" semanas", cuota:"Q"+semanal.toLocaleString()}); }catch(_){}
@@ -8412,6 +8442,9 @@ function DepositReceiptUp({receipt, onAdd, onDel, compact}){
       var data;
       if((file.type||"").indexOf("image/")===0){ data=await compress(file); }
       else { data=await new Promise(function(res){var r=new FileReader();r.onload=function(ev){res(ev.target.result);};r.readAsDataURL(file);}); }
+      if(!IS_CLAUDE_SANDBOX){
+        try{ var url=await uploadMedia(data,"deposito-"+Date.now()+"-"+file.name,file.type,"adelantos"); onAdd({name:file.name,type:file.type,url:url}); setBusy(false); return; }catch(_){}
+      }
       onAdd({name:file.name,type:file.type,data:data});
     }catch(e){}
     setBusy(false);
