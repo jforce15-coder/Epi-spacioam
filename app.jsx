@@ -9252,9 +9252,24 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, onSelect}) {
       </div>
 
       {rows.length===0&&(
-        <div style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:10,padding:"22px 18px",textAlign:"center"}}>
-          <div style={{fontSize:13,fontWeight:600,color:C.black,marginBottom:6}}>Todavía no hay ratings ligados</div>
-          <div style={{fontSize:11.5,color:C.earth,lineHeight:1.6}}>Importa las reviews arriba. Para que una review se ligue a un técnico, la limpieza de esa propiedad debe estar registrada en el app antes del check-in del huésped.</div>
+        <div style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:10,padding:"20px 18px"}}>
+          {(reviews||[]).length===0 ? (
+            <div>
+              <div style={{fontSize:13.5,fontWeight:700,color:C.black,marginBottom:7}}>Aún no hay reviews de huéspedes</div>
+              <div style={{fontSize:11.5,color:C.earth,lineHeight:1.7,marginBottom:12}}>Esta sección se llena con las calificaciones que los huéspedes dejan en Airbnb, Booking y las demás plataformas. Mientras no se importen, no hay nada que calcular.</div>
+              <div style={{fontSize:11.5,color:C.earth,lineHeight:1.8}}>
+                <b style={{color:C.black}}>Para llenarla:</b><br/>
+                1. Toca <b>↻ Importar</b> arriba. Trae las reviews desde Hospitable.<br/>
+                2. Si el botón da error, tu plan de Hospitable no expone reviews por API — usa <b>Cargar reviews a mano</b> y pega la tabla que exportas de la plataforma.
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div style={{fontSize:13.5,fontWeight:700,color:C.black,marginBottom:7}}>Hay {(reviews||[]).length} review{(reviews||[]).length===1?"":"s"}, pero ninguna se pudo ligar a un técnico</div>
+              <div style={{fontSize:11.5,color:C.earth,lineHeight:1.7,marginBottom:10}}>{att.rows.length>0?"Ninguna cae dentro del período seleccionado — amplía el rango arriba.":"Para ligar una review, la limpieza tradicional de esa propiedad debe estar registrada en el app con fecha anterior al check-in del huésped, y el nombre de la propiedad debe coincidir."}</div>
+              {att.orphan.length>0&&<div style={{fontSize:11.5,color:C.earth,lineHeight:1.7}}>Abre <b>Reviews sin técnico</b> abajo — ahí aparece el motivo exacto de cada una.</div>}
+            </div>
+          )}
         </div>
       )}
 
@@ -9443,6 +9458,7 @@ var TC_METRICS = [
 function TechCompare8w({reps, vendors, reviews}) {
   const [metric,setMetric] = useState("ingresos");
   const [sortK, setSortK]  = useState("ingresos");
+  const [focus, setFocus]  = useState("__all");
 
   var weeks = last8Weeks();
   var from  = weeks[0].from, to = weeks[weeks.length-1].to;
@@ -9493,12 +9509,25 @@ function TechCompare8w({reps, vendors, reviews}) {
     best[m.k]= m.hi==="min" ? Math.min.apply(null,vals) : Math.max.apply(null,vals);
   });
 
-  var chart = weeks.map(function(w,i){
-    var o={label:w.label};
-    data.forEach(function(r){ o[r.g.label]=r.weekly[i][metric]; });
-    return o;
-  });
   var mDef = TC_METRICS.find(function(x){return x.k===metric;})||TC_METRICS[0];
+
+  /* Barras: solo quienes tienen valor en la métrica activa, de mayor a menor. */
+  var barData = data.filter(function(r){return r[metric]!=null&&r[metric]>0;})
+    .sort(function(a,b){return b[metric]-a[metric];});
+  var barMax = barData.length?Math.max.apply(null,barData.map(function(r){return r[metric];})):0;
+
+  /* Serie semanal: un solo técnico, o el promedio del equipo. */
+  var focusRow = data.filter(function(r){return r.g.value===focus;})[0]||null;
+  var focusColor = focusRow?focusRow.color:C.black;
+  var weekSeries = weeks.map(function(w,i){
+    if(focusRow) return {label:w.label, v:focusRow.weekly[i][metric]};
+    var vals=data.map(function(r){return r.weekly[i][metric];}).filter(function(v){return v!=null;});
+    if(!vals.length) return {label:w.label, v:0};
+    var sum=vals.reduce(function(a,b){return a+b;},0);
+    return {label:w.label, v: metric==="rating" ? Math.round(sum/vals.length*100)/100 : sum};
+  });
+
+  var noRatings = !data.some(function(r){return r.rating!=null;});
 
   if(!data.length) return null;
 
@@ -9546,30 +9575,62 @@ function TechCompare8w({reps, vendors, reviews}) {
           </tbody>
         </table>
       </div>
-      <div style={{fontSize:10.5,color:C.taupe,lineHeight:1.6,marginTop:-12,marginBottom:18}}>Toca un encabezado para reordenar. En verde, el mejor de cada columna. El rating es la nota de limpieza que dejaron los huéspedes en las plataformas.</div>
+      <div style={{fontSize:10.5,color:C.taupe,lineHeight:1.6,marginTop:-12,marginBottom:14}}>Toca un encabezado para reordenar. En verde, el mejor de cada columna.</div>
+      {noRatings&&(
+        <div style={{background:"#FDF3EE",border:"1px solid #F2D9CE",borderRadius:9,padding:"11px 13px",marginBottom:18,fontSize:11.5,color:C.earth,lineHeight:1.65}}>
+          La columna <b>Rating limpieza</b> está vacía porque todavía no hay reviews de huéspedes importadas. Ve a <b>Calidad › ☆ Rating huéspedes</b> y toca <b>Importar</b> — o carga las reviews pegando una tabla.
+        </div>
+      )}
 
-      {/* Evolución semanal */}
-      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
-        {TC_METRICS.map(function(m){
-          var act=metric===m.k;
-          return <button key={m.k} onClick={function(){setMetric(m.k);}} style={{padding:"7px 13px",borderRadius:100,border:"1.5px solid "+(act?C.black:C.line),background:act?C.black:"#fff",color:act?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{m.label}</button>;
-        })}
-      </div>
-      <ResponsiveContainer width="100%" height={230}>
-        <LineChart data={chart} margin={{top:4,right:12,left:-14,bottom:0}}>
-          <CartesianGrid strokeDasharray="3 3" stroke={C.gray}/>
-          <XAxis dataKey="label" tick={{fontSize:10,fill:C.earth}} axisLine={false} tickLine={false}/>
-          <YAxis tick={{fontSize:10,fill:C.earth}} axisLine={false} tickLine={false} domain={metric==="rating"?[3,5]:[0,"auto"]} allowDecimals={metric==="rating"}/>
-          <Tooltip contentStyle={{borderRadius:8,fontSize:12,border:"1px solid "+C.gray}} formatter={function(v){return mDef.fmt(v);}}/>
-          {data.map(function(r){
-            return <Line key={r.g.value} type="monotone" dataKey={r.g.label} stroke={r.color} strokeWidth={2.2} dot={{r:3,fill:r.color}} connectNulls={true}/>;
+      {/* Selector de métrica */}
+      <div style={{borderTop:"1px solid "+C.line,paddingTop:16}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:9}}>Ver métrica</div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
+          {TC_METRICS.map(function(m){
+            var act=metric===m.k;
+            return <button key={m.k} onClick={function(){setMetric(m.k);setSortK(m.k);}} style={{padding:"7px 13px",borderRadius:100,border:"1.5px solid "+(act?C.black:C.line),background:act?C.black:"#fff",color:act?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{m.label}</button>;
           })}
-        </LineChart>
-      </ResponsiveContainer>
-      <div style={{display:"flex",gap:14,flexWrap:"wrap",marginTop:12,justifyContent:"center"}}>
-        {data.map(function(r){
-          return <span key={r.g.value} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.earth}}><span style={{width:14,height:2.5,background:r.color,borderRadius:2}}/>{r.g.label}</span>;
-        })}
+        </div>
+      </div>
+
+      {/* Barras comparativas — una barra por técnico, ordenadas */}
+      {barData.length===0
+        ? <div style={{background:C.surfaceWarm,borderRadius:10,padding:"20px 16px",textAlign:"center",fontSize:12,color:C.earth,lineHeight:1.6}}>Sin datos de <b>{mDef.label.toLowerCase()}</b> en estas 8 semanas.{metric==="rating"?" Importa las reviews en Calidad › Rating huéspedes.":""}</div>
+        : <div style={{display:"flex",flexDirection:"column",gap:9}}>
+            {barData.map(function(r,i){
+              var v=r[metric], pct=barMax>0?Math.max(2,(v/barMax)*100):0;
+              var isTop=i===0&&barData.length>1;
+              return (
+                <div key={r.g.value} style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{width:104,flexShrink:0,fontSize:11.5,fontWeight:isTop?700:500,color:C.black,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.g.label}</span>
+                  <span style={{flex:1,background:C.beige,borderRadius:4,height:20,position:"relative",minWidth:40}}>
+                    <span style={{display:"block",width:pct+"%",height:"100%",borderRadius:4,background:metric==="correcciones"?(v>0?C.red:C.green):(isTop?C.peach:C.earth),transition:"width .36s cubic-bezier(.22,.61,.36,1)"}}/>
+                  </span>
+                  <span style={{width:76,flexShrink:0,textAlign:"right",fontSize:12.5,fontWeight:isTop?700:600,color:metric==="rating"?rvColor(v):C.black}}>{mDef.fmt(v)}</span>
+                </div>
+              );
+            })}
+          </div>}
+
+      {/* Evolución semanal de UN técnico — evita la maraña de líneas */}
+      <div style={{borderTop:"1px solid "+C.line,marginTop:20,paddingTop:16}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:11}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase"}}>Semana por semana</div>
+          <select value={focus} onChange={function(e){setFocus(e.target.value);}} style={{border:"1px solid "+C.gray,borderRadius:6,padding:"7px 10px",fontSize:12,fontFamily:"Montserrat,sans-serif",background:"#fff",outline:"none",maxWidth:210}}>
+            <option value="__all">Promedio del equipo</option>
+            {sorted.map(function(r){return <option key={r.g.value} value={r.g.value}>{r.g.label}</option>;})}
+          </select>
+        </div>
+        <ResponsiveContainer width="100%" height={190}>
+          <BarChart data={weekSeries} margin={{top:4,right:8,left:-16,bottom:0}}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.gray} vertical={false}/>
+            <XAxis dataKey="label" tick={{fontSize:10,fill:C.earth}} axisLine={false} tickLine={false}/>
+            <YAxis tick={{fontSize:10,fill:C.earth}} axisLine={false} tickLine={false} domain={metric==="rating"?[3,5]:[0,"auto"]} allowDecimals={metric==="rating"}/>
+            <Tooltip contentStyle={{borderRadius:8,fontSize:12,border:"1px solid "+C.gray}} formatter={function(v){return [mDef.fmt(v),mDef.label];}} labelFormatter={function(l){return "Semana del "+l;}}/>
+            <Bar dataKey="v" fill={focusColor} radius={[4,4,0,0]}/>
+          </BarChart>
+        </ResponsiveContainer>
+        <div style={{fontSize:10.5,color:C.taupe,lineHeight:1.6,marginTop:8}}>{focus==="__all"?"Promedio de todo el equipo por semana.":"Solo "+(focusRow?focusRow.g.label:"")+". Cambia el técnico en el menú para comparar su curva."} Las semanas van de lunes a domingo.</div>
       </div>
     </div>
   );
