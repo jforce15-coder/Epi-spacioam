@@ -6304,7 +6304,7 @@ function HospSyncButton({onImport}) {
           <div style={{fontSize:9.5,fontWeight:700,color:C.green,letterSpacing:".16em",textTransform:"uppercase",marginBottom:3}}>Sincronizar con Hospitable</div>
           <div style={{fontSize:11.5,color:C.earth}}>Importa automáticamente los próximos 14 días de limpiezas y mantenimientos</div>
         </div>
-        <button onClick={sync} disabled={busy} style={{flexShrink:0,padding:"9px 16px",borderRadius:7,border:"none",background:busy?C.gray:"#3d6b52",color:"#fff",fontSize:12.5,fontWeight:700,cursor:busy?"default":"pointer",whiteSpace:"nowrap"}}>
+        <button onClick={function(){sync(false);}} disabled={busy} style={{flexShrink:0,padding:"9px 16px",borderRadius:7,border:"none",background:busy?C.gray:"#3d6b52",color:"#fff",fontSize:12.5,fontWeight:700,cursor:busy?"default":"pointer",whiteSpace:"nowrap"}}>
           {busy?"Sincronizando…":"↻ Sync"}
         </button>
       </div>
@@ -9183,24 +9183,39 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, onSelect}) {
   var sinRev = groups.filter(function(g){return !stats[g.value]||!stats[g.value].n;});
   var gAvg   = rows.length ? rows.reduce(function(s,x){return s+x.score;},0)/rows.length : null;
 
-  async function sync(){
-    setBusy(true); setMsg(null);
+  async function sync(auto){
+    if(!auto) setBusy(true);
+    setMsg(null);
     try{
       var d = await apiCall("syncReviews",{days:365});
-      if(d&&d.error) throw new Error(String(d.error).indexOf("Unknown action")>=0?"el Apps Script todavía no tiene la acción syncReviews (pega el Code actualizado y vuelve a publicar)":d.error);
-      if(d&&d.ok===false) throw new Error("La plataforma no devolvió reviews.");
+      var err = d && (d.error || (d.ok===false && "Hospitable no respondió."));
+      if(err) throw new Error(String(err).indexOf("Unknown action")>=0
+        ? "el Apps Script todavía no tiene la acción syncReviews — pega el Code actualizado y vuelve a publicar una nueva versión."
+        : err);
       var list = (d&&Array.isArray(d.reviews)) ? d.reviews : [];
-      if(!list.length) { setMsg({ok:false,txt:"No se recibió ninguna review. Revisa el token de Hospitable o usa la carga manual."}); }
-      else {
+      try{ localStorage.setItem("sam_rvsync", String(Date.now())); }catch(e2){}
+      if(!list.length){
+        setMsg({ok:false,txt:"Hospitable respondió bien, pero ninguna reserva trae calificación de limpieza"+(d&&d.reservas?" (se revisaron "+d.reservas+" reservas)":"")+". Suele pasar cuando el token no tiene el permiso Reviews, o cuando aún no hay reviews publicadas."});
+      } else {
         var byId={}; (reviews||[]).forEach(function(r){byId[String(r.id)]=r;});
         var nuevas=0; list.forEach(function(r){ if(!byId[String(r.id)]) nuevas++; byId[String(r.id)]=Object.assign({},byId[String(r.id)]||{},r); });
         var merged=Object.keys(byId).map(function(k){return byId[k];});
         onSvReviews&&onSvReviews(merged);
         setMsg({ok:true,txt:nuevas+" review"+(nuevas===1?"":"s")+" nueva"+(nuevas===1?"":"s")+" · "+merged.length+" en total."});
       }
-    }catch(e){ setMsg({ok:false,txt:"No se pudo importar: "+(e&&e.message?e.message:"error de conexión")+" — puedes cargarlas a mano abajo."}); }
-    setBusy(false);
+    }catch(e){
+      var t=(e&&e.message)?e.message:"error de conexión";
+      setMsg({ok:false,txt:"No se pudo importar: "+t+(/permiso|reviews:read|403/i.test(t)?"":" — si sigue fallando puedes cargarlas a mano abajo.")});
+    }
+    if(!auto) setBusy(false);
   }
+
+  /* Automático: si hace más de 12 h que no se sincroniza, lo hace en silencio
+     al abrir la pestaña. El activador diario del Apps Script hace el resto. */
+  useEffect(function(){
+    var last=0; try{ last=parseInt(localStorage.getItem("sam_rvsync")||"0",10)||0; }catch(e){}
+    if(Date.now()-last > 12*3600*1000) sync(true);
+  },[]);
 
   var IS = {border:"1px solid "+C.gray,borderRadius:6,padding:"7px 10px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff"};
 
@@ -9219,9 +9234,9 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, onSelect}) {
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
           <div style={{flex:"1 1 190px"}}>
             <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>Importar reviews de las plataformas</div>
-            <div style={{fontSize:10.5,color:C.taupe,marginTop:3,lineHeight:1.5}}>Trae Airbnb, Booking y las demás vía Hospitable. Puedes repetirlo cuando quieras — no duplica.</div>
+            <div style={{fontSize:10.5,color:C.taupe,marginTop:3,lineHeight:1.5}}>Se sincroniza solo cada noche. Este botón lo fuerza ahora mismo — no duplica.</div>
           </div>
-          <button onClick={sync} disabled={busy} style={{padding:"10px 16px",borderRadius:9,border:"none",background:busy?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:busy?"wait":"pointer",flexShrink:0}}>{busy?"Importando…":"↻ Importar"}</button>
+          <button onClick={function(){sync(false);}} disabled={busy} style={{padding:"10px 16px",borderRadius:9,border:"none",background:busy?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:busy?"wait":"pointer",flexShrink:0}}>{busy?"Importando…":"↻ Importar"}</button>
         </div>
         {msg&&<div style={{fontSize:12,fontWeight:600,lineHeight:1.55,color:msg.ok?C.green:C.red,background:msg.ok?"#EDF5EF":"#F5EDEC",padding:"9px 12px",borderRadius:8}}>{msg.txt}</div>}
         <button onClick={function(){setImp(!imp);}} style={{alignSelf:"flex-start",background:"none",border:"none",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",textDecoration:"underline",padding:0}}>{imp?"Ocultar carga manual":"Cargar reviews a mano (pegar tabla)"}</button>
@@ -9260,7 +9275,8 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, onSelect}) {
               <div style={{fontSize:11.5,color:C.earth,lineHeight:1.8}}>
                 <b style={{color:C.black}}>Para llenarla:</b><br/>
                 1. Toca <b>↻ Importar</b> arriba. Trae las reviews desde Hospitable.<br/>
-                2. Si el botón da error, tu plan de Hospitable no expone reviews por API — usa <b>Cargar reviews a mano</b> y pega la tabla que exportas de la plataforma.
+                2. Si da error de permisos, el token de Hospitable necesita el scope <b>reviews:read</b>. En my.hospitable.com › Apps › Access tokens genera uno nuevo marcando <b>Reviews</b> y pégalo en el Apps Script.<br/>
+                3. Como último recurso, <b>Cargar reviews a mano</b> acepta la tabla que exportas de la plataforma.
               </div>
             </div>
           ) : (
