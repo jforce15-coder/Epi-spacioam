@@ -199,6 +199,124 @@ function repInGroup(rep, g){
   return !!rp && g.emails.indexOf(rp)>=0;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   RATING DE HUÉSPEDES — calificación de LIMPIEZA importada de las plataformas
+   ─────────────────────────────────────────────────────────────────────────
+   • Se usa SOLO la sub-calificación de "limpieza" de cada review, nunca la general.
+   • Se atribuye al técnico que hizo la limpieza inmediatamente ANTERIOR al check-in
+     del huésped — normalmente la del mismo día del check-in, pero vale cualquier
+     limpieza programada antes de que el huésped entrara.
+   • Las LIMPIEZAS PROFUNDAS quedan excluidas de la atribución.
+   ═══════════════════════════════════════════════════════════════════════ */
+var RV_WINDOW_DAYS = 10;
+function isTradClean(cat){ return String(cat||"").toLowerCase().indexOf("tradicional")>=0; }
+function rvPropKey(s){ return normalize(s).replace(/[^a-z0-9]/g,""); }
+function isoShift(iso, days){
+  var d=new Date(String(iso).slice(0,10)+"T12:00:00"); if(isNaN(d)) return "";
+  d.setDate(d.getDate()+days); return d.toISOString().slice(0,10);
+}
+/* Normaliza la nota de limpieza a escala 1–5. Booking/Vrbo la dan sobre 10. */
+function rvCleanScore(rv){
+  var v = rv&&(rv.ratingLimpieza!=null?rv.ratingLimpieza:rv.cleanliness);
+  if(v===""||v==null) return null;
+  var n=parseFloat(v); if(isNaN(n)||n<=0) return null;
+  if(n>5.5) n=n/2;
+  return Math.round(Math.min(5,n)*100)/100;
+}
+/* Liga cada review con la limpieza previa al check-in (y por tanto con su técnico). */
+function rvAttribute(reviews, reps){
+  var cleans=(reps||[]).filter(function(r){return isTradClean(r.categoria)&&r.fecha;});
+  var byProp={};
+  cleans.forEach(function(r){ var k=rvPropKey(r.propiedad); if(!byProp[k])byProp[k]=[]; byProp[k].push(r); });
+  var keys=Object.keys(byProp);
+  var rows=[], orphan=[];
+  (reviews||[]).forEach(function(rv){
+    var score=rvCleanScore(rv);
+    var ci=String(rv.checkIn||"").slice(0,10);
+    if(score==null){ orphan.push({rv:rv,why:"La review no trae calificación de limpieza"}); return; }
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(ci)){ orphan.push({rv:rv,why:"Sin fecha de check-in"}); return; }
+    var k=rvPropKey(rv.propiedad), list=byProp[k];
+    if(!list){
+      var best=null,bs=0;
+      keys.forEach(function(kk){ var s=similarity(k,kk); if(s>bs){bs=s;best=kk;} });
+      if(best&&bs>=0.8) list=byProp[best];
+    }
+    if(!list){ orphan.push({rv:rv,why:"Propiedad sin limpiezas registradas en el app"}); return; }
+    var min=isoShift(ci,-RV_WINDOW_DAYS);
+    var cand=list.filter(function(r){return r.fecha<=ci && r.fecha>=min;});
+    if(!cand.length){ orphan.push({rv:rv,why:"Sin limpieza tradicional en los "+RV_WINDOW_DAYS+" días previos al check-in"}); return; }
+    cand.sort(function(a,b){ if(a.fecha!==b.fecha) return a.fecha<b.fecha?1:-1; return (b.createdAt||b.id||0)-(a.createdAt||a.id||0); });
+    rows.push({rv:rv, score:score, rep:cand[0]});
+  });
+  return {rows:rows, orphan:orphan};
+}
+/* Promedio, conteo y distribución de estrellas por grupo de técnico. */
+function rvStatsByGroup(rows, groups){
+  var out={};
+  (groups||[]).forEach(function(g){ out[g.value]={n:0,sum:0,dist:{1:0,2:0,3:0,4:0,5:0},rows:[],avg:null}; });
+  (rows||[]).forEach(function(row){
+    for(var i=0;i<groups.length;i++){
+      if(repInGroup(row.rep,groups[i])){
+        var s=out[groups[i].value]; s.n++; s.sum+=row.score;
+        var b=Math.max(1,Math.min(5,Math.round(row.score))); s.dist[b]++;
+        s.rows.push(row); break;
+      }
+    }
+  });
+  Object.keys(out).forEach(function(k){ out[k].avg = out[k].n ? out[k].sum/out[k].n : null; });
+  return out;
+}
+function rvStarsTxt(n){
+  if(n==null) return "—";
+  var full=Math.max(0,Math.min(5,Math.round(n)));
+  return "★★★★★".slice(0,full)+"☆☆☆☆☆".slice(0,5-full);
+}
+function rvColor(n){ return n==null?"#938B8A" : n>=4.8?"#3d6b52" : n>=4.5?"#5a7a52" : n>=4?"#9a5020" : "#8a3030"; }
+/* Config repartida en varios campos — evita desbordar la celda del Sheet (50k). */
+function rv_merge(cfg){
+  if(!cfg) return null;
+  var base=Array.isArray(cfg.reviews)?cfg.reviews:null;
+  var n=parseInt(cfg.reviews_n,10);
+  if(!n||n<=1) return base;
+  var merged=Array.isArray(cfg.reviews)?cfg.reviews.slice():[];
+  for(var i=1;i<n;i++){ var arr=cfg["reviews_"+(i+1)]; if(Array.isArray(arr)) merged=merged.concat(arr); }
+  return merged.length?merged:base;
+}
+function rv_shard(list){
+  var shards=[[]], size=0;
+  (list||[]).forEach(function(x){
+    var len=JSON.stringify(x).length+2;
+    if(size+len>38000 && shards[shards.length-1].length){ shards.push([]); size=0; }
+    shards[shards.length-1].push(x); size+=len;
+  });
+  return shards;
+}
+function rv_persist(list){
+  try{ localStorage.setItem("sam_reviews", JSON.stringify(list)); }catch(e){}
+  try{
+    var shards=rv_shard(list);
+    shards.forEach(function(sh,i){ apiCall("saveConfig",{key:i===0?"reviews":"reviews_"+(i+1),value:sh}); });
+    for(var k=shards.length;k<shards.length+3;k++){ apiCall("saveConfig",{key:"reviews_"+(k+1),value:[]}); }
+    apiCall("saveConfig",{key:"reviews_n",value:shards.length});
+  }catch(e){}
+}
+/* Últimas 8 semanas (lunes→domingo); la semana en curso queda al final. */
+function last8Weeks(){
+  var now=new Date(); now.setHours(12,0,0,0);
+  var dow=(now.getDay()+6)%7;
+  var mon=new Date(now); mon.setDate(now.getDate()-dow);
+  var out=[];
+  for(var i=7;i>=0;i--){
+    var s=new Date(mon); s.setDate(mon.getDate()-i*7);
+    var e=new Date(s); e.setDate(s.getDate()+6);
+    out.push({
+      from:s.toISOString().slice(0,10), to:e.toISOString().slice(0,10),
+      label:("0"+s.getDate()).slice(-2)+"/"+("0"+(s.getMonth()+1)).slice(-2)
+    });
+  }
+  return out;
+}
+
 /* ─── Fuzzy vendor matcher
    Matches by email, phone, or name similarity.
    Returns the best-matching vendor and a confidence score 0-1.
@@ -660,6 +778,7 @@ async function loadAllData() {
       adelantos: adv_load(),
       pagos:     pg_load(),
       notifprefs: d.notifprefs || {},
+      reviews:   d.reviews || [],
     };
   }
   /* Carga SECUENCIAL (no Promise.all): el Apps Script ocasionalmente mezcla las
@@ -692,6 +811,7 @@ async function loadAllData() {
     adelantos: Array.isArray(cfg.adelantos) ? cfg.adelantos : null,
     pagos: pg_merge(cfg),
     notifprefs: (cfg.notifprefs && typeof cfg.notifprefs==="object") ? cfg.notifprefs : {},
+    reviews: rv_merge(cfg),
   };
 }
 
@@ -986,6 +1106,9 @@ function App() {
   const [adelantos, setAdelantos] = useState([]);
   const [pagos, setPagos] = useState([]);
   const [notifPrefs, setNotifPrefs] = useState({});
+  /* Reviews de huéspedes (calificación de limpieza importada de las plataformas) */
+  const [reviews, setReviews] = useState([]);
+  async function svReviews(v){ setReviews(v); rv_persist(v); }
 
   /* Adelantos (advances): se cargan vía loadAllData (localStorage en demo, Sheets en vivo)
      y se migran/ligan a su técnico en el .then de carga. */
@@ -1040,6 +1163,7 @@ function App() {
       if(d.hospurlday)  setHospUrlDay(d.hospurlday||"");
       if(d.hospurlweek) setHospUrlWeek(d.hospurlweek||"");
       if(d.feedback)  setFeedback(d.feedback);
+      if(Array.isArray(d.reviews)) setReviews(d.reviews);
       /* Adelantos: tomar de la fuente (Sheets/local) o sembrar; luego ligar a técnicos. */
       var advRaw=(d.adelantos && d.adelantos.length)?d.adelantos:adv_seed();
       var mig=adv_migrate(advRaw, d.vendors||DEF_V);
@@ -1221,7 +1345,7 @@ function App() {
     try{ if(localStorage.getItem("epi_onboard_done_"+freshV.id)) needsOnb=false; }catch(_){}
     inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
   } else {
-    inner = <AdminApp reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
+    inner = <AdminApp reviews={reviews} onSvReviews={svReviews} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
   }
   return <ErrorBoundary>{inner}</ErrorBoundary>;
 }
@@ -1489,7 +1613,7 @@ function NotifCfg({prefs, vendors, onSave, readOnly}){
 }
 
 /* ═══ ADMIN */
-function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
+function AdminApp({reviews,onSvReviews,reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
   const [tab,    setTab]    = useState("dash");
   const [detail, setDetail] = useState(null);
   const [cDel,   setCDel]   = useState(null);
@@ -1587,7 +1711,7 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrl
         role="Admin"
       />
 
-      <div style={{display:tab==="dash"?"block":"none"}}><DashView reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh}/></div>
+      <div style={{display:tab==="dash"?"block":"none"}}><DashView reviews={reviews} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh}/></div>
       <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
       <div style={{display:tab==="sched"?"block":"none"}}>
         <ScheduleCfg schedules={schedules||[]} vendors={vendors||[]} props={props||[]} hospUrlDay={hospUrlDay||""} hospUrlWeek={hospUrlWeek||""} onSave={onSvSchedules} onSaveHospUrlDay={onSvHospUrlDay} onSaveHospUrlWeek={onSvHospUrlWeek}/>
@@ -1616,7 +1740,7 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrl
         )}
       </div>
       <div style={{display:tab==="qa"?"block":"none"}}>
-        <AdminQAPanel reps={reps} vendors={vendors} onQA={qaUpdate} onSelect={setDetail} onUpdate={onUpsert} isAdmin={true} me={adminVendor}/>
+        <AdminQAPanel reps={reps} vendors={vendors} reviews={reviews} onSvReviews={onSvReviews} onQA={qaUpdate} onSelect={setDetail} onUpdate={onUpsert} isAdmin={true} me={adminVendor}/>
       </div>
       <div style={{display:tab==="adv"?"block":"none"}}><AdvancesAdmin adelantos={adelantos} reps={reps} vendors={vendors} onSvAdelantos={onSvAdelantos}/></div>
       <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  reps={reps} vendors={vendors} props={props} adminPin={adminPin} company={company} extCats={extCats||[]} notifPrefs={notifPrefs} canNotif={canNotif} onSvNotifPrefs={onSvNotifPrefs} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
@@ -1629,7 +1753,7 @@ function AdminApp({reps,vendors,props,adminPin,company,extCats,schedules,hospUrl
 }
 
 /* ─── Dashboard container */
-function DashView({reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
+function DashView({reviews,reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
   const [sub,setSub] = useState("ops");
   return (
     <div>
@@ -1640,7 +1764,7 @@ function DashView({reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkP
         ); })}
       </div>
       <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} vendors={vendors} adelantos={adelantos} onMarkPaidBatch={onMarkPaidBatch} onSelect={onSelect} onMarkPaid={onMarkPaid} onRefresh={onRefresh}/></div>
-      <div style={{display:sub==="exec"?"block":"none"}}><ExecDash reps={reps} vendors={vendors}/></div>
+      <div style={{display:sub==="exec"?"block":"none"}}><ExecDash reps={reps} vendors={vendors} reviews={reviews}/></div>
       <div style={{display:sub==="pagos"?"block":"none"}}><PagosHistory pagos={pagos} vendors={vendors} company={company} isAdmin={true} onSvPagos={onSvPagos}/></div>
     </div>
   );
@@ -1920,7 +2044,7 @@ function CalView({reps,onSelect,onMarkPaid,vendors}) {
 }
 
 /* ─── Executive Dashboard */
-function ExecDash({reps,vendors}) {
+function ExecDash({reps,vendors,reviews}) {
   const [fProp,  setFProp]   = useState("Todas");
   const [fDesde, setFDesde]  = useState("");
   const [fHasta, setFHasta]  = useState("");
@@ -2082,6 +2206,9 @@ function ExecDash({reps,vendors}) {
           })}
         </div>
       </div>
+
+      {/* ── Comparativo de técnicos · últimas 8 semanas */}
+      <TechCompare8w reps={reps} vendors={vendors} reviews={reviews}/>
 
       {/* ── Pagos semanales de limpieza */}
       <PagosLimpieza reps={reps} vendors={vendors}/>
@@ -6603,7 +6730,7 @@ function QuickEditTotal({rep, vendors, onSave}) {
 
 
 /* ─── Admin QA Panel — full quality review across all cleanings + daños + resumen */
-function AdminQAPanel({reps, vendors, onQA, onSelect, onUpdate, isAdmin, me}) {
+function AdminQAPanel({reps, vendors, reviews, onSvReviews, onQA, onSelect, onUpdate, isAdmin, me}) {
   const [sec,      setSec]      = useState("limpiezas"); /* limpiezas | danios | resumen */
   const [filter,   setFilter]   = useState("all"); /* all | pendiente | aprobada | correccion */
   const [selVend,  setSelVend]  = useState("Todos");
@@ -6665,7 +6792,7 @@ function AdminQAPanel({reps, vendors, onQA, onSelect, onUpdate, isAdmin, me}) {
     <div style={{maxWidth:700,margin:"0 auto",padding:"16px 16px 100px",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:14}}>
       {/* Secciones */}
       <div style={{display:"flex",gap:8}}>
-        {[["limpiezas","★ Limpiezas"],["danios","⚠ Daños"+(urgAlta>0?" · "+urgAlta:"")]].concat(isAdmin?[["mant","🔧 Mantenimiento"],["resumen","Resumen técnicos"]]:[]).map(function(it){
+        {[["limpiezas","★ Limpiezas"],["danios","⚠ Daños"+(urgAlta>0?" · "+urgAlta:"")]].concat(isAdmin?[["rating","☆ Rating huéspedes"],["mant","🔧 Mantenimiento"],["resumen","Resumen técnicos"]]:[]).map(function(it){
           var s=sec===it[0];
           return <button key={it[0]} onClick={function(){setSec(it[0]);}} style={{flex:1,padding:"11px 8px",borderRadius:9,border:"1.5px solid "+(s?C.black:C.line),background:s?C.black:"#fff",color:s?"#fff":(it[0]==="danios"&&urgAlta>0?C.red:C.earth),fontSize:12.5,fontWeight:700,cursor:"pointer"}}>{it[1]}</button>;
         })}
@@ -6673,6 +6800,7 @@ function AdminQAPanel({reps, vendors, onQA, onSelect, onUpdate, isAdmin, me}) {
 
       {sec==="danios"&&<DamageBoard reps={reps} vendors={vendors} me={me} isAdmin={isAdmin} onUpdate={onUpdate} onSelect={onSelect}/>}
       {sec==="mant"&&isAdmin&&<MaintBoard reps={reps} vendors={vendors} me={me} onUpdate={onUpdate} onSelect={onSelect}/>}
+      {sec==="rating"&&isAdmin&&<GuestRatingBoard reviews={reviews||[]} reps={reps} vendors={vendors} onSvReviews={onSvReviews} onSelect={onSelect}/>}
       {sec==="resumen"&&isAdmin&&<TechSummary reps={reps} vendors={vendors}/>}
 
       {sec==="limpiezas"&&<>
@@ -9021,6 +9149,428 @@ function InvoiceUp({factura,onAdd,onDel}) {
         </button>
       )}
       <input ref={ref} type="file" accept="image/*,application/pdf" style={{display:"none"}} onChange={function(e){if(e.target.files&&e.target.files[0])onAdd(e.target.files[0]);e.target.value="";}}/>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RATING DE HUÉSPEDES — pestaña Calidad › ☆ Rating huéspedes
+   Importa las reviews de las plataformas y atribuye la nota de LIMPIEZA al
+   técnico que limpió antes del check-in.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function GuestRatingBoard({reviews, reps, vendors, onSvReviews, onSelect}) {
+  const [busy,   setBusy]   = useState(false);
+  const [msg,    setMsg]    = useState(null);
+  const [imp,    setImp]    = useState(false);
+  const [open,   setOpen]   = useState(null);
+  const [orphOpen,setOrphOpen]= useState(false);
+  const [preset, setPreset] = useState("todo");
+  const [dFrom,  setDFrom]  = useState("");
+  const [dTo,    setDTo]    = useState("");
+
+  function applyPreset(v){ setPreset(v); var r=presetRange(v); setDFrom(r.from); setDTo(r.to); }
+
+  var att   = rvAttribute(reviews, reps);
+  var rows  = att.rows.filter(function(x){
+    if(dFrom && (x.rep.fecha||"")<dFrom) return false;
+    if(dTo   && (x.rep.fecha||"")>dTo)   return false;
+    return true;
+  });
+  var groups = techFilterGroups(reps, vendors, function(r){return isTradClean(r.categoria);});
+  var stats  = rvStatsByGroup(rows, groups);
+  var ranked = groups.filter(function(g){return stats[g.value]&&stats[g.value].n>0;})
+                     .sort(function(a,b){return (stats[b.value].avg||0)-(stats[a.value].avg||0);});
+  var sinRev = groups.filter(function(g){return !stats[g.value]||!stats[g.value].n;});
+  var gAvg   = rows.length ? rows.reduce(function(s,x){return s+x.score;},0)/rows.length : null;
+
+  async function sync(){
+    setBusy(true); setMsg(null);
+    try{
+      var d = await apiCall("syncReviews",{days:365});
+      if(d&&d.error) throw new Error(String(d.error).indexOf("Unknown action")>=0?"el Apps Script todavía no tiene la acción syncReviews (pega el Code actualizado y vuelve a publicar)":d.error);
+      if(d&&d.ok===false) throw new Error("La plataforma no devolvió reviews.");
+      var list = (d&&Array.isArray(d.reviews)) ? d.reviews : [];
+      if(!list.length) { setMsg({ok:false,txt:"No se recibió ninguna review. Revisa el token de Hospitable o usa la carga manual."}); }
+      else {
+        var byId={}; (reviews||[]).forEach(function(r){byId[String(r.id)]=r;});
+        var nuevas=0; list.forEach(function(r){ if(!byId[String(r.id)]) nuevas++; byId[String(r.id)]=Object.assign({},byId[String(r.id)]||{},r); });
+        var merged=Object.keys(byId).map(function(k){return byId[k];});
+        onSvReviews&&onSvReviews(merged);
+        setMsg({ok:true,txt:nuevas+" review"+(nuevas===1?"":"s")+" nueva"+(nuevas===1?"":"s")+" · "+merged.length+" en total."});
+      }
+    }catch(e){ setMsg({ok:false,txt:"No se pudo importar: "+(e&&e.message?e.message:"error de conexión")+" — puedes cargarlas a mano abajo."}); }
+    setBusy(false);
+  }
+
+  var IS = {border:"1px solid "+C.gray,borderRadius:6,padding:"7px 10px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff"};
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div>
+        <div style={{fontSize:9.5,color:C.earth,fontWeight:700,letterSpacing:".24em",textTransform:"uppercase",marginBottom:6}}>Rating de huéspedes</div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:24,fontWeight:400,color:C.black}}>Calificación de limpieza por técnico</div>
+        <div style={{fontSize:11.5,color:C.earth,lineHeight:1.65,marginTop:8,textWrap:"pretty"}}>
+          Se toma únicamente la nota de <b>limpieza</b> que el huésped dejó en la plataforma —no la calificación general— y se asigna al técnico que hizo la limpieza previa a su entrada. Normalmente es la limpieza del día del check-in; si no hubo, se usa la última limpieza programada dentro de los {RV_WINDOW_DAYS} días anteriores. Las <b>limpiezas profundas no cuentan</b>.
+        </div>
+      </div>
+
+      {/* Importar */}
+      <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"13px 15px",display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+          <div style={{flex:"1 1 190px"}}>
+            <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>Importar reviews de las plataformas</div>
+            <div style={{fontSize:10.5,color:C.taupe,marginTop:3,lineHeight:1.5}}>Trae Airbnb, Booking y las demás vía Hospitable. Puedes repetirlo cuando quieras — no duplica.</div>
+          </div>
+          <button onClick={sync} disabled={busy} style={{padding:"10px 16px",borderRadius:9,border:"none",background:busy?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:busy?"wait":"pointer",flexShrink:0}}>{busy?"Importando…":"↻ Importar"}</button>
+        </div>
+        {msg&&<div style={{fontSize:12,fontWeight:600,lineHeight:1.55,color:msg.ok?C.green:C.red,background:msg.ok?"#EDF5EF":"#F5EDEC",padding:"9px 12px",borderRadius:8}}>{msg.txt}</div>}
+        <button onClick={function(){setImp(!imp);}} style={{alignSelf:"flex-start",background:"none",border:"none",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",textDecoration:"underline",padding:0}}>{imp?"Ocultar carga manual":"Cargar reviews a mano (pegar tabla)"}</button>
+        {imp&&<ReviewPaste reviews={reviews} onSave={function(list){onSvReviews&&onSvReviews(list);setImp(false);setMsg({ok:true,txt:"Reviews cargadas."});}}/>}
+      </div>
+
+      {/* Período */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"10px 12px"}}>
+        <span style={{fontSize:10,fontWeight:700,color:C.taupe,letterSpacing:".1em",textTransform:"uppercase"}}>Período</span>
+        <select value={preset} onChange={function(e){applyPreset(e.target.value);}} style={Object.assign({},IS,{flex:"1 1 150px"})}>
+          {PRESET_OPTS.map(function(o){return <option key={o[0]} value={o[0]}>{o[1]}</option>;})}
+          {preset==="custom"&&<option value="custom">Personalizado</option>}
+        </select>
+        <input type="date" value={dFrom} onChange={function(e){setDFrom(e.target.value);setPreset("custom");}} style={Object.assign({},IS,{flex:"1 1 130px"})}/>
+        <input type="date" value={dTo} onChange={function(e){setDTo(e.target.value);setPreset("custom");}} style={Object.assign({},IS,{flex:"1 1 130px"})}/>
+      </div>
+
+      {/* KPIs */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        {[["Promedio",gAvg==null?"—":gAvg.toFixed(2),rvColor(gAvg)],["Reviews ligadas",String(rows.length),C.black],["Sin ligar",String(att.orphan.length),att.orphan.length?C.orange:C.taupe]].map(function(it,i){
+          return (
+            <div key={i} style={{flex:"1 1 100px",background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"12px 14px"}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".12em",textTransform:"uppercase",marginBottom:6}}>{it[0]}</div>
+              <div style={{fontSize:21,fontWeight:600,color:it[2]}}>{it[1]}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {rows.length===0&&(
+        <div style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:10,padding:"22px 18px",textAlign:"center"}}>
+          <div style={{fontSize:13,fontWeight:600,color:C.black,marginBottom:6}}>Todavía no hay ratings ligados</div>
+          <div style={{fontSize:11.5,color:C.earth,lineHeight:1.6}}>Importa las reviews arriba. Para que una review se ligue a un técnico, la limpieza de esa propiedad debe estar registrada en el app antes del check-in del huésped.</div>
+        </div>
+      )}
+
+      {/* Ranking */}
+      {ranked.map(function(g,i){
+        var s=stats[g.value];
+        var isOpen=open===g.value;
+        var maxD=Math.max(s.dist[5],s.dist[4],s.dist[3],s.dist[2],s.dist[1],1);
+        return (
+          <div key={g.value} style={{background:"#fff",border:"1.5px solid "+(i===0?"#c8dfc8":C.line),borderRadius:11,overflow:"hidden"}}>
+            <button onClick={function(){setOpen(isOpen?null:g.value);}} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+              <span style={{width:24,fontSize:12,fontWeight:700,color:i===0?C.peach:C.taupe,flexShrink:0}}>{i+1}</span>
+              <span style={{flex:1,minWidth:0}}>
+                <span style={{display:"block",fontSize:14,fontWeight:600,color:C.black}}>{g.label}</span>
+                <span style={{display:"block",fontSize:11,color:C.earth,marginTop:3}}>{s.n} review{s.n===1?"":"s"} de huéspedes</span>
+              </span>
+              <span style={{textAlign:"right",flexShrink:0}}>
+                <span style={{display:"block",fontSize:20,fontWeight:600,color:rvColor(s.avg)}}>{s.avg.toFixed(2)}</span>
+                <span style={{display:"block",fontSize:11,color:rvColor(s.avg),letterSpacing:".08em"}}>{rvStarsTxt(s.avg)}</span>
+              </span>
+              <span style={{fontSize:12,color:C.taupe,flexShrink:0}}>{isOpen?"▴":"▾"}</span>
+            </button>
+            {isOpen&&(
+              <div style={{borderTop:"1px solid "+C.line,padding:"13px 16px",display:"flex",flexDirection:"column",gap:12}}>
+                <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                  {[5,4,3,2,1].map(function(b){
+                    return (
+                      <div key={b} style={{display:"flex",alignItems:"center",gap:9}}>
+                        <span style={{fontSize:10.5,color:C.earth,width:26,flexShrink:0}}>{b} ★</span>
+                        <span style={{flex:1,background:C.beige,borderRadius:100,height:6,overflow:"hidden"}}><span style={{display:"block",width:(s.dist[b]/maxD*100)+"%",height:"100%",background:b>=4?C.green:b>=3?C.orange:C.red}}/></span>
+                        <span style={{fontSize:10.5,color:C.taupe,width:20,textAlign:"right",flexShrink:0}}>{s.dist[b]}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {s.rows.slice().sort(function(a,b){return (b.rv.checkIn||"")<(a.rv.checkIn||"")?-1:1;}).map(function(x,j){
+                    return (
+                      <div key={j} style={{background:C.surfaceWarm,borderRadius:9,padding:"11px 13px"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"start"}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{x.rv.propiedad||"—"}</div>
+                            <div style={{fontSize:10.5,color:C.earth,marginTop:3}}>{x.rv.platform||"Plataforma"} · check-in {fmtDate(x.rv.checkIn)}{x.rv.guest?" · "+x.rv.guest:""}</div>
+                          </div>
+                          <div style={{textAlign:"right",flexShrink:0}}>
+                            <div style={{fontSize:14,fontWeight:700,color:rvColor(x.score)}}>{x.score.toFixed(1)}</div>
+                            <div style={{fontSize:9.5,color:C.taupe,letterSpacing:".1em",textTransform:"uppercase"}}>limpieza</div>
+                          </div>
+                        </div>
+                        {x.rv.comentario&&<div style={{fontSize:11.5,color:C.earth,lineHeight:1.6,marginTop:7,fontStyle:"italic"}}>“{String(x.rv.comentario).slice(0,260)}{String(x.rv.comentario).length>260?"…":""}”</div>}
+                        <button onClick={function(){onSelect&&onSelect(x.rep);}} style={{marginTop:8,background:"none",border:"none",padding:0,fontSize:11,fontWeight:600,color:C.peach,cursor:"pointer",textDecoration:"underline"}}>Ver la limpieza del {fmtDate(x.rep.fecha)} →</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {sinRev.length>0&&rows.length>0&&(
+        <div style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:10,padding:"12px 14px"}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:6}}>Sin reviews en el período</div>
+          <div style={{fontSize:11.5,color:C.earth,lineHeight:1.6}}>{sinRev.map(function(g){return g.label;}).join(" · ")}</div>
+        </div>
+      )}
+
+      {att.orphan.length>0&&(
+        <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:10,overflow:"hidden"}}>
+          <button onClick={function(){setOrphOpen(!orphOpen);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"12px 15px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+            <span>
+              <span style={{display:"block",fontSize:12.5,fontWeight:700,color:C.black}}>Reviews sin técnico ({att.orphan.length})</span>
+              <span style={{display:"block",fontSize:10.5,color:C.taupe,marginTop:2}}>No se pudo saber quién limpió antes del check-in</span>
+            </span>
+            <span style={{fontSize:12,color:C.taupe}}>{orphOpen?"▴":"▾"}</span>
+          </button>
+          {orphOpen&&(
+            <div style={{borderTop:"1px solid "+C.line,padding:"12px 15px",display:"flex",flexDirection:"column",gap:7,maxHeight:340,overflowY:"auto"}}>
+              {att.orphan.map(function(o,i){
+                return (
+                  <div key={i} style={{background:C.surfaceWarm,borderRadius:8,padding:"9px 11px"}}>
+                    <div style={{fontSize:12,fontWeight:600,color:C.black}}>{o.rv.propiedad||"— sin propiedad —"}</div>
+                    <div style={{fontSize:10.5,color:C.earth,marginTop:3}}>{o.rv.checkIn?"check-in "+fmtDate(o.rv.checkIn):"sin check-in"}{o.rv.platform?" · "+o.rv.platform:""}</div>
+                    <div style={{fontSize:10.5,color:C.orange,marginTop:4,fontWeight:600}}>{o.why}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Carga manual de reviews — pegar una tabla desde Excel / export de la plataforma. */
+function ReviewPaste({reviews, onSave}) {
+  const [raw,setRaw] = useState("");
+  const [prev,setPrev]= useState(null);
+  const [err,setErr] = useState("");
+
+  function parse(text){
+    setErr(""); setPrev(null);
+    var lines=String(text||"").replace(/\r/g,"").split("\n").filter(function(l){return l.trim()!=="";});
+    if(lines.length<2){ setErr("Pega al menos la fila de encabezados y una fila de datos."); return; }
+    var sep = lines[0].indexOf("\t")>=0 ? "\t" : (lines[0].split(";").length>lines[0].split(",").length ? ";" : ",");
+    function cells(l){ return l.split(sep).map(function(c){return c.replace(/^"|"$/g,"").trim();}); }
+    var head=cells(lines[0]).map(function(h){return normalize(h);});
+    function col(){ 
+      for(var a=0;a<arguments.length;a++){
+        var needle=normalize(arguments[a]);
+        for(var i=0;i<head.length;i++) if(head[i].indexOf(needle)>=0) return i;
+      }
+      return -1;
+    }
+    var iProp=col("propiedad","listing","apartamento","property");
+    var iCi  =col("check-in","checkin","llegada","arrival","entrada");
+    var iCle =col("limpieza","cleanliness","limpio");
+    var iGen =col("general","overall","total","promedio");
+    var iGu  =col("huesped","guest","cliente");
+    var iPl  =col("plataforma","platform","canal","channel","fuente");
+    var iCom =col("comentario","review","texto","publico","comment");
+    var iRd  =col("fecha review","fecha de la review","reviewed");
+    if(iProp<0||iCi<0||iCle<0){ setErr("Faltan columnas. Se necesitan al menos: Propiedad · Check-in · Limpieza. Encontradas: "+cells(lines[0]).join(" | ")); return; }
+    function isoOf(v){
+      v=String(v||"").trim();
+      if(/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0,10);
+      var m=v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+      if(m){ var y=m[3].length===2?"20"+m[3]:m[3]; return y+"-"+("0"+m[2]).slice(-2)+"-"+("0"+m[1]).slice(-2); }
+      var d=new Date(v); return isNaN(d)?"":d.toISOString().slice(0,10);
+    }
+    var out=[];
+    for(var i=1;i<lines.length;i++){
+      var c=cells(lines[i]); if(!c[iProp]&&!c[iCi]) continue;
+      var ci=isoOf(c[iCi]);
+      out.push({
+        id: "man_"+ci+"_"+rvPropKey(c[iProp]).slice(0,18)+"_"+i,
+        propiedad: c[iProp]||"", checkIn: ci,
+        ratingLimpieza: c[iCle]!==undefined&&c[iCle]!=="" ? parseFloat(String(c[iCle]).replace(",",".")) : null,
+        ratingGeneral: iGen>=0&&c[iGen] ? parseFloat(String(c[iGen]).replace(",",".")) : null,
+        guest: iGu>=0?(c[iGu]||""):"", platform: iPl>=0?(c[iPl]||"Manual"):"Manual",
+        comentario: iCom>=0?(c[iCom]||""):"", reviewedAt: iRd>=0?isoOf(c[iRd]):"", source:"manual",
+      });
+    }
+    if(!out.length){ setErr("No se encontraron filas con datos."); return; }
+    setPrev(out);
+  }
+
+  function save(){
+    if(!prev||!prev.length) return;
+    var byId={}; (reviews||[]).forEach(function(r){byId[String(r.id)]=r;});
+    prev.forEach(function(r){ byId[String(r.id)]=Object.assign({},byId[String(r.id)]||{},r); });
+    onSave(Object.keys(byId).map(function(k){return byId[k];}));
+  }
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:9,borderTop:"1px solid "+C.line,paddingTop:11}}>
+      <div style={{fontSize:11,color:C.earth,lineHeight:1.6}}>Pega una tabla con encabezados. Columnas mínimas: <b>Propiedad · Check-in · Limpieza</b>. Opcionales: General, Huésped, Plataforma, Comentario.</div>
+      <textarea value={raw} onChange={function(e){setRaw(e.target.value);parse(e.target.value);}} placeholder={"Propiedad\tCheck-in\tLimpieza\tPlataforma\tComentario"} rows={5} style={{width:"100%",border:"1px solid "+C.gray,borderRadius:8,padding:"9px 11px",fontSize:11.5,fontFamily:"ui-monospace,monospace",outline:"none",resize:"vertical",boxSizing:"border-box"}}/>
+      {err&&<div style={{fontSize:11.5,color:C.red,background:"#F5EDEC",padding:"8px 11px",borderRadius:7,lineHeight:1.5}}>{err}</div>}
+      {prev&&(
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{fontSize:11.5,fontWeight:600,color:C.green}}>✓ {prev.length} review{prev.length===1?"":"s"} lista{prev.length===1?"":"s"} para cargar</div>
+          <div style={{maxHeight:150,overflowY:"auto",display:"flex",flexDirection:"column",gap:4}}>
+            {prev.slice(0,12).map(function(r,i){return <div key={i} style={{fontSize:11,color:C.earth,background:C.surfaceWarm,borderRadius:6,padding:"6px 9px"}}>{r.propiedad} · {r.checkIn||"sin fecha"} · limpieza {r.ratingLimpieza==null?"—":r.ratingLimpieza}</div>;})}
+          </div>
+          <button onClick={save} style={{alignSelf:"flex-start",padding:"9px 16px",borderRadius:8,border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Guardar reviews</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   COMPARATIVO DE TÉCNICOS · ÚLTIMAS 8 SEMANAS — Dashboard Ejecutivo
+   ═══════════════════════════════════════════════════════════════════════════ */
+var TC_PAL = ["#3E3F3F","#E9826A","#3d6b52","#938B8A","#9a5020","#5a4a7a","#4a5a7a","#8a3030"];
+var TC_METRICS = [
+  {k:"ingresos",     label:"Ingresos",       short:"Q",     fmt:function(v){return "Q"+Math.round(v||0).toLocaleString("es-GT");}, hi:"max"},
+  {k:"rating",       label:"Rating limpieza",short:"★",     fmt:function(v){return v==null?"—":v.toFixed(2);},                     hi:"max"},
+  {k:"limpiezas",    label:"Limpiezas",      short:"Limp.", fmt:function(v){return String(v||0);},                                hi:"max"},
+  {k:"profundas",    label:"Profundas",      short:"Prof.", fmt:function(v){return String(v||0);},                                hi:"max"},
+  {k:"correcciones", label:"Correcciones",   short:"Corr.", fmt:function(v){return String(v||0);},                                hi:"min"},
+];
+function TechCompare8w({reps, vendors, reviews}) {
+  const [metric,setMetric] = useState("ingresos");
+  const [sortK, setSortK]  = useState("ingresos");
+
+  var weeks = last8Weeks();
+  var from  = weeks[0].from, to = weeks[weeks.length-1].to;
+  var att   = rvAttribute(reviews, reps);
+
+  var groups = techFilterGroups(reps, vendors, function(r){return isCleaning(r.categoria)||r.categoria==="Supervisión";});
+  var inWin  = function(f){ return f && f>=from && f<=to; };
+
+  var data = groups.map(function(g,gi){
+    var mine = (reps||[]).filter(function(r){return repInGroup(r,g)&&inWin(r.fecha);});
+    var rv   = att.rows.filter(function(x){ return inWin(x.rep.fecha) && repInGroup(x.rep,g); });
+    var row = {
+      g:g, color:TC_PAL[gi%TC_PAL.length],
+      ingresos: mine.reduce(function(s,r){return s+pgEffTotal(r,vendors);},0),
+      limpiezas: mine.filter(function(r){return isTradClean(r.categoria);}).length,
+      profundas: mine.filter(function(r){return r.categoria==="Limpieza profunda";}).length,
+      correcciones: mine.filter(function(r){return r.qaStatus==="correccion"||r.qaStatus==="corregido";}).length,
+      nReviews: rv.length,
+      rating: rv.length ? rv.reduce(function(s,x){return s+x.score;},0)/rv.length : null,
+      trabajos: mine.length,
+      weekly: weeks.map(function(w){
+        var wm = mine.filter(function(r){return r.fecha>=w.from&&r.fecha<=w.to;});
+        var wr = rv.filter(function(x){return x.rep.fecha>=w.from&&x.rep.fecha<=w.to;});
+        return {
+          ingresos: wm.reduce(function(s,r){return s+pgEffTotal(r,vendors);},0),
+          limpiezas: wm.filter(function(r){return isTradClean(r.categoria);}).length,
+          profundas: wm.filter(function(r){return r.categoria==="Limpieza profunda";}).length,
+          correcciones: wm.filter(function(r){return r.qaStatus==="correccion"||r.qaStatus==="corregido";}).length,
+          rating: wr.length ? wr.reduce(function(s,x){return s+x.score;},0)/wr.length : null,
+        };
+      }),
+    };
+    return row;
+  }).filter(function(r){return r.trabajos>0||r.ingresos>0;});
+
+  var sorted = data.slice().sort(function(a,b){
+    var m=TC_METRICS.find(function(x){return x.k===sortK;})||TC_METRICS[0];
+    var av=a[sortK], bv=b[sortK];
+    if(av==null) av=m.hi==="min"?Infinity:-Infinity;
+    if(bv==null) bv=m.hi==="min"?Infinity:-Infinity;
+    return m.hi==="min" ? av-bv : bv-av;
+  });
+
+  var best={};
+  TC_METRICS.forEach(function(m){
+    var vals=data.map(function(r){return r[m.k];}).filter(function(v){return v!=null;});
+    if(!vals.length) return;
+    best[m.k]= m.hi==="min" ? Math.min.apply(null,vals) : Math.max.apply(null,vals);
+  });
+
+  var chart = weeks.map(function(w,i){
+    var o={label:w.label};
+    data.forEach(function(r){ o[r.g.label]=r.weekly[i][metric]; });
+    return o;
+  });
+  var mDef = TC_METRICS.find(function(x){return x.k===metric;})||TC_METRICS[0];
+
+  if(!data.length) return null;
+
+  return (
+    <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.line,padding:"18px",marginTop:24}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:12,flexWrap:"wrap",marginBottom:4}}>
+        <div>
+          <div style={{fontSize:10.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Comparativo de técnicos</div>
+          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:20,fontWeight:400,color:C.black,marginTop:5}}>Últimas 8 semanas</div>
+        </div>
+        <div style={{fontSize:11,color:C.taupe,textAlign:"right",lineHeight:1.5}}>{fmtDate(from)} → {fmtDate(to)}<br/><span style={{fontSize:10}}>Período fijo — no depende de los filtros de arriba</span></div>
+      </div>
+
+      {/* Tabla comparativa */}
+      <div style={{overflowX:"auto",marginTop:16,marginBottom:20}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5,minWidth:560}}>
+          <thead>
+            <tr>
+              <th style={{textAlign:"left",padding:"8px 10px",fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".12em",textTransform:"uppercase",borderBottom:"1px solid "+C.gray}}>Técnico</th>
+              {TC_METRICS.map(function(m){
+                var act=sortK===m.k;
+                return <th key={m.k} onClick={function(){setSortK(m.k);}} style={{textAlign:"right",padding:"8px 10px",fontSize:9.5,fontWeight:700,color:act?C.black:C.taupe,letterSpacing:".12em",textTransform:"uppercase",borderBottom:"1px solid "+(act?C.black:C.gray),cursor:"pointer",whiteSpace:"nowrap"}}>{m.label}</th>;
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(function(r){
+              return (
+                <tr key={r.g.value}>
+                  <td style={{padding:"11px 10px",borderBottom:"1px solid "+C.line,fontWeight:600,color:C.black,whiteSpace:"nowrap"}}>
+                    <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:r.color,marginRight:8}}/>{r.g.label}
+                  </td>
+                  {TC_METRICS.map(function(m){
+                    var v=r[m.k], isBest=v!=null&&best[m.k]!=null&&v===best[m.k]&&data.length>1;
+                    return (
+                      <td key={m.k} style={{padding:"11px 10px",borderBottom:"1px solid "+C.line,textAlign:"right",whiteSpace:"nowrap",fontWeight:isBest?700:500,color:isBest?C.green:(m.k==="rating"?rvColor(v):C.black)}}>
+                        {m.fmt(v)}
+                        {m.k==="rating"&&r.nReviews>0&&<span style={{display:"block",fontSize:9.5,color:C.taupe,fontWeight:400}}>{r.nReviews} review{r.nReviews===1?"":"s"}</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div style={{fontSize:10.5,color:C.taupe,lineHeight:1.6,marginTop:-12,marginBottom:18}}>Toca un encabezado para reordenar. En verde, el mejor de cada columna. El rating es la nota de limpieza que dejaron los huéspedes en las plataformas.</div>
+
+      {/* Evolución semanal */}
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14}}>
+        {TC_METRICS.map(function(m){
+          var act=metric===m.k;
+          return <button key={m.k} onClick={function(){setMetric(m.k);}} style={{padding:"7px 13px",borderRadius:100,border:"1.5px solid "+(act?C.black:C.line),background:act?C.black:"#fff",color:act?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{m.label}</button>;
+        })}
+      </div>
+      <ResponsiveContainer width="100%" height={230}>
+        <LineChart data={chart} margin={{top:4,right:12,left:-14,bottom:0}}>
+          <CartesianGrid strokeDasharray="3 3" stroke={C.gray}/>
+          <XAxis dataKey="label" tick={{fontSize:10,fill:C.earth}} axisLine={false} tickLine={false}/>
+          <YAxis tick={{fontSize:10,fill:C.earth}} axisLine={false} tickLine={false} domain={metric==="rating"?[3,5]:[0,"auto"]} allowDecimals={metric==="rating"}/>
+          <Tooltip contentStyle={{borderRadius:8,fontSize:12,border:"1px solid "+C.gray}} formatter={function(v){return mDef.fmt(v);}}/>
+          {data.map(function(r){
+            return <Line key={r.g.value} type="monotone" dataKey={r.g.label} stroke={r.color} strokeWidth={2.2} dot={{r:3,fill:r.color}} connectNulls={true}/>;
+          })}
+        </LineChart>
+      </ResponsiveContainer>
+      <div style={{display:"flex",gap:14,flexWrap:"wrap",marginTop:12,justifyContent:"center"}}>
+        {data.map(function(r){
+          return <span key={r.g.value} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.earth}}><span style={{width:14,height:2.5,background:r.color,borderRadius:2}}/>{r.g.label}</span>;
+        })}
+      </div>
     </div>
   );
 }
