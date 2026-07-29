@@ -223,45 +223,82 @@ function rvCleanScore(rv){
   if(n>5.5) n=n/2;
   return Math.round(Math.min(5,n)*100)/100;
 }
-/* Liga cada review con la limpieza previa al check-in (y por tanto con su técnico). */
-function rvAttribute(reviews, reps){
+/* Liga cada review con la limpieza previa al check-in (y por tanto con su técnico).
+   `casos` son las revisiones resueltas por el administrador: una review excluida
+   deja de contar para el promedio, una reasignada pasa a otro técnico.
+   Las reviews con check-in ANTERIOR al primer trabajo registrado en el app no se
+   pueden atribuir a nadie — salen aparte, en `orphanPre`, y no se muestran como
+   pendientes de clasificar. */
+function rvAttribute(reviews, reps, casos){
   var cleans=(reps||[]).filter(function(r){return isTradClean(r.categoria)&&r.fecha;});
   var byProp={};
   cleans.forEach(function(r){ var k=rvPropKey(r.propiedad); if(!byProp[k])byProp[k]=[]; byProp[k].push(r); });
   var keys=Object.keys(byProp);
-  var rows=[], orphan=[];
+  var firstJob="";
+  (reps||[]).forEach(function(r){ var f=String(r.fecha||"").slice(0,10); if(/^\d{4}-\d{2}-\d{2}$/.test(f)&&(!firstJob||f<firstJob)) firstJob=f; });
+  var byRev=rcActive(casos), asig=rcAsignada(casos);
+  var rows=[], orphan=[], orphanPre=[];
+  function noLigada(rv,why,ci,score){
+    /* Si el administrador ya la asignó a mano, deja de ser huérfana. */
+    var a=asig[String(rv.id)];
+    if(a&&score!=null){
+      rows.push({rv:rv, score:score, manual:true,
+        rep:{fecha:ci||String(rv.checkIn||"").slice(0,10), propiedad:rv.propiedad||"", manual:true},
+        reasignadaA:String(a.reasignadaA).toLowerCase().trim(), caso:a});
+      return;
+    }
+    var o={rv:rv,why:why,score:score==null?null:score};
+    if(firstJob&&ci&&ci<firstJob){ o.pre=true; orphanPre.push(o); } else orphan.push(o);
+  }
   (reviews||[]).forEach(function(rv){
     var score=rvCleanScore(rv);
     var ci=String(rv.checkIn||"").slice(0,10);
-    if(score==null){ orphan.push({rv:rv,why:"La review no trae calificación de limpieza"}); return; }
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(ci)){ orphan.push({rv:rv,why:"Sin fecha de check-in"}); return; }
+    if(score==null){ noLigada(rv,"La review no trae calificación de limpieza",ci,null); return; }
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(ci)){ noLigada(rv,"Sin fecha de check-in","",score); return; }
     var k=rvPropKey(rv.propiedad), list=byProp[k];
     if(!list){
       var best=null,bs=0;
       keys.forEach(function(kk){ var s=similarity(k,kk); if(s>bs){bs=s;best=kk;} });
       if(best&&bs>=0.8) list=byProp[best];
     }
-    if(!list){ orphan.push({rv:rv,why:"Propiedad sin limpiezas registradas en el app"}); return; }
+    if(!list){ noLigada(rv,"Propiedad sin limpiezas registradas en el app",ci,score); return; }
     var min=isoShift(ci,-RV_WINDOW_DAYS);
     var cand=list.filter(function(r){return r.fecha<=ci && r.fecha>=min;});
-    if(!cand.length){ orphan.push({rv:rv,why:"Sin limpieza tradicional en los "+RV_WINDOW_DAYS+" días previos al check-in"}); return; }
+    if(!cand.length){ noLigada(rv,"Sin limpieza tradicional en los "+RV_WINDOW_DAYS+" días previos al check-in",ci,score); return; }
     cand.sort(function(a,b){ if(a.fecha!==b.fecha) return a.fecha<b.fecha?1:-1; return (b.createdAt||b.id||0)-(a.createdAt||a.id||0); });
-    rows.push({rv:rv, score:score, rep:cand[0]});
+    var row={rv:rv, score:score, rep:cand[0]};
+    var caso=byRev[String(rv.id)];
+    if(caso){
+      row.caso=caso;
+      if(caso.estado==="excluida")   row.excluded=true;
+      if(caso.estado==="reasignada"&&caso.reasignadaA) row.reasignadaA=String(caso.reasignadaA).toLowerCase().trim();
+    }
+    rows.push(row);
   });
-  return {rows:rows, orphan:orphan};
+  return {rows:rows, orphan:orphan, orphanPre:orphanPre, firstJob:firstJob};
 }
-/* Promedio, conteo y distribución de estrellas por grupo de técnico. */
+/* Grupo de técnico al que pertenece una review, respetando la reasignación. */
+function rvRowGroup(row, groups){
+  if(row.reasignadaA){
+    for(var i=0;i<(groups||[]).length;i++)
+      if((groups[i].emails||[]).indexOf(row.reasignadaA)>=0) return groups[i];
+  }
+  for(var j=0;j<(groups||[]).length;j++) if(repInGroup(row.rep,groups[j])) return groups[j];
+  return null;
+}
+/* Promedio, conteo y distribución de estrellas por grupo de técnico.
+   Las reviews excluidas por el administrador quedan en `excl` — visibles en el
+   desglose, fuera del promedio. */
 function rvStatsByGroup(rows, groups){
   var out={};
-  (groups||[]).forEach(function(g){ out[g.value]={n:0,sum:0,dist:{1:0,2:0,3:0,4:0,5:0},rows:[],avg:null}; });
+  (groups||[]).forEach(function(g){ out[g.value]={n:0,sum:0,dist:{1:0,2:0,3:0,4:0,5:0},rows:[],excl:[],avg:null}; });
   (rows||[]).forEach(function(row){
-    for(var i=0;i<groups.length;i++){
-      if(repInGroup(row.rep,groups[i])){
-        var s=out[groups[i].value]; s.n++; s.sum+=row.score;
-        var b=Math.max(1,Math.min(5,Math.round(row.score))); s.dist[b]++;
-        s.rows.push(row); break;
-      }
-    }
+    var g=rvRowGroup(row,groups); if(!g) return;
+    var s=out[g.value]; if(!s) return;
+    if(row.excluded){ s.excl.push(row); return; }
+    s.n++; s.sum+=row.score;
+    var b=Math.max(1,Math.min(5,Math.round(row.score))); s.dist[b]++;
+    s.rows.push(row);
   });
   Object.keys(out).forEach(function(k){ out[k].avg = out[k].n ? out[k].sum/out[k].n : null; });
   return out;
@@ -271,34 +308,117 @@ function rvStarsTxt(n){
   var full=Math.max(0,Math.min(5,Math.round(n)));
   return "★★★★★".slice(0,full)+"☆☆☆☆☆".slice(0,5-full);
 }
+/* Jerarquía implícita en el nombre de la propiedad: "Z10 - Fiamene - 404"
+   → zona Z10 · edificio Fiamene · unidad 404. Tolera guiones largos y
+   nombres incompletos ("Z10 - Fiamene" o sólo un nombre suelto). */
+function propParts(nombre){
+  var s=String(nombre||"").trim();
+  if(!s) return {zona:"",edificio:"",unidad:"",full:""};
+  var p=s.split(/\s*[-\u2013\u2014]\s*/).filter(function(x){return x!=="";});
+  if(p.length>=3) return {zona:p[0],edificio:p[1],unidad:p.slice(2).join(" - "),full:s};
+  if(p.length===2) return {zona:p[0],edificio:p[1],unidad:"",full:s};
+  return {zona:"",edificio:p[0]||s,unidad:"",full:s};
+}
+function propZona(n){ return propParts(n).zona; }
+function propEdificio(n){ return propParts(n).edificio; }
+
 function rvColor(n){ return n==null?"#938B8A" : n>=4.8?"#3d6b52" : n>=4.5?"#5a7a52" : n>=4?"#9a5020" : "#8a3030"; }
+
+/* ═══ CASOS DE REVISIÓN DE RATING ═══
+   Un caso = solicitud del técnico + decisión del administrador.
+   estado: pendiente · excluida · reasignada · rechazada
+   tipo:   eliminacion (pide que no cuente) · aclaracion (deja contexto) */
+var RV_STD = 4.7;   /* estándar de la marca */
+function rcId(){ return "c"+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function rcActive(casos){
+  var out={};
+  (casos||[]).forEach(function(c){
+    if(!c||!c.reviewId) return;
+    var k=String(c.reviewId), p=out[k];
+    if(!p || String(c.fecha||"")>=String(p.fecha||"")) out[k]=c;
+  });
+  return out;
+}
+/* Asignación manual de una review huérfana: se guarda como un caso ya resuelto
+   con tipo "asignacion", para que quede el rastro de quién la asignó. */
+function rcAsignada(casos){
+  var out={};
+  (casos||[]).forEach(function(c){
+    if(!c||!c.reviewId) return;
+    if(c.tipo!=="asignacion"||c.estado!=="reasignada"||!c.reasignadaA) return;
+    var k=String(c.reviewId), p=out[k];
+    if(!p || String(c.fechaResol||c.fecha||"")>=String(p.fechaResol||p.fecha||"")) out[k]=c;
+  });
+  return out;
+}
+function rcPend(casos){ return (casos||[]).filter(function(c){return (c.estado||"pendiente")==="pendiente";}); }
+function rcEstadoTxt(e){
+  return e==="excluida"?"Excluida del promedio" : e==="reasignada"?"Reasignada a otro técnico"
+       : e==="rechazada"?"Calificación mantenida" : "En revisión";
+}
+function rcEstadoColor(e){
+  return e==="excluida"?"#3d6b52" : e==="reasignada"?"#4a6b8a" : e==="rechazada"?"#8a3030" : "#9a5020";
+}
+/* Sugerencias concretas según la categoría más débil / la brecha con el estándar. */
+/* El resumen IA llega como líneas etiquetadas (BIEN / OPORTUNIDAD / ACCION).
+   Se pinta como una lista corta; si llegara texto plano (versiones previas),
+   se muestra tal cual. */
+function rvIAParse(txt){
+  var out=[];
+  String(txt||"").split(/\n+/).forEach(function(l){
+    var m=String(l).trim().replace(/^[-•·*]\s*/,"").match(/^(BIEN|OPORTUNIDAD|ACCION|ACCIÓN)\s*:\s*(.+)$/i);
+    if(m) out.push({k:m[1].toUpperCase().replace("ACCIÓN","ACCION"), v:m[2].trim()});
+  });
+  return out;
+}
+var RV_IA_META = {
+  BIEN:        {label:"Lo que elogian",      color:"#3d6b52", bg:"#EDF5EF"},
+  OPORTUNIDAD: {label:"Área de oportunidad", color:"#8a6320", bg:"#F7EFE2"},
+  ACCION:      {label:"Acción",              color:"#4a6b8a", bg:"#EDF1F5"}
+};
+function RvIABody({texto}){
+  var items=rvIAParse(texto);
+  if(!items.length) return <div style={{fontSize:12,color:C.earth,lineHeight:1.7,textWrap:"pretty"}}>{texto}</div>;
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:7}}>
+      {items.map(function(it,i){
+        var m=RV_IA_META[it.k]||RV_IA_META.ACCION;
+        return (
+          <div key={i} style={{display:"flex",gap:9,alignItems:"baseline"}}>
+            <span style={{flexShrink:0,fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:m.color,background:m.bg,borderRadius:100,padding:"3px 8px",whiteSpace:"nowrap"}}>{m.label}</span>
+            <span style={{fontSize:12,color:C.black,lineHeight:1.55,textWrap:"pretty"}}>{it.v}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+var RV_IA_VER = 2;
+var RV_TIPS = [
+  "Repasa baños y grifería al final: es lo primero que el huésped toca y lo que más se menciona.",
+  "Revisa debajo de la cama y detrás de las puertas antes de cerrar: el polvo escondido baja la nota.",
+  "Deja el olor neutro y ventila 10 minutos: un ambiente cargado se lee como “sucio” aunque esté limpio.",
+  "Verifica que la ropa de cama no tenga manchas ni pelos antes de tenderla.",
+  "Alinea toallas, cojines y control remoto: el orden visual sube la percepción de limpieza.",
+  "Limpia interior de microondas, refrigerador y coladera del lavatrastos.",
+  "Toma la foto final desde la puerta: si algo se ve fuera de lugar en la foto, el huésped también lo verá."
+];
 /* Config repartida en varios campos — evita desbordar la celda del Sheet (50k). */
 function rv_merge(cfg){
   if(!cfg) return null;
-  var base=Array.isArray(cfg.reviews)?cfg.reviews:null;
-  var n=parseInt(cfg.reviews_n,10);
-  if(!n||n<=1) return base;
-  var merged=Array.isArray(cfg.reviews)?cfg.reviews.slice():[];
-  for(var i=1;i<n;i++){ var arr=cfg["reviews_"+(i+1)]; if(Array.isArray(arr)) merged=merged.concat(arr); }
-  return merged.length?merged:base;
-}
-function rv_shard(list){
-  var shards=[[]], size=0;
-  (list||[]).forEach(function(x){
-    var len=JSON.stringify(x).length+2;
-    if(size+len>38000 && shards[shards.length-1].length){ shards.push([]); size=0; }
-    shards[shards.length-1].push(x); size+=len;
-  });
-  return shards;
+  /* Las reviews viven en la hoja "Reviews" del Sheet; el Apps Script las
+     inyecta ya listas en cfg.reviews. Los campos JSON viejos ya no existen. */
+  return Array.isArray(cfg.reviews)?cfg.reviews:null;
 }
 function rv_persist(list){
   try{ localStorage.setItem("sam_reviews", JSON.stringify(list)); }catch(e){}
-  try{
-    var shards=rv_shard(list);
-    shards.forEach(function(sh,i){ apiCall("saveConfig",{key:i===0?"reviews":"reviews_"+(i+1),value:sh}); });
-    for(var k=shards.length;k<shards.length+3;k++){ apiCall("saveConfig",{key:"reviews_"+(k+1),value:[]}); }
-    apiCall("saveConfig",{key:"reviews_n",value:shards.length});
-  }catch(e){}
+  try{ apiCall("saveReviews",{reviews:list||[]}); }catch(e){}
+}
+/* Casos de revisión — viven en la hoja "Rating - revisiones". */
+function rc_persist(list){
+  try{ localStorage.setItem("sam_rvcasos", JSON.stringify(list)); }catch(e){}
+  try{ apiCall("saveCasos",{casos:list||[]}); }catch(e){}
 }
 /* Últimas 8 semanas (lunes→domingo); la semana en curso queda al final. */
 function last8Weeks(){
@@ -593,6 +713,7 @@ var NOTIF_META = [
   {id:"correccionFutura",   label:"Corrección para el futuro",    desc:"Observación para próximas limpiezas"},
   {id:"listaSupervision",   label:"Lista para supervisión",       desc:"Una limpieza terminó y espera revisión"},
   {id:"correccionAtendida", label:"Corrección atendida",          desc:"El técnico confirmó que corrigió"},
+  {id:"ratingRevision",     label:"Revisión de calificación",     desc:"Un técnico pidió revisar una nota de huésped"},
   {id:"danoUrgente",        label:"Daño urgente",                 desc:"Se clasificó un daño de urgencia alta"},
   {id:"solicitudAdelanto",  label:"Nueva solicitud de adelanto",  desc:"Un técnico solicitó un adelanto"},
   {id:"adelantoFirma",      label:"Adelanto por firmar",          desc:"El admin inició un adelanto para el técnico"},
@@ -602,6 +723,7 @@ var NOTIF_META = [
 var NOTIF_DEFAULTS = {
   limpiezaAprobada:{tecnico:1}, correccionInmediata:{tecnico:1}, correccionFutura:{tecnico:1},
   listaSupervision:{supervisores:1}, correccionAtendida:{supervisores:1,adminPrincipal:1,adminSecundarios:1},
+  ratingRevision:{adminPrincipal:1,adminSecundarios:1,supervisores:1},
   danoUrgente:{adminPrincipal:1,adminSecundarios:1}, solicitudAdelanto:{adminPrincipal:1,adminSecundarios:1},
   adelantoFirma:{tecnico:1}, adelantoDepositado:{tecnico:1}, comprobantePago:{tecnico:1}
 };
@@ -779,6 +901,7 @@ async function loadAllData() {
       pagos:     pg_load(),
       notifprefs: d.notifprefs || {},
       reviews:   d.reviews || [],
+      rvCasos:   d.rvCasos || [],
     };
   }
   /* Carga SECUENCIAL (no Promise.all): el Apps Script ocasionalmente mezcla las
@@ -812,6 +935,8 @@ async function loadAllData() {
     pagos: pg_merge(cfg),
     notifprefs: (cfg.notifprefs && typeof cfg.notifprefs==="object") ? cfg.notifprefs : {},
     reviews: rv_merge(cfg),
+    rvCasos: Array.isArray(cfg.rvCasos) ? cfg.rvCasos : [],
+    rvIA: (cfg.rvIA && typeof cfg.rvIA==="object") ? cfg.rvIA : {},
   };
 }
 
@@ -1109,6 +1234,12 @@ function App() {
   /* Reviews de huéspedes (calificación de limpieza importada de las plataformas) */
   const [reviews, setReviews] = useState([]);
   async function svReviews(v){ setReviews(v); rv_persist(v); }
+  /* Casos de revisión de rating (solicitudes del técnico → decisión del admin) */
+  const [rvCasos, setRvCasos] = useState([]);
+  async function svRvCasos(v){ setRvCasos(v); rc_persist(v); }
+  /* Resúmenes IA de limpieza por técnico (uno por mes) */
+  const [rvIA, setRvIA] = useState({});
+  async function svRvIA(v){ setRvIA(v); saveConfigItem("rvIA", v); }
 
   /* Adelantos (advances): se cargan vía loadAllData (localStorage en demo, Sheets en vivo)
      y se migran/ligan a su técnico en el .then de carga. */
@@ -1164,6 +1295,8 @@ function App() {
       if(d.hospurlweek) setHospUrlWeek(d.hospurlweek||"");
       if(d.feedback)  setFeedback(d.feedback);
       if(Array.isArray(d.reviews)) setReviews(d.reviews);
+      if(Array.isArray(d.rvCasos)) setRvCasos(d.rvCasos);
+      if(d.rvIA && typeof d.rvIA==="object") setRvIA(d.rvIA);
       /* Adelantos: tomar de la fuente (Sheets/local) o sembrar; luego ligar a técnicos. */
       var advRaw=(d.adelantos && d.adelantos.length)?d.adelantos:adv_seed();
       var mig=adv_migrate(advRaw, d.vendors||DEF_V);
@@ -1343,9 +1476,9 @@ function App() {
     var freshV = vendors.find(function(x){return x.id===sess.vendor.id;}) || vendors.find(function(x){return x.email===sess.vendor.email;}) || sess.vendor;
     var needsOnb = isEpiLimpieza(freshV) && !freshV.notifSetupDone && !onbDone;
     try{ if(localStorage.getItem("epi_onboard_done_"+freshV.id)) needsOnb=false; }catch(_){}
-    inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
+    inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
   } else {
-    inner = <AdminApp reviews={reviews} onSvReviews={svReviews} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
+    inner = <AdminApp reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
   }
   return <ErrorBoundary>{inner}</ErrorBoundary>;
 }
@@ -1613,7 +1746,7 @@ function NotifCfg({prefs, vendors, onSave, readOnly}){
 }
 
 /* ═══ ADMIN */
-function AdminApp({reviews,onSvReviews,reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
+function AdminApp({reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
   const [tab,    setTab]    = useState("dash");
   const [detail, setDetail] = useState(null);
   const [cDel,   setCDel]   = useState(null);
@@ -1711,7 +1844,7 @@ function AdminApp({reviews,onSvReviews,reps,vendors,props,adminPin,company,extCa
         role="Admin"
       />
 
-      <div style={{display:tab==="dash"?"block":"none"}}><DashView reviews={reviews} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh}/></div>
+      <div style={{display:tab==="dash"?"block":"none"}}><DashView reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh}/></div>
       <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
       <div style={{display:tab==="sched"?"block":"none"}}>
         <ScheduleCfg schedules={schedules||[]} vendors={vendors||[]} props={props||[]} hospUrlDay={hospUrlDay||""} hospUrlWeek={hospUrlWeek||""} onSave={onSvSchedules} onSaveHospUrlDay={onSvHospUrlDay} onSaveHospUrlWeek={onSvHospUrlWeek}/>
@@ -1740,7 +1873,7 @@ function AdminApp({reviews,onSvReviews,reps,vendors,props,adminPin,company,extCa
         )}
       </div>
       <div style={{display:tab==="qa"?"block":"none"}}>
-        <AdminQAPanel reps={reps} vendors={vendors} reviews={reviews} onSvReviews={onSvReviews} onQA={qaUpdate} onSelect={setDetail} onUpdate={onUpsert} isAdmin={true} me={adminVendor}/>
+        <AdminQAPanel reps={reps} vendors={vendors} reviews={reviews} onSvReviews={onSvReviews} rvCasos={rvCasos} onSvRvCasos={onSvRvCasos} rvIA={rvIA} onSvRvIA={onSvRvIA} onQA={qaUpdate} onSelect={setDetail} onUpdate={onUpsert} isAdmin={true} me={adminVendor}/>
       </div>
       <div style={{display:tab==="adv"?"block":"none"}}><AdvancesAdmin adelantos={adelantos} reps={reps} vendors={vendors} onSvAdelantos={onSvAdelantos}/></div>
       <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  reps={reps} vendors={vendors} props={props} adminPin={adminPin} company={company} extCats={extCats||[]} notifPrefs={notifPrefs} canNotif={canNotif} onSvNotifPrefs={onSvNotifPrefs} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
@@ -1753,7 +1886,7 @@ function AdminApp({reviews,onSvReviews,reps,vendors,props,adminPin,company,extCa
 }
 
 /* ─── Dashboard container */
-function DashView({reviews,reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
+function DashView({reviews,rvCasos,rvIA,reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
   const [sub,setSub] = useState("ops");
   return (
     <div>
@@ -1763,20 +1896,23 @@ function DashView({reviews,reps,vendors,alerts,adelantos,pagos,onSvPagos,company
           <button key={k} onClick={function(){setSub(k);}} style={{padding:"14px 16px",border:"none",borderBottom:"1.5px solid "+(sub===k?C.black:"transparent"),background:"none",fontSize:13,fontWeight:600,cursor:"pointer",color:sub===k?C.black:C.taupe,transition:"all .2s"}}>{l}</button>
         ); })}
       </div>
-      <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} vendors={vendors} adelantos={adelantos} onMarkPaidBatch={onMarkPaidBatch} onSelect={onSelect} onMarkPaid={onMarkPaid} onRefresh={onRefresh}/></div>
-      <div style={{display:sub==="exec"?"block":"none"}}><ExecDash reps={reps} vendors={vendors} reviews={reviews}/></div>
+      <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} adelantos={adelantos} onMarkPaidBatch={onMarkPaidBatch} onSelect={onSelect} onMarkPaid={onMarkPaid} onRefresh={onRefresh}/></div>
+      <div style={{display:sub==="exec"?"block":"none"}}><ExecDash reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos}/></div>
       <div style={{display:sub==="pagos"?"block":"none"}}><PagosHistory pagos={pagos} vendors={vendors} company={company} isAdmin={true} onSvPagos={onSvPagos}/></div>
     </div>
   );
 }
 
 /* ─── Operational Dashboard */
-function OpsDash({reps,vendors,adelantos,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
+function OpsDash({reps,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
   const [view,     setView]     = useState("table");
   const [fVend,    setFVend]    = useState("Todos");
   const [fStatus,  setFStatus]  = useState("Todos");
   const [fCat,     setFCat]     = useState("Todos");
   const [fPagador, setFPagador] = useState("Todos");
+  const [fZona,    setFZona]    = useState("Todas");
+  const [fEdif,    setFEdif]    = useState("Todos");
+  const [fUnidad,  setFUnidad]  = useState("Todas");
   const [fDesde,   setFDesde]   = useState("");
   const [fHasta,   setFHasta]   = useState("");
   const [showAll,  setShowAll]  = useState(false);
@@ -1785,11 +1921,30 @@ function OpsDash({reps,vendors,adelantos,onMarkPaidBatch,onSelect,onMarkPaid,onR
     var r = presetRange(val); setFDesde(r.from); setFHasta(r.to);
   }
 
-  function reset() { setFVend("Todos"); setFStatus("Todos"); setFCat("Todos"); setFPagador("Todos"); setFDesde(""); setFHasta(""); setShowAll(false); }
+  function reset() { setFVend("Todos"); setFStatus("Todos"); setFCat("Todos"); setFPagador("Todos"); setFZona("Todas"); setFEdif("Todos"); setFUnidad("Todas"); setFDesde(""); setFHasta(""); setShowAll(false); }
+
+  /* Zona › edificio › apartamento salen del propio nombre de la propiedad
+     ("Z10 - Fiamene - 404"). Cada nivel acota las opciones del siguiente. */
+  var allProps = uniq((reps||[]).map(function(r){return r.propiedad;}).filter(Boolean));
+  var zonaOpts = uniq(allProps.map(propZona).filter(Boolean)).sort();
+  var edifOpts = uniq(allProps.filter(function(n){return fZona==="Todas"||propZona(n)===fZona;})
+                              .map(propEdificio).filter(Boolean)).sort();
+  var unidOpts = uniq(allProps.filter(function(n){
+                                var p=propParts(n);
+                                return (fZona==="Todas"||p.zona===fZona)&&(fEdif==="Todos"||p.edificio===fEdif);
+                              }).map(function(n){return propParts(n).unidad;}).filter(Boolean)).sort();
+  function matchProp(r){
+    var p=propParts(r.propiedad);
+    if(fZona!=="Todas"   && p.zona!==fZona)     return false;
+    if(fEdif!=="Todos"   && p.edificio!==fEdif) return false;
+    if(fUnidad!=="Todas" && p.unidad!==fUnidad) return false;
+    return true;
+  }
 
   var techOpts = techFilterGroups(reps, vendors, null, true);
   var selGroup = (fVend!=="Todos") ? techOpts.find(function(o){return o.value===fVend;}) : null;
   var fReps = reps.filter(function(r) {
+    if (!matchProp(r)) return false;
     if (fVend!=="Todos") {
       if (selGroup) { if(!repInGroup(r, selGroup)) return false; }
       else return false;
@@ -1833,6 +1988,8 @@ function OpsDash({reps,vendors,adelantos,onMarkPaidBatch,onSelect,onMarkPaid,onR
 
   return (
     <div>
+      <div style={{padding:"16px 22px 0"}}><RatingDashCard reviews={reviews||[]} reps={reps} vendors={vendors} rvCasos={rvCasos||[]} soloGrupo={selGroup} rvIA={rvIA} propFilter={matchProp} propScope={[fZona,fEdif,fUnidad].filter(function(v){return v!=="Todas"&&v!=="Todos";}).join(" · ")}/></div>
+
       {/* Stats bar */}
       <StatsSummary
         heroLabel="A depositar"
@@ -1879,6 +2036,27 @@ function OpsDash({reps,vendors,adelantos,onMarkPaidBatch,onSelect,onMarkPaid,onR
               <option>Todos</option>
               <option>Spacio AM</option>
               <option>Dueño</option>
+            </select>
+          </div>
+          <div>
+            <span style={LBL}>Zona</span>
+            <select value={fZona} onChange={function(e){setFZona(e.target.value);setFEdif("Todos");setFUnidad("Todas");setShowAll(false);}} style={fZona!=="Todas"?IS_A:IS}>
+              <option value="Todas">Todas</option>
+              {zonaOpts.map(function(z){return <option key={z} value={z}>{z}</option>;})}
+            </select>
+          </div>
+          <div>
+            <span style={LBL}>Edificio</span>
+            <select value={fEdif} onChange={function(e){setFEdif(e.target.value);setFUnidad("Todas");setShowAll(false);}} style={fEdif!=="Todos"?IS_A:IS}>
+              <option value="Todos">Todos</option>
+              {edifOpts.map(function(b){return <option key={b} value={b}>{b}</option>;})}
+            </select>
+          </div>
+          <div>
+            <span style={LBL}>Apartamento</span>
+            <select value={fUnidad} onChange={function(e){setFUnidad(e.target.value);setShowAll(false);}} style={fUnidad!=="Todas"?IS_A:IS}>
+              <option value="Todas">Todos</option>
+              {unidOpts.map(function(u){return <option key={u} value={u}>{u}</option>;})}
             </select>
           </div>
         </div>
@@ -2044,7 +2222,7 @@ function CalView({reps,onSelect,onMarkPaid,vendors}) {
 }
 
 /* ─── Executive Dashboard */
-function ExecDash({reps,vendors,reviews}) {
+function ExecDash({reps,vendors,reviews,rvCasos}) {
   const [fProp,  setFProp]   = useState("Todas");
   const [fDesde, setFDesde]  = useState("");
   const [fHasta, setFHasta]  = useState("");
@@ -2208,7 +2386,7 @@ function ExecDash({reps,vendors,reviews}) {
       </div>
 
       {/* ── Comparativo de técnicos · últimas 8 semanas */}
-      <TechCompare8w reps={reps} vendors={vendors} reviews={reviews}/>
+      <TechCompare8w reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos}/>
 
       {/* ── Pagos semanales de limpieza */}
       <PagosLimpieza reps={reps} vendors={vendors}/>
@@ -4747,7 +4925,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
 }
 
 /* ═══ VENDOR APP */
-function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout}) {
+function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout,reviews,rvCasos,onSvRvCasos,rvIA}) {
   const [view,setView] = useState("jobs");
   var tot=reps.reduce(function(s,r){return s+(isDanos(r.categoria)?0:parseFloat(r.total||0));},0);
   var cob=reps.filter(function(r){return r.paid;}).reduce(function(s,r){return s+parseFloat(r.total||0);},0);
@@ -4786,10 +4964,10 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,hospU
         feedbackVendor={vendor}
         onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}
       />
-      <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} adelantos={adelantos} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}} onGoAccount={function(){setView("account");}} vendor={vendor} allVendors={allVendors}/></div>
+      <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} adelantos={adelantos} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}} onGoAccount={function(){setView("account");}} vendor={vendor} allVendors={allVendors} reviews={reviews} allReps={allReps} rvCasos={rvCasos} rvIA={rvIA} onGoCalidad={vendor.tipo==="interno"?function(){setView("hist");}:null}/></div>
       <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={allVendors||[]} props={props} company={company} defaultVendor={vendor.email} myReps={reps} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
       <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek}/></div>
-      <div style={{display:view==="hist"   ?"block":"none"}}><VendorHistory reps={cleaningReps} onRespond={vendorRespond} vendor={vendor} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
+      <div style={{display:view==="hist"   ?"block":"none"}}><VendorHistory reps={cleaningReps} onRespond={vendorRespond} vendor={vendor} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}} reviews={reviews} allReps={allReps} allVendors={allVendors} rvCasos={rvCasos} onSvRvCasos={onSvRvCasos} rvIA={rvIA}/></div>
       {vendor.isSupervisor&&<div style={{display:view==="sup"?"block":"none"}}><SupervisionPanel me={vendor} reps={allReps||[]} vendors={allVendors||[]} props={props} onUpdate={onUpdate}/></div>}
       <div style={{display:view==="account"?"block":"none"}}><VendorAccount vendor={vendor} allVendors={allVendors} allReps={allReps} onSvV={onSvV}/></div>
       {isInternalVendor(vendor)&&<div style={{display:view==="adv"?"block":"none"}}><AdvanceRequest vendor={vendor} reps={reps} adelantos={adelantos} onSvAdelantos={onSvAdelantos}/></div>}
@@ -4801,7 +4979,7 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,hospU
 
 
 /* ─── Vendor Jobs View — with filters */
-function VendorJobsView({reps, tot, cob, pnd, adelantos, pendingCorrections, onNew, vendor, allVendors, onGoAccount}) {
+function VendorJobsView({reps, tot, cob, pnd, adelantos, pendingCorrections, onNew, vendor, allVendors, onGoAccount, reviews, allReps, rvCasos, rvIA, onGoCalidad}) {
   const [fCat,    setFCat]    = useState("Todos");
   const [fStatus, setFStatus] = useState("Todos");
   const [fDesde,  setFDesde]  = useState("");
@@ -4854,6 +5032,8 @@ function VendorJobsView({reps, tot, cob, pnd, adelantos, pendingCorrections, onN
           />
         );
       })()}
+
+      {onGoCalidad&&<MyRatingMini reviews={reviews||[]} allReps={allReps||reps} vendor={vendor} rvCasos={rvCasos||[]} rvIA={rvIA} onGoCalidad={onGoCalidad}/>}
 
       {/* Correction alert */}
       {pendingCorrections>0&&(
@@ -4979,7 +5159,7 @@ function SuggestionBox({vendor, onSaveFeedback}) {
 }
 
 /* ─── Vendor History — Historial de calidad de limpiezas */
-function VendorHistory({reps, onRespond, vendor, onSaveFeedback}) {
+function VendorHistory({reps, onRespond, vendor, onSaveFeedback, reviews, allReps, allVendors, rvCasos, onSvRvCasos, rvIA}) {
   var cleanReps = (reps||[]).filter(function(r){return isCleaning(r.categoria);})
     .sort(function(a,b){return (b.createdAt||b.id)-(a.createdAt||a.id);});
 
@@ -4995,6 +5175,7 @@ function VendorHistory({reps, onRespond, vendor, onSaveFeedback}) {
 
   return (
     <div style={{maxWidth:600,margin:"0 auto",padding:"22px 16px 100px",fontFamily:"Montserrat,sans-serif"}}>
+      <MyRatingPanel reviews={reviews||[]} allReps={allReps||reps} allVendors={allVendors||[]} vendor={vendor} casos={rvCasos||[]} onSvCasos={onSvRvCasos} rvIA={rvIA||{}}/>
       <div style={{marginBottom:20}}>
         <div style={{fontSize:9.5,color:C.earth,fontWeight:700,letterSpacing:".24em",textTransform:"uppercase",marginBottom:6}}>Historial de Calidad</div>
         <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:24,fontWeight:400,color:C.black}}>Revisiones de limpieza</div>
@@ -6730,7 +6911,7 @@ function QuickEditTotal({rep, vendors, onSave}) {
 
 
 /* ─── Admin QA Panel — full quality review across all cleanings + daños + resumen */
-function AdminQAPanel({reps, vendors, reviews, onSvReviews, onQA, onSelect, onUpdate, isAdmin, me}) {
+function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos, rvIA, onSvRvIA, onQA, onSelect, onUpdate, isAdmin, me}) {
   const [sec,      setSec]      = useState("limpiezas"); /* limpiezas | danios | resumen */
   const [filter,   setFilter]   = useState("all"); /* all | pendiente | aprobada | correccion */
   const [selVend,  setSelVend]  = useState("Todos");
@@ -6800,7 +6981,7 @@ function AdminQAPanel({reps, vendors, reviews, onSvReviews, onQA, onSelect, onUp
 
       {sec==="danios"&&<DamageBoard reps={reps} vendors={vendors} me={me} isAdmin={isAdmin} onUpdate={onUpdate} onSelect={onSelect}/>}
       {sec==="mant"&&isAdmin&&<MaintBoard reps={reps} vendors={vendors} me={me} onUpdate={onUpdate} onSelect={onSelect}/>}
-      {sec==="rating"&&isAdmin&&<GuestRatingBoard reviews={reviews||[]} reps={reps} vendors={vendors} onSvReviews={onSvReviews} onSelect={onSelect}/>}
+      {sec==="rating"&&isAdmin&&<GuestRatingBoard reviews={reviews||[]} reps={reps} vendors={vendors} onSvReviews={onSvReviews} casos={rvCasos||[]} onSvCasos={onSvRvCasos} rvIA={rvIA||{}} onSvRvIA={onSvRvIA} onSelect={onSelect} me={me}/>}
       {sec==="resumen"&&isAdmin&&<TechSummary reps={reps} vendors={vendors}/>}
 
       {sec==="limpiezas"&&<>
@@ -9158,19 +9339,25 @@ function InvoiceUp({factura,onAdd,onDel}) {
    Importa las reviews de las plataformas y atribuye la nota de LIMPIEZA al
    técnico que limpió antes del check-in.
    ═══════════════════════════════════════════════════════════════════════════ */
-function GuestRatingBoard({reviews, reps, vendors, onSvReviews, onSelect}) {
+function GuestRatingBoard({reviews, reps, vendors, onSvReviews, casos, onSvCasos, rvIA, onSvRvIA, onSelect, me}) {
   const [busy,   setBusy]   = useState(false);
   const [msg,    setMsg]    = useState(null);
   const [imp,    setImp]    = useState(false);
   const [open,   setOpen]   = useState(null);
   const [orphOpen,setOrphOpen]= useState(false);
+  const [asgOpen, setAsgOpen] = useState(null);
+  const [asgDest, setAsgDest] = useState("");
+  const [preOpen, setPreOpen] = useState(false);
+  const [iaBusy,  setIaBusy]  = useState(false);
+  const [iaErr,   setIaErr]   = useState(false);
+  const [iaMsg,   setIaMsg]   = useState("");
   const [preset, setPreset] = useState("todo");
   const [dFrom,  setDFrom]  = useState("");
   const [dTo,    setDTo]    = useState("");
 
   function applyPreset(v){ setPreset(v); var r=presetRange(v); setDFrom(r.from); setDTo(r.to); }
 
-  var att   = rvAttribute(reviews, reps);
+  var att   = rvAttribute(reviews, reps, casos);
   var rows  = att.rows.filter(function(x){
     if(dFrom && (x.rep.fecha||"")<dFrom) return false;
     if(dTo   && (x.rep.fecha||"")>dTo)   return false;
@@ -9182,6 +9369,21 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, onSelect}) {
                      .sort(function(a,b){return (stats[b.value].avg||0)-(stats[a.value].avg||0);});
   var sinRev = groups.filter(function(g){return !stats[g.value]||!stats[g.value].n;});
   var gAvg   = rows.length ? rows.reduce(function(s,x){return s+x.score;},0)/rows.length : null;
+
+  /* Asignación manual de una review huérfana — queda como caso resuelto. */
+  function asignar(o){
+    if(!asgDest) return;
+    var g=groups.filter(function(x){return (x.emails||[]).indexOf(asgDest)>=0;})[0];
+    var c={
+      id:rcId(), reviewId:String(o.rv.id||""), propiedad:o.rv.propiedad||"",
+      checkIn:o.rv.checkIn||"", tecnico:(g&&g.label)||"", nota:o.score,
+      tipo:"asignacion", motivo:"Sin ligar automáticamente: "+(o.why||""),
+      fecha:todayStr(), estado:"reasignada", decision:"Asignada manualmente por el administrador.",
+      reasignadaA:asgDest, resueltaPor:(me&&(me.nombre||me.email))||"Administrador", fechaResol:todayStr()
+    };
+    onSvCasos&&onSvCasos((casos||[]).concat([c]));
+    setAsgOpen(null); setAsgDest("");
+  }
 
   async function sync(auto){
     if(!auto) setBusy(true);
@@ -9195,7 +9397,8 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, onSelect}) {
       var list = (d&&Array.isArray(d.reviews)) ? d.reviews : [];
       try{ localStorage.setItem("sam_rvsync", String(Date.now())); }catch(e2){}
       if(!list.length){
-        setMsg({ok:false,txt:"Hospitable respondió bien, pero ninguna reserva trae calificación de limpieza"+(d&&d.reservas?" (se revisaron "+d.reservas+" reservas)":"")+". Suele pasar cuando el token no tiene el permiso Reviews, o cuando aún no hay reviews publicadas."});
+        setMsg({ok:false,txt: (d&&d.aviso) ? d.aviso
+          : "Hospitable respondió bien, pero ninguna review trae la sub-calificación de limpieza"+(d&&d.recibidas?" (se revisaron "+d.recibidas+" reservas)":"")+". Las reservas directas y algunos canales no la incluyen — para esas usa la carga manual."});
       } else {
         var byId={}; (reviews||[]).forEach(function(r){byId[String(r.id)]=r;});
         var nuevas=0; list.forEach(function(r){ if(!byId[String(r.id)]) nuevas++; byId[String(r.id)]=Object.assign({},byId[String(r.id)]||{},r); });
@@ -9217,6 +9420,123 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, onSelect}) {
     if(Date.now()-last > 12*3600*1000) sync(true);
   },[]);
 
+  /* Resumen mensual con IA, automático: al abrir la pestaña, si algún técnico
+     no tiene resumen del mes en curso, se genera solo y en silencio. Usa sólo
+     las reviews de los últimos ~2 meses — lo reciente es lo que sirve. */
+  function iaDe(g){
+    return (rvIA||{})[g.value] || ((g.emails||[]).map(function(e){return (rvIA||{})[e];}).filter(Boolean)[0]) || null;
+  }
+  async function genIA(auto){
+    setIaBusy(true); setIaErr(false); if(!auto) setIaMsg("");
+    async function complete(prompt){
+      if(window.claude&&window.claude.complete) return await window.claude.complete(prompt);
+      var r=await apiCall("ai",{prompt:prompt});
+      return (r&&r.text)||"";
+    }
+    try{
+      var desde=isoShift(todayStr(),-62), mes=todayStr().slice(0,7);
+      var out=Object.assign({},rvIA||{}), hechos=0;
+      for(var i=0;i<ranked.length;i++){
+        var g=ranked[i], s=stats[g.value];
+        var prev=iaDe(g);
+        if(auto && prev && prev.mes===mes && prev.v===RV_IA_VER) continue;   /* ya está el del mes, en el formato actual */
+        var rec=s.rows.filter(function(x){return String(x.rv.checkIn||"")>=desde;});
+        if(rec.length<2) continue;
+        var avg=rec.reduce(function(a,x){return a+x.score;},0)/rec.length;
+        var lines=rec.map(function(x){
+          var c=String(x.rv.comentario||"").trim();
+          return "- "+fmtDate(x.rv.checkIn)+" · "+(x.rv.propiedad||"")+(c?": \u201c"+c.slice(0,400)+"\u201d":": (el huésped calificó pero no escribió comentario)");
+        }).join("\n");
+        var conTexto=rec.filter(function(x){return String(x.rv.comentario||"").trim().length>12;}).length;
+        var prompt="Eres supervisor de calidad de limpieza en una empresa boutique de renta corta en Guatemala. "+
+          "Abajo están las reseñas que dejaron los huéspedes en los últimos dos meses en las propiedades que limpió "+g.label+".\n\n"+lines+
+          "\n\nDevuelve EXACTAMENTE este formato, una línea por punto, sin nada más:\n"+
+          "BIEN: <lo que los huéspedes elogian de forma recurrente>\n"+
+          "OPORTUNIDAD: <un área concreta que aparece más de una vez>\n"+
+          "OPORTUNIDAD: <otra, sólo si de verdad se repite>\n"+
+          "ACCION: <algo concreto que hacer en la próxima limpieza>\n"+
+          "ACCION: <otra, sólo si aporta>\n\n"+
+          "REGLAS ESTRICTAS:\n"+
+          "- Máximo 16 palabras por línea. Frases directas, sin relleno ni preámbulo.\n"+
+          "- Nombra el área concreta: baños, regadera, inodoro, camas, ropa de cama, toallas, cocina, trastes, refrigerador, polvo, pisos, ventanas, olores, orden, terraza, basura.\n"+
+          "- NO menciones calificaciones, notas, números, estrellas, promedios ni el estándar. Nada de cifras.\n"+
+          "- NO evalúes al técnico ni digas si va bien o mal. Habla de las propiedades y de lo que percibieron los huéspedes.\n"+
+          "- Sólo limpieza y orden. Ignora ubicación, precio, ruido, wifi, anfitrión o check-in.\n"+
+          "- No inventes nada que no esté escrito. Omite la línea entera si no tienes con qué llenarla.\n"+
+          (conTexto<2
+            ? "- CASO ESPECIAL: casi ninguna reseña trae comentario escrito. Usa una sola línea BIEN diciéndolo, y dos ACCION con lo que los huéspedes notan primero (baño, ropa de cama, olor, orden visual). Sin OPORTUNIDAD.\n"
+            : "")+
+          "Responde SOLO esas líneas.";
+        var txt=String(await complete(prompt)||"").trim();
+        if(!txt) continue;
+        var reg={mes:mes, v:RV_IA_VER, texto:txt, n:rec.length, avg:Math.round(avg*100)/100, fecha:todayStr(), tecnico:g.label};
+        (g.emails||[]).forEach(function(em){ if(em) out[em]=reg; });
+        out[g.value]=reg;
+        hechos++;
+      }
+      /* Visión de conjunto: un resumen de TODAS las reseñas, para el dashboard. */
+      var prevG=(rvIA||{}).__global;
+      if(!(auto && prevG && prevG.mes===mes && prevG.v===RV_IA_VER)){
+        var todas=rows.filter(function(x){return String(x.rv.checkIn||"")>=desde;});
+        if(todas.length>=3){
+          var gl=todas.map(function(x){
+            var c=String(x.rv.comentario||"").trim();
+            return "- "+fmtDate(x.rv.checkIn)+" · "+(x.rv.propiedad||"")+(c?": \u201c"+c.slice(0,300)+"\u201d":": (sin comentario escrito)");
+          }).join("\n");
+          var glTexto=todas.filter(function(x){return String(x.rv.comentario||"").trim().length>12;}).length;
+          var pg="Eres supervisor de calidad de limpieza en una empresa boutique de renta corta en Guatemala. "+
+            "Abajo están TODAS las reseñas que dejaron los huéspedes en los últimos dos meses, en todas las propiedades y de todo el equipo.\n\n"+gl+
+            "\n\nDevuelve EXACTAMENTE este formato, una línea por punto, sin nada más:\n"+
+            "BIEN: <lo que los huéspedes elogian de forma recurrente en toda la operación>\n"+
+            "OPORTUNIDAD: <un área concreta que se repite en varias propiedades>\n"+
+            "OPORTUNIDAD: <otra, sólo si de verdad se repite>\n"+
+            "ACCION: <algo concreto que aplicar en todo el equipo>\n"+
+            "ACCION: <otra, sólo si aporta>\n\n"+
+            "REGLAS ESTRICTAS:\n"+
+            "- Máximo 16 palabras por línea. Frases directas, sin relleno ni preámbulo.\n"+
+            "- Es una visión de conjunto: busca patrones que cruzan propiedades, no casos aislados.\n"+
+            "- Nombra el área concreta: baños, regadera, inodoro, camas, ropa de cama, toallas, cocina, trastes, refrigerador, polvo, pisos, ventanas, olores, orden, terraza, basura.\n"+
+            "- NO menciones calificaciones, notas, números, estrellas, promedios ni el estándar. Nada de cifras.\n"+
+            "- NO nombres ni evalúes a ningún técnico. Habla de las propiedades y de lo que percibieron los huéspedes.\n"+
+            "- Sólo limpieza y orden. Ignora ubicación, precio, ruido, wifi, anfitrión o check-in.\n"+
+            "- No inventes nada que no esté escrito. Omite la línea entera si no tienes con qué llenarla.\n"+
+            (glTexto<3 ? "- CASO ESPECIAL: casi ninguna reseña trae comentario escrito. Dilo en una línea BIEN y da dos ACCION generales (baño, ropa de cama, olor, orden visual). Sin OPORTUNIDAD.\n" : "")+
+            "Responde SOLO esas líneas.";
+          var gt=String(await complete(pg)||"").trim();
+          if(gt){ out.__global={mes:mes, v:RV_IA_VER, texto:gt, n:todas.length, fecha:todayStr()}; hechos++; }
+        }
+      }
+      if(hechos){ onSvRvIA&&onSvRvIA(out); setIaMsg("Resumen del mes actualizado."); }
+      else if(!auto){ setIaMsg("Hacen falta al menos 2 reviews de los últimos dos meses por técnico para generar un resumen útil."); }
+    }catch(e){
+      /* También en modo automático: si falla en silencio, nunca aparece nada
+         y no hay forma de saber por qué. */
+      var m=String((e&&e.message)||e);
+      setIaErr(true);
+      setIaMsg(/Unknown action|ANTHROPIC/i.test(m)
+        ? "El Apps Script no tiene configurada la IA. Agrega ANTHROPIC_API_KEY en ⚙️ Configuración del proyecto → Propiedades del script, y publica una versión nueva."
+        : "No se pudo generar el resumen: "+m);
+    }
+    setIaBusy(false);
+  }
+
+  /* Disparo automático una vez por mes (y sólo si de verdad falta alguno). */
+  useEffect(function(){
+    if(!ranked.length) return;
+    var mes=todayStr().slice(0,7);
+    var faltan=ranked.filter(function(g){ var r=iaDe(g); return !r || r.mes!==mes || r.v!==RV_IA_VER; });
+    var gReg=(rvIA||{}).__global;
+    var faltaG=!gReg||gReg.mes!==mes||gReg.v!==RV_IA_VER;
+    if(!faltan.length&&!faltaG) return;
+    /* El sello incluye la versión: al cambiar de formato no lo bloquea el
+       "ya lo intenté este mes" de la versión anterior. */
+    var sello=mes+"|v"+RV_IA_VER+"|"+faltan.length+"|"+(faltaG?"g":""), prev="";
+    try{ prev=localStorage.getItem("sam_rvia_try")||""; }catch(e){}
+    if(prev===sello) return;
+    try{ localStorage.setItem("sam_rvia_try",sello); }catch(e){}
+    genIA(true);
+  },[rows.length, ranked.length]);
+
   var IS = {border:"1px solid "+C.gray,borderRadius:6,padding:"7px 10px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff"};
 
   return (
@@ -9229,18 +9549,30 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, onSelect}) {
         </div>
       </div>
 
-      {/* Importar */}
+      <RatingCasesPanel casos={casos||[]} onSvCasos={onSvCasos} reps={reps} vendors={vendors} me={me}/>
+
+      {/* Resumen mensual con IA */}
       <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"13px 15px",display:"flex",flexDirection:"column",gap:10}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
-          <div style={{flex:"1 1 190px"}}>
-            <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>Importar reviews de las plataformas</div>
-            <div style={{fontSize:10.5,color:C.taupe,marginTop:3,lineHeight:1.5}}>Se sincroniza solo cada noche. Este botón lo fuerza ahora mismo — no duplica.</div>
+        <div style={{display:"flex",alignItems:"start",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+          <div style={{flex:"1 1 200px"}}>
+            <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>Resumen mensual de limpieza · IA</div>
+            <div style={{fontSize:10.5,color:C.taupe,marginTop:3,lineHeight:1.5}}>Se genera solo una vez al mes. Lee lo que los huéspedes escribieron en los últimos dos meses y busca temas que se repiten por área — baños, camas, cocina, polvo, olores, orden. Aparece al abrir cada técnico aquí abajo y en la pestaña Calidad del propio técnico; el dashboard muestra la visión de conjunto.</div>
           </div>
-          <button onClick={function(){sync(false);}} disabled={busy} style={{padding:"10px 16px",borderRadius:9,border:"none",background:busy?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:busy?"wait":"pointer",flexShrink:0}}>{busy?"Importando…":"↻ Importar"}</button>
+          {iaBusy
+            ? <span style={{fontSize:11,fontWeight:700,color:C.taupe,flexShrink:0}}>Analizando…</span>
+            : <button onClick={function(){genIA(false);}} style={{background:"none",border:"none",padding:0,fontSize:11,fontWeight:600,color:C.earth,cursor:"pointer",textDecoration:"underline",flexShrink:0}}>Actualizar ahora</button>}
         </div>
-        {msg&&<div style={{fontSize:12,fontWeight:600,lineHeight:1.55,color:msg.ok?C.green:C.red,background:msg.ok?"#EDF5EF":"#F5EDEC",padding:"9px 12px",borderRadius:8}}>{msg.txt}</div>}
-        <button onClick={function(){setImp(!imp);}} style={{alignSelf:"flex-start",background:"none",border:"none",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",textDecoration:"underline",padding:0}}>{imp?"Ocultar carga manual":"Cargar reviews a mano (pegar tabla)"}</button>
-        {imp&&<ReviewPaste reviews={reviews} onSave={function(list){onSvReviews&&onSvReviews(list);setImp(false);setMsg({ok:true,txt:"Reviews cargadas."});}}/>}
+        {iaMsg&&<div style={{fontSize:11.5,lineHeight:1.6,color:iaErr?C.red:C.earth,background:iaErr?"#F5EDEC":C.surfaceWarm,padding:"9px 12px",borderRadius:8}}>{iaMsg}</div>}
+        {(function(){
+          /* Los resúmenes se leen al expandir cada técnico, no aquí. */
+          var conIA=ranked.filter(function(g){var r=iaDe(g);return r&&r.texto;});
+          if(conIA.length||iaBusy) return null;
+          return (
+            <div style={{fontSize:11.5,lineHeight:1.6,color:C.taupe,background:C.surfaceWarm,padding:"9px 12px",borderRadius:8}}>
+              Todavía no hay resúmenes. Se necesitan al menos 2 reviews de los últimos dos meses por técnico. Si ya las hay y esto no cambia, pulsa «Actualizar ahora» para ver el motivo.
+            </div>
+          );
+        })()}
       </div>
 
       {/* Período */}
@@ -9321,6 +9653,16 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, onSelect}) {
                     );
                   })}
                 </div>
+                {(function(){
+                  var reg=iaDe(g);
+                  if(!reg||!reg.texto) return null;
+                  return (
+                    <div style={{background:C.surfaceWarm,borderRadius:9,padding:"12px 14px",borderLeft:"3px solid "+C.taupe}}>
+                      <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:6}}>✦ Qué dicen los huéspedes{reg.mes?" · "+reg.mes:""}</div>
+                      <div style={{marginTop:7}}><RvIABody texto={reg.texto}/></div>
+                    </div>
+                  );
+                })()}
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {s.rows.slice().sort(function(a,b){return (b.rv.checkIn||"")<(a.rv.checkIn||"")?-1:1;}).map(function(x,j){
                     return (
@@ -9336,11 +9678,29 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, onSelect}) {
                           </div>
                         </div>
                         {x.rv.comentario&&<div style={{fontSize:11.5,color:C.earth,lineHeight:1.6,marginTop:7,fontStyle:"italic"}}>“{String(x.rv.comentario).slice(0,260)}{String(x.rv.comentario).length>260?"…":""}”</div>}
-                        <button onClick={function(){onSelect&&onSelect(x.rep);}} style={{marginTop:8,background:"none",border:"none",padding:0,fontSize:11,fontWeight:600,color:C.peach,cursor:"pointer",textDecoration:"underline"}}>Ver la limpieza del {fmtDate(x.rep.fecha)} →</button>
+                        {x.manual
+                          ? <div style={{marginTop:8,fontSize:10.5,color:C.taupe,fontStyle:"italic"}}>Asignada manualmente — no hay limpieza registrada que enlazar</div>
+                          : <button onClick={function(){onSelect&&onSelect(x.rep);}} style={{marginTop:8,background:"none",border:"none",padding:0,fontSize:11,fontWeight:600,color:C.peach,cursor:"pointer",textDecoration:"underline"}}>Ver la limpieza del {fmtDate(x.rep.fecha)} →</button>}
                       </div>
                     );
                   })}
                 </div>
+                {s.excl.length>0&&(
+                  <div style={{borderTop:"1px dashed "+C.gray,paddingTop:11,display:"flex",flexDirection:"column",gap:7}}>
+                    <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase"}}>Excluidas del promedio ({s.excl.length})</div>
+                    {s.excl.map(function(x,j){
+                      return (
+                        <div key={"e"+j} style={{background:"#F4F4F2",borderRadius:8,padding:"9px 12px"}}>
+                          <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                            <span style={{fontSize:12,fontWeight:600,color:C.earth}}>{x.rv.propiedad||"—"} · check-in {fmtDate(x.rv.checkIn)}</span>
+                            <span style={{fontSize:12,fontWeight:700,color:C.taupe,textDecoration:"line-through"}}>{x.score.toFixed(1)}</span>
+                          </div>
+                          {x.caso&&x.caso.decision&&<div style={{fontSize:11,color:C.earth,lineHeight:1.6,marginTop:4}}><b>Motivo:</b> {x.caso.decision}{x.caso.resueltaPor?" — "+x.caso.resueltaPor:""}</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -9354,23 +9714,96 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, onSelect}) {
         </div>
       )}
 
-      {att.orphan.length>0&&(
-        <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:10,overflow:"hidden"}}>
-          <button onClick={function(){setOrphOpen(!orphOpen);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"12px 15px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
-            <span>
-              <span style={{display:"block",fontSize:12.5,fontWeight:700,color:C.black}}>Reviews sin técnico ({att.orphan.length})</span>
-              <span style={{display:"block",fontSize:10.5,color:C.taupe,marginTop:2}}>No se pudo saber quién limpió antes del check-in</span>
+      {att.orphan.length>0&&(function(){
+        var conNota=att.orphan.filter(function(o){return o.score!=null;});
+        var oAvg=conNota.length?conNota.reduce(function(s,o){return s+o.score;},0)/conNota.length:null;
+        return (
+        <div style={{background:"#fff",border:"1.5px solid #E3D5B8",borderRadius:11,overflow:"hidden"}}>
+          <button onClick={function(){setOrphOpen(!orphOpen);}} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"13px 15px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+            <span style={{flex:1,minWidth:0}}>
+              <span style={{display:"block",fontSize:13,fontWeight:700,color:C.black}}>Sin técnico asignado</span>
+              <span style={{display:"block",fontSize:10.5,color:C.taupe,marginTop:2}}>{att.orphan.length} review{att.orphan.length===1?"":"s"} · no se pudo saber quién limpió antes del check-in</span>
             </span>
-            <span style={{fontSize:12,color:C.taupe}}>{orphOpen?"▴":"▾"}</span>
+            <span style={{textAlign:"right",flexShrink:0}}>
+              <span style={{display:"block",fontSize:18,fontWeight:700,color:rvColor(oAvg)}}>{oAvg==null?"—":oAvg.toFixed(2)}</span>
+              <span style={{display:"block",fontSize:9,color:C.taupe,letterSpacing:".1em",textTransform:"uppercase"}}>promedio</span>
+            </span>
+            <span style={{fontSize:12,color:C.taupe,flexShrink:0}}>{orphOpen?"▴":"▾"}</span>
           </button>
           {orphOpen&&(
-            <div style={{borderTop:"1px solid "+C.line,padding:"12px 15px",display:"flex",flexDirection:"column",gap:7,maxHeight:340,overflowY:"auto"}}>
+            <div style={{borderTop:"1px solid "+C.line,padding:"13px 15px",display:"flex",flexDirection:"column",gap:9}}>
+              <div style={{fontSize:11,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>
+                Estas notas no cuentan para nadie. Si sabes quién hizo la limpieza, asígnala: pasa a contar en su promedio y queda el rastro de que fue una asignación manual.
+              </div>
               {att.orphan.map(function(o,i){
+                var rid=String(o.rv.id||i), abierto=asgOpen===rid;
                 return (
-                  <div key={i} style={{background:C.surfaceWarm,borderRadius:8,padding:"9px 11px"}}>
-                    <div style={{fontSize:12,fontWeight:600,color:C.black}}>{o.rv.propiedad||"— sin propiedad —"}</div>
-                    <div style={{fontSize:10.5,color:C.earth,marginTop:3}}>{o.rv.checkIn?"check-in "+fmtDate(o.rv.checkIn):"sin check-in"}{o.rv.platform?" · "+o.rv.platform:""}</div>
-                    <div style={{fontSize:10.5,color:C.orange,marginTop:4,fontWeight:600}}>{o.why}</div>
+                  <div key={i} style={{background:C.surfaceWarm,borderRadius:9,padding:"11px 13px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"start"}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{o.rv.propiedad||"— sin propiedad —"}</div>
+                        <div style={{fontSize:10.5,color:C.earth,marginTop:3}}>{o.rv.checkIn?"check-in "+fmtDate(o.rv.checkIn):"sin check-in"}{o.rv.platform?" · "+o.rv.platform:""}{o.rv.guest?" · "+o.rv.guest:""}</div>
+                      </div>
+                      <div style={{textAlign:"right",flexShrink:0}}>
+                        <div style={{fontSize:15,fontWeight:700,color:rvColor(o.score)}}>{o.score==null?"—":o.score.toFixed(1)}</div>
+                        <div style={{fontSize:9.5,color:C.taupe,letterSpacing:".1em",textTransform:"uppercase"}}>limpieza</div>
+                      </div>
+                    </div>
+                    {o.rv.comentario&&<div style={{fontSize:11.5,color:C.earth,lineHeight:1.6,marginTop:7,fontStyle:"italic"}}>“{String(o.rv.comentario).slice(0,260)}{String(o.rv.comentario).length>260?"…":""}”</div>}
+                    <div style={{fontSize:10.5,color:C.orange,marginTop:5,fontWeight:600}}>{o.why}</div>
+                    {o.score==null ? (
+                      <div style={{fontSize:10.5,color:C.taupe,marginTop:6}}>Sin nota de limpieza — no se puede asignar.</div>
+                    ) : abierto ? (
+                      <div style={{marginTop:9,borderTop:"1px solid "+C.line,paddingTop:9,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                        <select value={asgDest} onChange={function(e){setAsgDest(e.target.value);}} style={Object.assign({},IS,{flex:"1 1 180px"})}>
+                          <option value="">¿Quién hizo esta limpieza?</option>
+                          {groups.map(function(g){ var em=(g.emails||[])[0]||""; return <option key={g.value} value={em}>{g.label}</option>; })}
+                        </select>
+                        <button onClick={function(){asignar(o);}} disabled={!asgDest} style={{padding:"8px 14px",borderRadius:8,border:"none",background:asgDest?C.black:C.gray,color:"#fff",fontSize:11.5,fontWeight:700,cursor:asgDest?"pointer":"default"}}>Asignar</button>
+                        <button onClick={function(){setAsgOpen(null);setAsgDest("");}} style={{padding:"8px 14px",borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+                      </div>
+                    ) : (
+                      <button onClick={function(){setAsgOpen(rid);setAsgDest("");}} style={{marginTop:8,background:"none",border:"none",padding:0,fontSize:11,fontWeight:600,color:C.peach,cursor:"pointer",textDecoration:"underline"}}>Asignar a un técnico</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        );
+      })()}
+
+      {/* Importar — al final: el sync es automático, esto es respaldo manual */}
+      <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"13px 15px",display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+          <div style={{flex:"1 1 190px"}}>
+            <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>Importar reviews de las plataformas</div>
+            <div style={{fontSize:10.5,color:C.taupe,marginTop:3,lineHeight:1.5}}>Se sincroniza solo cada noche. Este botón lo fuerza ahora mismo — no duplica. Airbnb y Booking traen la nota de limpieza por separado; las reservas directas no.</div>
+          </div>
+          <button onClick={function(){sync(false);}} disabled={busy} style={{padding:"10px 16px",borderRadius:9,border:"none",background:busy?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:busy?"wait":"pointer",flexShrink:0}}>{busy?"Importando…":"↻ Importar"}</button>
+        </div>
+        {msg&&<div style={{fontSize:12,fontWeight:600,lineHeight:1.55,color:msg.ok?C.green:C.red,background:msg.ok?"#EDF5EF":"#F5EDEC",padding:"9px 12px",borderRadius:8}}>{msg.txt}</div>}
+        <button onClick={function(){setImp(!imp);}} style={{alignSelf:"flex-start",background:"none",border:"none",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",textDecoration:"underline",padding:0}}>{imp?"Ocultar carga manual":"Cargar reviews a mano (pegar tabla)"}</button>
+        {imp&&<ReviewPaste reviews={reviews} onSave={function(list){onSvReviews&&onSvReviews(list);setImp(false);setMsg({ok:true,txt:"Reviews cargadas."});}}/>}
+      </div>
+
+      {att.orphanPre.length>0&&(
+        <div style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:10,overflow:"hidden"}}>
+          <button onClick={function(){setPreOpen(!preOpen);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"11px 15px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+            <span>
+              <span style={{display:"block",fontSize:12,fontWeight:700,color:C.earth}}>{att.orphanPre.length} review{att.orphanPre.length===1?"":"s"} anterior{att.orphanPre.length===1?"":"es"} al primer trabajo del app</span>
+              <span style={{display:"block",fontSize:10.5,color:C.taupe,marginTop:2}}>Check-in previo al {fmtDate(att.firstJob)} — no hay limpiezas registradas con las que atribuirlas, así que no cuentan como pendientes de clasificar. Siguen guardadas en la base.</span>
+            </span>
+            <span style={{fontSize:12,color:C.taupe}}>{preOpen?"▴":"▾"}</span>
+          </button>
+          {preOpen&&(
+            <div style={{borderTop:"1px solid "+C.line,padding:"12px 15px",display:"flex",flexDirection:"column",gap:6,maxHeight:300,overflowY:"auto"}}>
+              {att.orphanPre.map(function(o,i){
+                return (
+                  <div key={i} style={{background:"#fff",borderRadius:8,padding:"8px 11px",display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                    <span style={{fontSize:11.5,color:C.earth}}>{o.rv.propiedad||"—"}</span>
+                    <span style={{fontSize:10.5,color:C.taupe}}>{o.rv.checkIn?fmtDate(o.rv.checkIn):"sin check-in"}{o.rv.platform?" · "+o.rv.platform:""}</span>
                   </div>
                 );
               })}
@@ -9378,6 +9811,487 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, onSelect}) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MI CALIFICACIÓN — vista del técnico (pestaña Calidad)
+   Ve su nota de limpieza, las reviews que la componen, cómo va contra el
+   estándar de la marca y contra el equipo, y puede pedir revisión de una
+   calificación con la que no está de acuerdo.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function MyRatingPanel({reviews, allReps, allVendors, vendor, casos, onSvCasos, rvIA}) {
+  const [openReq, setOpenReq] = useState(null);
+  const [tipo,    setTipo]    = useState("eliminacion");
+  const [motivo,  setMotivo]  = useState("");
+  const [msg,     setMsg]     = useState(null);
+  const [verTodo, setVerTodo] = useState(false);
+
+  var mails = vendorEmailSet(vendor);
+  var att   = rvAttribute(reviews, allReps, casos);
+  function esMio(row){
+    if(row.reasignadaA) return mails.indexOf(row.reasignadaA)>=0;
+    return repMatchesVendor(row.rep, vendor);
+  }
+  var mine  = att.rows.filter(esMio).sort(function(a,b){return (a.rv.checkIn||"")<(b.rv.checkIn||"")?1:-1;});
+  var valid = mine.filter(function(r){return !r.excluded;});
+  var myAvg = valid.length ? valid.reduce(function(s,x){return s+x.score;},0)/valid.length : null;
+  var allValid = att.rows.filter(function(r){return !r.excluded;});
+  var teamAvg = allValid.length ? allValid.reduce(function(s,x){return s+x.score;},0)/allValid.length : null;
+
+  var bajoStd  = myAvg!=null && myAvg < RV_STD;
+  var bajoTeam = myAvg!=null && teamAvg!=null && myAvg < teamAvg-0.02;
+  var byRev = rcActive(casos);
+  var mio = (vendor&&vendor.email)||"";
+  var ia = (rvIA&&(rvIA[mio]||rvIA[String(mio).toLowerCase()]))||null;
+
+  function enviar(row){
+    if(!motivo.trim()){ setMsg({ok:false,txt:"Escribe el motivo para que el administrador pueda evaluarlo."}); return; }
+    var c = {
+      id: rcId(), reviewId: String(row.rv.id||""), propiedad: row.rv.propiedad||"",
+      checkIn: row.rv.checkIn||"", tecnico: vendorDisplay(vendor), nota: row.score,
+      tipo: tipo, motivo: motivo.trim(), fecha: todayStr(), estado: "pendiente",
+      decision: "", reasignadaA: "", resueltaPor: "", fechaResol: ""
+    };
+    onSvCasos&&onSvCasos((casos||[]).concat([c]));
+    setOpenReq(null); setMotivo(""); setTipo("eliminacion");
+    setMsg({ok:true,txt:"Solicitud enviada. El administrador la revisará y te avisará la decisión."});
+    try{ notifyTemplate(resolveNotifRecipients("ratingRevision", allVendors, []), "ratingRevision",
+      {tecnico:vendorDisplay(vendor), propiedad:c.propiedad, fecha:fmtDate(c.checkIn)}); }catch(_){}
+  }
+
+  var shown = verTodo ? mine : mine.slice(0,8);
+  var tip = RV_TIPS[(valid.length+String(mio).length)%RV_TIPS.length];
+
+  return (
+    <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:12,padding:"16px 17px",display:"flex",flexDirection:"column",gap:13,marginBottom:16}}>
+      <div>
+        <div style={{fontSize:9.5,color:C.earth,fontWeight:700,letterSpacing:".24em",textTransform:"uppercase",marginBottom:6}}>Calificación de huéspedes</div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:22,fontWeight:400,color:C.black}}>Mi nota de limpieza</div>
+        <div style={{fontSize:11.5,color:C.earth,lineHeight:1.65,marginTop:6,textWrap:"pretty"}}>
+          Es la nota que los huéspedes le dan <b>a la limpieza</b> en Airbnb, Booking y las demás plataformas —no la calificación general de la estancia— en las propiedades que limpiaste antes de su entrada.
+        </div>
+      </div>
+
+      {myAvg==null ? (
+        <div style={{background:C.surfaceWarm,borderRadius:10,padding:"16px 15px",fontSize:12.5,color:C.earth,lineHeight:1.7}}>
+          Todavía no hay reviews de huéspedes ligadas a tus limpiezas. Aparecen cuando el huésped califica después de su estancia, así que llevan unos días de retraso.
+        </div>
+      ) : (
+        <>
+          <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+            <div style={{flex:"1 1 130px",background:C.surfaceWarm,borderRadius:10,padding:"13px 15px"}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".12em",textTransform:"uppercase",marginBottom:6}}>Mi promedio</div>
+              <div style={{fontSize:27,fontWeight:600,color:rvColor(myAvg),lineHeight:1}}>{myAvg.toFixed(2)}</div>
+              <div style={{fontSize:12,color:rvColor(myAvg),letterSpacing:".1em",marginTop:4}}>{rvStarsTxt(myAvg)}</div>
+              <div style={{fontSize:10.5,color:C.taupe,marginTop:5}}>{valid.length} review{valid.length===1?"":"s"}{mine.length>valid.length?" · "+(mine.length-valid.length)+" excluida"+(mine.length-valid.length===1?"":"s"):""}</div>
+            </div>
+            <div style={{flex:"1 1 130px",background:C.surfaceWarm,borderRadius:10,padding:"13px 15px"}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".12em",textTransform:"uppercase",marginBottom:6}}>Estándar Spacio AM</div>
+              <div style={{fontSize:27,fontWeight:600,color:C.black,lineHeight:1}}>{RV_STD.toFixed(2)}</div>
+              <div style={{fontSize:11,fontWeight:700,marginTop:8,color:bajoStd?C.orange:C.green}}>{bajoStd?"▼ "+(RV_STD-myAvg).toFixed(2)+" por debajo":"▲ En el estándar"}</div>
+            </div>
+            <div style={{flex:"1 1 130px",background:C.surfaceWarm,borderRadius:10,padding:"13px 15px"}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".12em",textTransform:"uppercase",marginBottom:6}}>Promedio del equipo</div>
+              <div style={{fontSize:27,fontWeight:600,color:C.black,lineHeight:1}}>{teamAvg==null?"—":teamAvg.toFixed(2)}</div>
+              <div style={{fontSize:11,fontWeight:700,marginTop:8,color:bajoTeam?C.orange:C.green}}>{teamAvg==null?"":(bajoTeam?"▼ "+(teamAvg-myAvg).toFixed(2)+" por debajo":"▲ Igual o arriba")}</div>
+            </div>
+          </div>
+
+          {(bajoStd||bajoTeam) ? (
+            <div style={{background:"#F7EFE2",border:"1px solid #E3D5B8",borderRadius:10,padding:"14px 15px"}}>
+              <div style={{fontSize:12.5,fontWeight:700,color:"#8a6320",marginBottom:6}}>Vas un poco abajo — y se puede revertir rápido</div>
+              <div style={{fontSize:11.5,color:"#7a5a20",lineHeight:1.7,textWrap:"pretty"}}>
+                Una sola nota baja pesa mucho cuando hay pocas reviews, así que tres o cuatro limpiezas impecables mueven el promedio de inmediato. Nadie te está midiendo por una mala noche: lo que cuenta es la tendencia.
+              </div>
+              <div style={{fontSize:11.5,color:"#7a5a20",lineHeight:1.7,marginTop:9}}>
+                <b>Para esta semana:</b> {tip}
+              </div>
+              <div style={{fontSize:11.5,color:"#7a5a20",lineHeight:1.7,marginTop:6}}>
+                Y si alguna de estas notas no te corresponde —la propiedad ya estaba así, hubo un daño previo, la limpió alguien más— pídela a revisión abajo. Se evalúa caso por caso.
+              </div>
+            </div>
+          ) : (
+            <div style={{background:"#EDF5EF",border:"1px solid #C8DFC8",borderRadius:10,padding:"13px 15px",fontSize:12,color:C.green,fontWeight:600,lineHeight:1.6}}>
+              Vas en el estándar de la marca. Gracias — se nota en lo que escriben los huéspedes.
+            </div>
+          )}
+
+          {ia&&ia.texto&&(
+            <div style={{background:C.surfaceWarm,borderRadius:10,padding:"13px 15px",borderLeft:"3px solid "+C.taupe}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:6}}>✦ Resumen de tus reviews{ia.mes?" · "+ia.mes:""}</div>
+              <RvIABody texto={ia.texto}/>
+            </div>
+          )}
+
+          {msg&&<div style={{fontSize:12,fontWeight:600,lineHeight:1.55,color:msg.ok?C.green:C.red,background:msg.ok?"#EDF5EF":"#F5EDEC",padding:"9px 12px",borderRadius:8}}>{msg.txt}</div>}
+
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{fontSize:10,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase"}}>Las reviews que forman mi nota</div>
+            {shown.map(function(x,i){
+              var caso = byRev[String(x.rv.id)];
+              var abierto = openReq===String(x.rv.id);
+              return (
+                <div key={i} style={{background:x.excluded?"#F4F4F2":C.surfaceWarm,borderRadius:9,padding:"11px 13px",opacity:x.excluded?.72:1}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"start"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{x.rv.propiedad||"—"}</div>
+                      <div style={{fontSize:10.5,color:C.earth,marginTop:3}}>{x.rv.platform||"Plataforma"} · check-in {fmtDate(x.rv.checkIn)}{x.manual?" · asignada manualmente":" · limpieza del "+fmtDate(x.rep.fecha)}</div>
+                    </div>
+                    <div style={{textAlign:"right",flexShrink:0}}>
+                      <div style={{fontSize:15,fontWeight:700,color:x.excluded?C.taupe:rvColor(x.score),textDecoration:x.excluded?"line-through":"none"}}>{x.score.toFixed(1)}</div>
+                      <div style={{fontSize:9.5,color:C.taupe,letterSpacing:".1em",textTransform:"uppercase"}}>limpieza</div>
+                    </div>
+                  </div>
+                  {x.rv.comentario&&<div style={{fontSize:11.5,color:C.earth,lineHeight:1.6,marginTop:7,fontStyle:"italic"}}>“{String(x.rv.comentario).slice(0,300)}{String(x.rv.comentario).length>300?"…":""}”</div>}
+                  {caso ? (
+                    <div style={{marginTop:8,borderTop:"1px solid "+C.line,paddingTop:8}}>
+                      <div style={{fontSize:11,fontWeight:700,color:rcEstadoColor(caso.estado)}}>{rcEstadoTxt(caso.estado)}</div>
+                      <div style={{fontSize:11,color:C.earth,lineHeight:1.6,marginTop:3}}>Pediste: “{caso.motivo}”</div>
+                      {caso.decision&&<div style={{fontSize:11,color:C.black,lineHeight:1.6,marginTop:4}}><b>Respuesta:</b> {caso.decision}</div>}
+                    </div>
+                  ) : abierto ? (
+                    <div style={{marginTop:9,borderTop:"1px solid "+C.line,paddingTop:10,display:"flex",flexDirection:"column",gap:8}}>
+                      <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                        {[["eliminacion","Esta nota no me corresponde"],["aclaracion","Quiero dejar una aclaración"]].map(function(o){
+                          var act=tipo===o[0];
+                          return <button key={o[0]} onClick={function(){setTipo(o[0]);}} style={{padding:"7px 12px",borderRadius:100,border:"1px solid "+(act?C.black:C.gray),background:act?C.black:"#fff",color:act?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{o[1]}</button>;
+                        })}
+                      </div>
+                      <textarea value={motivo} onChange={function(e){setMotivo(e.target.value);}} rows={3} placeholder="Explica qué pasó. Ej: el huésped anterior dejó un daño en el sofá que no se podía limpiar, ya estaba reportado."
+                        style={{width:"100%",boxSizing:"border-box",border:"1px solid "+C.gray,borderRadius:8,padding:"9px 11px",fontSize:12,fontFamily:"Montserrat,sans-serif",lineHeight:1.6,outline:"none",resize:"vertical"}}/>
+                      <div style={{display:"flex",gap:8}}>
+                        <button onClick={function(){enviar(x);}} style={{padding:"9px 15px",borderRadius:8,border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:700,cursor:"pointer"}}>Enviar solicitud</button>
+                        <button onClick={function(){setOpenReq(null);setMotivo("");}} style={{padding:"9px 15px",borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button onClick={function(){setOpenReq(String(x.rv.id));setMotivo("");setMsg(null);}} style={{marginTop:8,background:"none",border:"none",padding:0,fontSize:11,fontWeight:600,color:C.peach,cursor:"pointer",textDecoration:"underline"}}>Solicitar revisión de esta calificación</button>
+                  )}
+                </div>
+              );
+            })}
+            {mine.length>8&&<button onClick={function(){setVerTodo(!verTodo);}} style={{alignSelf:"flex-start",background:"none",border:"none",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",textDecoration:"underline",padding:0}}>{verTodo?"Ver menos":"Ver las "+mine.length+" reviews"}</button>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SOLICITUDES DE REVISIÓN — panel del administrador
+   Decide si una calificación se excluye del promedio, se reasigna al técnico
+   que sí hizo la limpieza, o se mantiene. Nada se borra de la base.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function RatingCasesPanel({casos, onSvCasos, reps, vendors, me}) {
+  const [open,   setOpen]   = useState(null);
+  const [accion, setAccion] = useState("excluida");
+  const [nota,   setNota]   = useState("");
+  const [dest,   setDest]   = useState("");
+  const [verRes, setVerRes] = useState(false);
+
+  var pend = rcPend(casos).sort(function(a,b){return (a.fecha||"")<(b.fecha||"")?1:-1;});
+  var res  = (casos||[]).filter(function(c){return (c.estado||"pendiente")!=="pendiente";})
+                        .sort(function(a,b){return (a.fechaResol||"")<(b.fechaResol||"")?1:-1;});
+  var techs = techFilterGroups(reps, vendors, function(r){return isTradClean(r.categoria);});
+
+  function resolver(c){
+    if(!nota.trim()) return;
+    if(accion==="reasignada"&&!dest) return;
+    var upd = (casos||[]).map(function(x){
+      if(x.id!==c.id) return x;
+      return Object.assign({},x,{
+        estado: accion, decision: nota.trim(),
+        reasignadaA: accion==="reasignada"?dest:"",
+        resueltaPor: (me&&(me.nombre||me.email))||"Administrador",
+        fechaResol: todayStr()
+      });
+    });
+    onSvCasos&&onSvCasos(upd);
+    setOpen(null); setNota(""); setDest(""); setAccion("excluida");
+  }
+
+  if(!(casos||[]).length) return null;
+
+  return (
+    <div style={{background:"#fff",border:"1.5px solid "+(pend.length?"#E3D5B8":C.line),borderRadius:11,padding:"14px 16px",display:"flex",flexDirection:"column",gap:11}}>
+      <div>
+        <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>Solicitudes de revisión {pend.length>0&&<span style={{color:C.orange}}>({pend.length} pendiente{pend.length===1?"":"s"})</span>}</div>
+        <div style={{fontSize:10.5,color:C.taupe,marginTop:3,lineHeight:1.55}}>Un técnico pidió revisar una calificación. Puedes excluirla de su promedio, reasignarla a quien sí hizo la limpieza, o mantenerla. La review nunca se borra de la base.</div>
+      </div>
+
+      {pend.length===0&&<div style={{fontSize:12,color:C.green,fontWeight:600,background:"#EDF5EF",borderRadius:8,padding:"9px 12px"}}>✓ Sin solicitudes pendientes.</div>}
+
+      {pend.map(function(c){
+        var abierto=open===c.id;
+        return (
+          <div key={c.id} style={{background:C.surfaceWarm,borderRadius:9,padding:"12px 13px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"start",flexWrap:"wrap"}}>
+              <div style={{flex:"1 1 200px",minWidth:0}}>
+                <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>{c.tecnico||"—"}</div>
+                <div style={{fontSize:10.5,color:C.earth,marginTop:3}}>{c.propiedad||"—"} · check-in {fmtDate(c.checkIn)} · solicitada {fmtDate(c.fecha)}</div>
+                <div style={{fontSize:10.5,color:C.taupe,marginTop:3}}>{c.tipo==="aclaracion"?"Pide dejar una aclaración":"Pide que no cuente para su promedio"}</div>
+              </div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontSize:15,fontWeight:700,color:rvColor(c.nota)}}>{c.nota==null?"—":Number(c.nota).toFixed(1)}</div>
+                <div style={{fontSize:9.5,color:C.taupe,letterSpacing:".1em",textTransform:"uppercase"}}>limpieza</div>
+              </div>
+            </div>
+            <div style={{fontSize:11.5,color:C.black,lineHeight:1.65,marginTop:8,background:"#fff",borderRadius:7,padding:"9px 11px"}}>“{c.motivo}”</div>
+            {abierto ? (
+              <div style={{marginTop:10,borderTop:"1px solid "+C.line,paddingTop:10,display:"flex",flexDirection:"column",gap:9}}>
+                <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                  {[["excluida","No cuenta para el promedio"],["reasignada","Reasignar a otro técnico"],["rechazada","Mantener la calificación"]].map(function(o){
+                    var act=accion===o[0];
+                    return <button key={o[0]} onClick={function(){setAccion(o[0]);}} style={{padding:"7px 12px",borderRadius:100,border:"1px solid "+(act?C.black:C.gray),background:act?C.black:"#fff",color:act?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{o[1]}</button>;
+                  })}
+                </div>
+                {accion==="reasignada"&&(
+                  <select value={dest} onChange={function(e){setDest(e.target.value);}} style={{border:"1px solid "+C.gray,borderRadius:7,padding:"8px 10px",fontSize:12,fontFamily:"Montserrat,sans-serif",background:"#fff",outline:"none"}}>
+                    <option value="">¿A quién le corresponde esta limpieza?</option>
+                    {techs.map(function(g){ var em=(g.emails||[])[0]||""; return <option key={g.value} value={em}>{g.label}</option>; })}
+                  </select>
+                )}
+                <textarea value={nota} onChange={function(e){setNota(e.target.value);}} rows={3} placeholder="Motivo de la decisión — queda guardado y el técnico lo ve. Ej: el daño del sofá estaba reportado desde el 12/06, la nota no le corresponde."
+                  style={{width:"100%",boxSizing:"border-box",border:"1px solid "+C.gray,borderRadius:8,padding:"9px 11px",fontSize:12,fontFamily:"Montserrat,sans-serif",lineHeight:1.6,outline:"none",resize:"vertical"}}/>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <button onClick={function(){resolver(c);}} disabled={!nota.trim()||(accion==="reasignada"&&!dest)} style={{padding:"9px 15px",borderRadius:8,border:"none",background:(!nota.trim()||(accion==="reasignada"&&!dest))?C.gray:C.black,color:"#fff",fontSize:11.5,fontWeight:700,cursor:(!nota.trim()||(accion==="reasignada"&&!dest))?"default":"pointer"}}>Guardar decisión</button>
+                  <button onClick={function(){setOpen(null);setNota("");}} style={{padding:"9px 15px",borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={function(){setOpen(c.id);setNota("");setAccion(c.tipo==="aclaracion"?"rechazada":"excluida");}} style={{marginTop:9,padding:"8px 14px",borderRadius:8,border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:700,cursor:"pointer"}}>Revisar</button>
+            )}
+          </div>
+        );
+      })}
+
+      {res.length>0&&(
+        <>
+          <button onClick={function(){setVerRes(!verRes);}} style={{alignSelf:"flex-start",background:"none",border:"none",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",textDecoration:"underline",padding:0}}>{verRes?"Ocultar resueltas":"Ver "+res.length+" resuelta"+(res.length===1?"":"s")}</button>
+          {verRes&&(
+            <div style={{display:"flex",flexDirection:"column",gap:7,maxHeight:320,overflowY:"auto"}}>
+              {res.map(function(c){
+                return (
+                  <div key={c.id} style={{background:C.surfaceWarm,borderRadius:8,padding:"10px 12px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontSize:11.5,fontWeight:700,color:C.black}}>{c.tecnico} · {c.propiedad}</span>
+                      <span style={{fontSize:10.5,fontWeight:700,color:rcEstadoColor(c.estado)}}>{rcEstadoTxt(c.estado)}</span>
+                    </div>
+                    <div style={{fontSize:10.5,color:C.taupe,marginTop:3}}>check-in {fmtDate(c.checkIn)} · resuelta {fmtDate(c.fechaResol)}{c.resueltaPor?" por "+c.resueltaPor:""}</div>
+                    {c.decision&&<div style={{fontSize:11,color:C.earth,lineHeight:1.6,marginTop:4}}>{c.decision}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ═══ Resumen de rating para el dashboard operativo (sólo administradores) ═══
+   Contraído muestra sólo las cuatro cifras; el desglose por técnico, el
+   resumen de IA y las alertas viven detrás del botón central.
+   Con un técnico seleccionado en los filtros, muestra únicamente ese técnico. */
+function RatingDashCard({reviews, reps, vendors, rvCasos, soloGrupo, rvIA, propFilter, propScope}) {
+  const [abierto, setAbierto] = useState(false);
+  /* El filtro de zona/edificio/apartamento del dashboard también acota el rating. */
+  var revScope = propFilter ? (reviews||[]).filter(function(rv){ return propFilter({propiedad:rv.propiedad}); }) : reviews;
+  var att    = rvAttribute(revScope, reps, rvCasos);
+  var groups = techFilterGroups(reps, vendors, function(r){return isTradClean(r.categoria);});
+  var stats  = rvStatsByGroup(att.rows, groups);
+  var con    = groups.filter(function(g){return stats[g.value]&&stats[g.value].n>0;});
+  var uno    = soloGrupo ? (con.filter(function(g){return g.value===soloGrupo.value;})[0]||null) : null;
+  if(soloGrupo && !uno) return null;
+  var valid  = (uno ? stats[uno.value].rows : att.rows.filter(function(r){return !r.excluded;}));
+  if(!valid.length) return null;
+
+  function iaDe(g){
+    if(!g) return null;
+    return (rvIA||{})[g.value] || ((g.emails||[]).map(function(e){return (rvIA||{})[e];}).filter(Boolean)[0]) || null;
+  }
+  var gAvg  = valid.reduce(function(s,x){return s+x.score;},0)/valid.length;
+  var rank  = con.slice().sort(function(a,b){return stats[b.value].avg-stats[a.value].avg;});
+  var bajos = rank.filter(function(g){return stats[g.value].avg < RV_STD;});
+  var pend  = rcPend(rvCasos).filter(function(c){ return !uno || (uno.label&&c.tecnico===uno.label); }).length;
+  var mes   = String(todayStr()).slice(0,7);
+  var delMes= valid.filter(function(x){return String(x.rv.checkIn||"").slice(0,7)===mes;});
+  var avgMes= delMes.length ? delMes.reduce(function(s,x){return s+x.score;},0)/delMes.length : null;
+  /* Bajo estándar medido en REVIEWS, no en técnicos. */
+  var nBajo = valid.filter(function(x){return x.score < RV_STD;}).length;
+  var pctBajo = Math.round(nBajo/valid.length*100);
+
+  function ResumenGlobal(){
+    var reg=(rvIA||{}).__global;
+    if(!reg||!reg.texto) return null;
+    return (
+      <div style={{background:C.surfaceWarm,borderRadius:9,padding:"12px 14px",borderLeft:"3px solid "+C.taupe}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>✦ Qué dicen los huéspedes · todas las propiedades{reg.mes?" · "+reg.mes:""}</div>
+        <RvIABody texto={reg.texto}/>
+      </div>
+    );
+  }
+  function Resumen(g){
+    var reg=iaDe(g);
+    if(!reg||!reg.texto) return null;
+    return (
+      <div key={"ia"+g.value} style={{background:C.surfaceWarm,borderRadius:9,padding:"12px 14px",borderLeft:"3px solid "+C.taupe}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:6}}>✦ Qué dicen los huéspedes{uno?"":" · "+g.label}{reg.mes?" · "+reg.mes:""}</div>
+        <RvIABody texto={reg.texto}/>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:12,padding:"15px 17px",marginBottom:16,display:"flex",flexDirection:"column",gap:12}}>
+      <div>
+        <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Calidad percibida</div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:19,fontWeight:400,color:C.black,marginTop:4}}>{uno?"Rating de limpieza · "+uno.label:"Rating de limpieza de los huéspedes"}</div>
+          {propScope?<div style={{fontSize:10.5,color:C.taupe,marginTop:3}}>{propScope}</div>:null}
+      </div>
+
+      <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+        {[["Promedio"+(uno?"":" general"),gAvg.toFixed(2),rvColor(gAvg),valid.length+" review"+(valid.length===1?"":"s")],
+          ["Este mes",avgMes==null?"—":avgMes.toFixed(2),rvColor(avgMes),delMes.length?delMes.length+" review"+(delMes.length===1?"":"s"):"sin reviews aún"],
+          ["Estándar de marca",RV_STD.toFixed(2),gAvg>=RV_STD?C.green:C.orange,gAvg>=RV_STD?"cumplido":"por alcanzar"],
+          ["Bajo estándar",pctBajo+"%",nBajo?C.orange:C.green,nBajo+"/"+valid.length+" reviews"]].map(function(it,i){
+          return (
+            <div key={i} style={{flex:"1 1 120px",background:C.surfaceWarm,borderRadius:9,padding:"11px 13px"}}>
+              <div style={{fontSize:9,fontWeight:700,color:C.taupe,letterSpacing:".1em",textTransform:"uppercase",marginBottom:5}}>{it[0]}</div>
+              <div style={{fontSize:19,fontWeight:600,color:it[2],lineHeight:1.1}}>{it[1]}</div>
+              <div style={{fontSize:9.5,color:C.taupe,marginTop:4}}>{it[3]}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {abierto&&(
+        <>
+          {pend>0&&(
+            <div style={{background:"#F7EFE2",border:"1px solid #E3D5B8",borderRadius:9,padding:"10px 13px",fontSize:11.5,fontWeight:700,color:"#8a6320"}}>
+              {pend} solicitud{pend===1?"":"es"} de revisión por atender en Calidad › Rating huéspedes
+            </div>
+          )}
+
+          {uno ? Resumen(uno) : ResumenGlobal()}
+
+          {!uno&&con.length>0&&(
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase"}}>Por técnico</div>
+              {rank.map(function(g){
+                var s=stats[g.value], v=s.avg;
+                var bajoStd=v<RV_STD;
+                /* Escala 4.00–5.00: en 0–5 todas las barras se ven iguales. */
+                var pct=Math.max(0,Math.min(100,(v-4)*100));
+                var stdPct=(RV_STD-4)*100;
+                var avgPct=Math.max(0,Math.min(100,(gAvg-4)*100));
+                return (
+                  <div key={g.value} style={{display:"flex",flexDirection:"column",gap:5}}>
+                    <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+                      <span style={{flex:1,minWidth:0,fontSize:12,fontWeight:600,color:C.black,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{g.label}</span>
+                      <span style={{fontSize:10,color:C.taupe,flexShrink:0}}>{s.n} review{s.n===1?"":"s"}</span>
+                      <span style={{fontSize:13.5,fontWeight:700,color:rvColor(v),flexShrink:0,width:40,textAlign:"right"}}>{v.toFixed(2)}</span>
+                    </div>
+                    <div style={{position:"relative",height:10,background:C.beige,borderRadius:100}}>
+                      <div style={{position:"absolute",left:0,top:0,bottom:0,width:pct+"%",background:rvColor(v),borderRadius:100,transition:"width .36s cubic-bezier(.22,.61,.36,1)"}}/>
+                      <div style={{position:"absolute",left:avgPct+"%",top:-2,bottom:-2,width:1,background:"rgba(62,63,63,.28)"}}/>
+                      <div style={{position:"absolute",left:stdPct+"%",top:-3,bottom:-3,width:2,background:C.black,borderRadius:2}}/>
+                    </div>
+                    {bajoStd&&<div style={{fontSize:10,fontWeight:700,color:C.orange}}>−{(RV_STD-v).toFixed(2)} del estándar</div>}
+                  </div>
+                );
+              })}
+              <div style={{display:"flex",gap:14,flexWrap:"wrap",fontSize:9.5,color:C.taupe,borderTop:"1px solid "+C.line,paddingTop:9}}>
+                <span><span style={{display:"inline-block",width:2,height:9,background:C.black,marginRight:5,verticalAlign:"middle"}}/>Estándar {RV_STD.toFixed(2)}</span>
+                <span><span style={{display:"inline-block",width:1,height:9,background:"rgba(62,63,63,.4)",marginRight:5,verticalAlign:"middle"}}/>Promedio del equipo {gAvg.toFixed(2)}</span>
+                <span>Escala 4.00 – 5.00</span>
+              </div>
+            </div>
+          )}
+
+          {!uno&&bajos.length>0&&(
+            <div style={{background:"#F7EFE2",border:"1px solid #E3D5B8",borderRadius:9,padding:"11px 13px",fontSize:11.5,color:"#7a5a20",lineHeight:1.65,textWrap:"pretty"}}>
+              <b>{bajos.map(function(g){return g.label;}).join(", ")}</b> {bajos.length===1?"está":"están"} por debajo del estándar {RV_STD.toFixed(2)}. En Calidad › Rating huéspedes puedes ver review por review qué mencionó cada huésped.
+            </div>
+          )}
+        </>
+      )}
+
+      <div style={{display:"flex",justifyContent:"center",borderTop:"1px solid "+C.line,paddingTop:11,marginTop:-1}}>
+        <button onClick={function(){setAbierto(!abierto);}} style={{display:"flex",alignItems:"center",gap:7,background:"none",border:"1px solid "+C.gray,borderRadius:100,padding:"6px 15px",fontSize:10.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.earth,cursor:"pointer",fontFamily:"Montserrat,sans-serif",transition:"opacity .18s"}}>
+          {abierto?"Ver menos":"Ver detalle"}
+          {pend>0&&!abierto&&<span style={{width:6,height:6,borderRadius:100,background:C.orange}}/>}
+          <span style={{fontSize:9}}>{abierto?"▴":"▾"}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Mi rating, versión breve — dashboard del técnico ═══
+   Explica de dónde viene la nota y lleva al detalle en Calidad. */
+function MyRatingMini({reviews, allReps, vendor, rvCasos, rvIA, onGoCalidad}) {
+  var mails = vendorEmailSet(vendor);
+  var att = rvAttribute(reviews, allReps, rvCasos);
+  var mine = att.rows.filter(function(row){
+    if(row.excluded) return false;
+    if(row.reasignadaA) return mails.indexOf(row.reasignadaA)>=0;
+    return repMatchesVendor(row.rep, vendor);
+  });
+  var avg = mine.length ? mine.reduce(function(s,x){return s+x.score;},0)/mine.length : null;
+  var bajo = avg!=null && avg < RV_STD;
+  var mes = String(todayStr()).slice(0,7);
+  var delMes = mine.filter(function(x){return String(x.rv.checkIn||"").slice(0,7)===mes;});
+  var avgMes = delMes.length ? delMes.reduce(function(s,x){return s+x.score;},0)/delMes.length : null;
+  var mio = (vendor&&vendor.email)||"";
+  var ia = (rvIA&&(rvIA[mio]||rvIA[String(mio).toLowerCase()]))||null;
+
+  return (
+    <div style={{margin:"16px 16px 0",background:"#fff",border:"1px solid "+C.line,borderRadius:12,padding:"15px 16px",display:"flex",flexDirection:"column",gap:11}}>
+      <div>
+        <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Calidad percibida</div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:19,fontWeight:400,color:C.black,marginTop:4}}>Mi rating de limpieza</div>
+      </div>
+
+      <div style={{fontSize:11.5,color:C.earth,lineHeight:1.7,textWrap:"pretty"}}>
+        Cuando un huésped termina su estancia, Airbnb y las demás plataformas le piden calificar varias cosas por separado. Una de ellas es <b>la limpieza</b>. Esa nota —y sólo esa, no la calificación general de la estancia— es la que ves aquí, en las propiedades que limpiaste antes de su entrada.
+      </div>
+      <div style={{fontSize:11.5,color:C.earth,lineHeight:1.7,textWrap:"pretty"}}>
+        Es la medida más honesta de nuestro trabajo: la da el huésped, no un supervisor. También es la que sostiene la reputación de cada propiedad y, con eso, cuántas reservas entran. El estándar de la marca es <b>{RV_STD.toFixed(2)}</b>.
+      </div>
+
+      {avg==null ? (
+        <div style={{background:C.surfaceWarm,borderRadius:9,padding:"12px 13px",fontSize:12,color:C.earth,lineHeight:1.65}}>
+          Aún no hay reviews ligadas a tus limpiezas. Aparecen unos días después de cada estancia, cuando el huésped califica.
+        </div>
+      ) : (
+        <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+          {[["Mi promedio",avg.toFixed(2),rvColor(avg),mine.length+" review"+(mine.length===1?"":"s")],
+            ["Este mes",avgMes==null?"—":avgMes.toFixed(2),rvColor(avgMes),delMes.length?delMes.length+" review"+(delMes.length===1?"":"s"):"sin reviews aún"],
+            ["Estándar",RV_STD.toFixed(2),bajo?C.orange:C.green,bajo?"−"+(RV_STD-avg).toFixed(2)+" abajo":"cumplido"]].map(function(it,i){
+            return (
+              <div key={i} style={{flex:"1 1 95px",background:C.surfaceWarm,borderRadius:9,padding:"11px 13px"}}>
+                <div style={{fontSize:9,fontWeight:700,color:C.taupe,letterSpacing:".1em",textTransform:"uppercase",marginBottom:5}}>{it[0]}</div>
+                <div style={{fontSize:19,fontWeight:600,color:it[2],lineHeight:1.1}}>{it[1]}</div>
+                <div style={{fontSize:9.5,color:C.taupe,marginTop:4}}>{it[3]}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {ia&&ia.texto&&(
+        <div style={{background:C.surfaceWarm,borderRadius:9,padding:"12px 13px",borderLeft:"3px solid "+C.taupe}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:6}}>✦ Qué dicen los huéspedes{ia.mes?" · "+ia.mes:""}</div>
+          <div style={{fontSize:12.5,color:C.black,lineHeight:1.7,textWrap:"pretty"}}>{ia.texto}</div>
+        </div>
+      )}
+
+      <button onClick={onGoCalidad} style={{alignSelf:"flex-start",background:"none",border:"none",padding:0,fontSize:11.5,fontWeight:700,color:C.peach,cursor:"pointer",textDecoration:"underline"}}>Ver el detalle en Calidad →</button>
     </div>
   );
 }
@@ -9471,21 +10385,21 @@ var TC_METRICS = [
   {k:"profundas",    label:"Profundas",      short:"Prof.", fmt:function(v){return String(v||0);},                                hi:"max"},
   {k:"correcciones", label:"Correcciones",   short:"Corr.", fmt:function(v){return String(v||0);},                                hi:"min"},
 ];
-function TechCompare8w({reps, vendors, reviews}) {
+function TechCompare8w({reps, vendors, reviews, rvCasos}) {
   const [metric,setMetric] = useState("ingresos");
   const [sortK, setSortK]  = useState("ingresos");
   const [focus, setFocus]  = useState("__all");
 
   var weeks = last8Weeks();
   var from  = weeks[0].from, to = weeks[weeks.length-1].to;
-  var att   = rvAttribute(reviews, reps);
+  var att   = rvAttribute(reviews, reps, rvCasos);
 
   var groups = techFilterGroups(reps, vendors, function(r){return isCleaning(r.categoria)||r.categoria==="Supervisión";});
   var inWin  = function(f){ return f && f>=from && f<=to; };
 
   var data = groups.map(function(g,gi){
     var mine = (reps||[]).filter(function(r){return repInGroup(r,g)&&inWin(r.fecha);});
-    var rv   = att.rows.filter(function(x){ return inWin(x.rep.fecha) && repInGroup(x.rep,g); });
+    var rv   = att.rows.filter(function(x){ return !x.excluded && inWin(x.rep.fecha) && rvRowGroup(x,groups)===g; });
     var row = {
       g:g, color:TC_PAL[gi%TC_PAL.length],
       ingresos: mine.reduce(function(s,r){return s+pgEffTotal(r,vendors);},0),
@@ -9528,8 +10442,10 @@ function TechCompare8w({reps, vendors, reviews}) {
   var mDef = TC_METRICS.find(function(x){return x.k===metric;})||TC_METRICS[0];
 
   /* Barras: solo quienes tienen valor en la métrica activa, de mayor a menor. */
-  var barData = data.filter(function(r){return r[metric]!=null&&r[metric]>0;})
-    .sort(function(a,b){return b[metric]-a[metric];});
+  /* Los ceros SÍ cuentan: en "Correcciones" un cero es el mejor resultado.
+     El orden sigue la dirección de la métrica (hi:"min" = menos es mejor). */
+  var barData = data.filter(function(r){return r[metric]!=null;})
+    .sort(function(a,b){return mDef.hi==="min" ? a[metric]-b[metric] : b[metric]-a[metric];});
   var barMax = barData.length?Math.max.apply(null,barData.map(function(r){return r[metric];})):0;
 
   /* Serie semanal: un solo técnico, o el promedio del equipo. */
@@ -9614,15 +10530,17 @@ function TechCompare8w({reps, vendors, reviews}) {
         ? <div style={{background:C.surfaceWarm,borderRadius:10,padding:"20px 16px",textAlign:"center",fontSize:12,color:C.earth,lineHeight:1.6}}>Sin datos de <b>{mDef.label.toLowerCase()}</b> en estas 8 semanas.{metric==="rating"?" Importa las reviews en Calidad › Rating huéspedes.":""}</div>
         : <div style={{display:"flex",flexDirection:"column",gap:9}}>
             {barData.map(function(r,i){
-              var v=r[metric], pct=barMax>0?Math.max(2,(v/barMax)*100):0;
+              var v=r[metric];
+              var pct=(barMax>0&&v>0)?Math.max(2,(v/barMax)*100):0;
               var isTop=i===0&&barData.length>1;
               return (
                 <div key={r.g.value} style={{display:"flex",alignItems:"center",gap:10}}>
                   <span style={{width:104,flexShrink:0,fontSize:11.5,fontWeight:isTop?700:500,color:C.black,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.g.label}</span>
                   <span style={{flex:1,background:C.beige,borderRadius:4,height:20,position:"relative",minWidth:40}}>
-                    <span style={{display:"block",width:pct+"%",height:"100%",borderRadius:4,background:metric==="correcciones"?(v>0?C.red:C.green):(isTop?C.peach:C.earth),transition:"width .36s cubic-bezier(.22,.61,.36,1)"}}/>
+                    <span style={{display:"block",width:pct+"%",height:"100%",borderRadius:4,background:mDef.hi==="min"?(v>0?C.red:C.green):(isTop?C.peach:C.earth),transition:"width .36s cubic-bezier(.22,.61,.36,1)"}}/>
+                    {v===0&&<span style={{position:"absolute",left:6,top:0,height:"100%",display:"flex",alignItems:"center",fontSize:10,fontWeight:600,color:mDef.hi==="min"?C.green:C.taupe}}>{mDef.hi==="min"?"ninguna":"—"}</span>}
                   </span>
-                  <span style={{width:76,flexShrink:0,textAlign:"right",fontSize:12.5,fontWeight:isTop?700:600,color:metric==="rating"?rvColor(v):C.black}}>{mDef.fmt(v)}</span>
+                  <span style={{width:76,flexShrink:0,textAlign:"right",fontSize:12.5,fontWeight:isTop?700:600,color:metric==="rating"?rvColor(v):(mDef.hi==="min"&&v===0?C.green:C.black)}}>{mDef.fmt(v)}</span>
                 </div>
               );
             })}
