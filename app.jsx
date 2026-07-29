@@ -630,6 +630,9 @@ var VENDORS_SAFE = false;
    un técnico — actual, de notificaciones y anteriores — aunque el adelanto se haya
    creado con un correo que la persona ya cambió. */
 var ADV_VENDORS = [];
+/* Comprobantes de pago visibles para el cálculo de adelantos de planilla (el débito
+   de un adelanto quincenal ocurre dentro del comprobante, no por semana trabajada). */
+var ADV_PAGOS = [];
 
 /* Detect if running inside Claude sandbox — strict check */
 var IS_CLAUDE_SANDBOX = false;
@@ -826,12 +829,13 @@ function ls_loadAll(){
     hospurlweek: ls_get("c:hospweek")||null,
     feedback:  ls_get("c:fb")||null,
     notifprefs: ls_get("c:notif")||null,
+    nomAjustes: ls_get("c:nomaj")||null,
   };
   return {reports:reps.sort(function(a,b){return (b.createdAt||b.id)-(a.createdAt||a.id);}), ...cfg};
 }
 function ls_saveReport(rep){ls_set("m:"+rep.id,rep);}
 function ls_deleteReport(id){ls_del("m:"+id);}
-function ls_saveConfig(key,value){var km={vendors:"c:v",props:"c:p",adminpin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif"};ls_set(km[key]||key,value);}
+function ls_saveConfig(key,value){var km={vendors:"c:v",props:"c:p",adminpin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj"};ls_set(km[key]||key,value);}
 
 /* Rescate de arreglos JSON dañados. Si una celda de Config quedó con JSON válido
    seguido de basura (p.ej. una restauración que dejó '...]" por "[...]'), extrae el
@@ -902,6 +906,7 @@ async function loadAllData() {
       notifprefs: d.notifprefs || {},
       reviews:   d.reviews || [],
       rvCasos:   d.rvCasos || [],
+      nomAjustes: d.nomAjustes || [],
     };
   }
   /* Carga SECUENCIAL (no Promise.all): el Apps Script ocasionalmente mezcla las
@@ -937,6 +942,7 @@ async function loadAllData() {
     reviews: rv_merge(cfg),
     rvCasos: Array.isArray(cfg.rvCasos) ? cfg.rvCasos : [],
     rvIA: (cfg.rvIA && typeof cfg.rvIA==="object") ? cfg.rvIA : {},
+    nomAjustes: Array.isArray(cfg.nomAjustes) ? cfg.nomAjustes : [],
   };
 }
 
@@ -1107,7 +1113,7 @@ async function deleteReportById(id) {
 
 async function saveConfigItem(key, value) {
   if(IS_CLAUDE_SANDBOX){
-    var ls_km={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif"};
+    var ls_km={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj"};
     ls_set(ls_km[key]||key,value);
     return;
   }
@@ -1132,7 +1138,7 @@ async function saveConfigItem(key, value) {
   } catch(e) {
     console.error("saveConfig failed for key "+key+":", e.message);
     /* Fallback to localStorage so data isn't lost */
-    var ls_km2={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif"};
+    var ls_km2={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj"};
     ls_set(ls_km2[key]||key,value);
   }
 }
@@ -1230,6 +1236,9 @@ function App() {
   const [retryQ,   setRetryQ]   = useState([]);
   const [adelantos, setAdelantos] = useState([]);
   const [pagos, setPagos] = useState([]);
+  /* Planilla administrativa: bonos y ajustes asignados por el admin principal. */
+  const [nomAjustes, setNomAjustes] = useState([]);
+  async function svNomAjustes(v){ setNomAjustes(v); saveConfigItem("nomAjustes", v); }
   const [notifPrefs, setNotifPrefs] = useState({});
   /* Reviews de huéspedes (calificación de limpieza importada de las plataformas) */
   const [reviews, setReviews] = useState([]);
@@ -1281,7 +1290,7 @@ function App() {
     loadAllData().then(function(d){
       clearTimeout(timeoutId);
       setReps(withAutoPagador(d.reports||[]));
-      setVendors(d.vendors||DEF_V);
+      setVendors(nom_seed(d.vendors||DEF_V));
       /* Conexión exitosa → permitir guardar usuarios SOLO si la lista se leyó completa
          (todos los shards). Si faltó algún shard, el candado queda en false para no
          re-guardar una lista incompleta y borrar usuarios que no se pudieron leer. */
@@ -1319,6 +1328,7 @@ function App() {
         }catch(_){}
       }
       setPagos(pgFinal);
+      setNomAjustes(Array.isArray(d.nomAjustes)?d.nomAjustes:[]);
       setNotifPrefs(d.notifprefs||{}); NOTIF_PREFS=d.notifprefs||{};
       setSheetsOk(!IS_CLAUDE_SANDBOX);
       setReady(true); setSyncing(false);
@@ -1364,6 +1374,7 @@ function App() {
   /* Mantener ADV_VENDORS sincronizado: el cálculo de adelantos debe reconocer todos
      los correos de cada técnico (incluye los anteriores tras un cambio de correo). */
   useEffect(function(){ ADV_VENDORS = vendors || []; },[vendors]);
+  useEffect(function(){ ADV_PAGOS = pagos || []; },[pagos]);
   useEffect(function(){ NOTIF_PREFS = notifPrefs || {}; },[notifPrefs]);
 
   /* Unificación automática (una sola vez tras la carga): si un técnico tiene ≥2 adelantos
@@ -1478,7 +1489,7 @@ function App() {
     try{ if(localStorage.getItem("epi_onboard_done_"+freshV.id)) needsOnb=false; }catch(_){}
     inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
   } else {
-    inner = <AdminApp reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
+    inner = <AdminApp nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
   }
   return <ErrorBoundary>{inner}</ErrorBoundary>;
 }
@@ -1746,13 +1757,31 @@ function NotifCfg({prefs, vendors, onSave, readOnly}){
 }
 
 /* ═══ ADMIN */
-function AdminApp({reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
+function AdminApp({nomAjustes,onSvNomAjustes,reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
   const [tab,    setTab]    = useState("dash");
   const [detail, setDetail] = useState(null);
   const [cDel,   setCDel]   = useState(null);
   const [pagoDetail, setPagoDetail] = useState(null);
 
   var adminName = adminVendor ? vendorDisplay(adminVendor) : "Admin";
+  /* PLANILLA — genera automáticamente los comprobantes de quincena, bono 14 y aguinaldo
+     que ya vencieron y aún no existen en el historial. Idempotente: cada comprobante
+     lleva un nomKey único (usuario + período). */
+  useEffect(function(){
+    if(sheetsOk===null) return;
+    if(!vendors||!vendors.length) return;
+    /* Migración: comprobantes creados antes de que los adelantos vivieran en el módulo
+       de Adelantos (descuento sin `advDebitos`) se descartan y se regeneran. */
+    var limpios=(pagos||[]).filter(function(p){ return !(p&&p.nomina&&!p.nomina.advDebitos); });
+    if(limpios.length!==(pagos||[]).length){ if(onSvPagos) onSvPagos(limpios); return; }
+    var res=nomGenerarPendientes({vendors:vendors,pagos:pagos,ajustes:nomAjustes,adelantos:adelantos});
+    if(!res.nuevos.length) return;
+    if(onSvPagos) onSvPagos(res.nuevos.concat(pagos||[]));
+    var usados=res.usados;
+    if(Object.keys(usados).length&&onSvNomAjustes){
+      onSvNomAjustes((nomAjustes||[]).map(function(a){ return usados[a.id]?Object.assign({},a,{aplicado:true,aplicadoEn:usados[a.id]}):a; }));
+    }
+  },[vendors,pagos,nomAjustes,adelantos,sheetsOk]);
   /* Solo el admin principal (o el acceso por PIN maestro, sin identidad de usuario) edita
      las preferencias de notificaciones; los demás admin ni siquiera ven la pestaña. */
   var canNotif = !adminVendor || isAdminPrincipalVendor(adminVendor, vendors);
@@ -1844,7 +1873,7 @@ function AdminApp({reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,ve
         role="Admin"
       />
 
-      <div style={{display:tab==="dash"?"block":"none"}}><DashView reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh}/></div>
+      <div style={{display:tab==="dash"?"block":"none"}}><DashView nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh}/></div>
       <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
       <div style={{display:tab==="sched"?"block":"none"}}>
         <ScheduleCfg schedules={schedules||[]} vendors={vendors||[]} props={props||[]} hospUrlDay={hospUrlDay||""} hospUrlWeek={hospUrlWeek||""} onSave={onSvSchedules} onSaveHospUrlDay={onSvHospUrlDay} onSaveHospUrlWeek={onSvHospUrlWeek}/>
@@ -1886,19 +1915,20 @@ function AdminApp({reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,ve
 }
 
 /* ─── Dashboard container */
-function DashView({reviews,rvCasos,rvIA,reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
+function DashView({nomAjustes,onSvNomAjustes,canNom,onSvV,reviews,rvCasos,rvIA,reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
   const [sub,setSub] = useState("ops");
   return (
     <div>
       {alerts.length>0&&<div style={{background:"#EDE4E4",padding:"10px 22px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",borderBottom:"1px solid #D6C8C8"}}><span>⚠️</span><span style={{fontSize:13,fontWeight:600,color:C.red}}>{alerts.length} trabajo{alerts.length!==1?"s":""} con pago pendiente</span></div>}
       <div style={{background:"#fff",borderBottom:"1px solid "+C.gray,padding:"0 22px",display:"flex",gap:4}}>
-        {[["ops","Dashboard Operativo"],["exec","Dashboard Ejecutivo"],["pagos","Historial de pagos"]].map(function(it){ var k=it[0],l=it[1]; return (
+        {[["ops","Dashboard Operativo"],["exec","Dashboard Ejecutivo"],["pagos","Historial de pagos"]].concat(canNom?[["planilla","Planilla"]]:[]).map(function(it){ var k=it[0],l=it[1]; return (
           <button key={k} onClick={function(){setSub(k);}} style={{padding:"14px 16px",border:"none",borderBottom:"1.5px solid "+(sub===k?C.black:"transparent"),background:"none",fontSize:13,fontWeight:600,cursor:"pointer",color:sub===k?C.black:C.taupe,transition:"all .2s"}}>{l}</button>
         ); })}
       </div>
       <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} adelantos={adelantos} onMarkPaidBatch={onMarkPaidBatch} onSelect={onSelect} onMarkPaid={onMarkPaid} onRefresh={onRefresh}/></div>
       <div style={{display:sub==="exec"?"block":"none"}}><ExecDash reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos}/></div>
       <div style={{display:sub==="pagos"?"block":"none"}}><PagosHistory pagos={pagos} vendors={vendors} company={company} isAdmin={true} onSvPagos={onSvPagos}/></div>
+      {canNom&&<div style={{display:sub==="planilla"?"block":"none"}}><NominaAdmin vendors={vendors} pagos={pagos} adelantos={adelantos} onSvPagos={onSvPagos} ajustes={nomAjustes||[]} onSvAjustes={onSvNomAjustes} onSvV={onSvV}/></div>}
     </div>
   );
 }
@@ -4069,7 +4099,7 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats}) {
   function cancelEdit(){setEditId(null);setEFld(null);setEVal("");}
   function confirmEdit(){
     if(editVal!==null&&editVal!==""){
-      var val=editFld==="tarifaLimpieza"?parseFloat(editVal)||0:editVal;
+      var val=NOM_NUMF[editFld]?(parseFloat(editVal)||0):editVal;
       var updated=vendors.map(function(v){if(v.id===editId){var u=Object.assign({},v);u[editFld]=val;u.name=vendorDisplay(u);return u;}return v;});
       onSave(updated);
     }
@@ -4185,6 +4215,36 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats}) {
                     {v.isSupervisor?"Supervisión activa":"Sin supervisión"}
                   </button>
                   {v.isSupervisor&&<span style={{fontSize:10.5,color:C.taupe}}>Revisa limpiezas del equipo y clasifica daños</span>}
+                </div>
+              )}
+              {/* Planilla administrativa — salario fijo, quincenas automáticas */}
+              {v.tipo==="interno"&&(
+                <div style={{paddingTop:8,borderTop:"1px solid "+C.line}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                    <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase",minWidth:72}}>Planilla</span>
+                    <button onClick={function(){var u=vendors.map(function(x){if(x.id!==v.id)return x;var r=Object.assign({},x);r.planilla=!x.planilla;if(r.planilla){if(r.bonifDecreto==null)r.bonifDecreto=250;if(!r.planillaDesde)r.planillaDesde=todayStr().slice(0,8)+"01";}return r;});onSave(u);}} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 12px",borderRadius:6,border:"1px solid "+C.gray,background:v.planilla?"#1E1E1E":"#fff",color:v.planilla?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>
+                      <span style={{width:14,height:14,borderRadius:"50%",background:v.planilla?C.green:"#ccc",display:"inline-block",flexShrink:0}}/>
+                      {v.planilla?"Administrativo · salario fijo":"Pago por trabajo"}
+                    </button>
+                    {v.planilla&&<span style={{fontSize:10.5,color:C.taupe}}>Comprobante automático el 15 y el 30</span>}
+                  </div>
+                  {v.planilla&&(
+                    <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:10}}>
+                      {EditRow("puesto",        "Puesto",         v.puesto)}
+                      {EditRow("salarioBase",   "Salario base",   v.salarioBase||0,"number")}
+                      {EditRow("bonifDecreto",  "Bonif. decreto", v.bonifDecreto==null?250:v.bonifDecreto,"number")}
+                      {EditRow("otrasBonif",    "Otras bonif.",   v.otrasBonif||0,"number")}
+                      {EditRow("isrMensual",    "ISR mensual",    v.isrMensual||0,"number")}
+                      {EditRow("otrosDesc",     "Otros desc.",    v.otrosDesc||0,"number")}
+                      {EditRow("inicioLaboral", "Inicio laboral", v.inicioLaboral||"","date")}
+                      {EditRow("planillaDesde", "Generar desde",  v.planillaDesde||"","date")}
+                      {EditRow("advSaldo",      "Adelanto Q",     v.advSaldo||0,"number")}
+                      {EditRow("advCuota",      "Cuota quinc.",   v.advCuota||0,"number")}
+                      <div style={{fontSize:11.5,color:C.earth,background:C.surfaceWarm,borderRadius:8,padding:"8px 11px"}}>
+                        Bruto mensual <b style={{color:C.black}}>{pgMoney(nomBruto(v))}</b> · IGSS <b style={{color:C.black}}>{pgMoney(nomIgss(v))}</b> · Líquido por quincena <b style={{color:C.green}}>{pgMoney(nomQuincena(v))}</b>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -7570,6 +7630,19 @@ function adv_seed(){
 /* Normaliza/migra: liga adelantos legacy a su técnico por nombre, agrega fechaInicio y pausas */
 function adv_migrate(list, vendors){
   var changed=false;
+  /* Adelanto de planilla vigente de Gabriel Asturias: saldo Q7,691.50 al 30/07/2026,
+     cuota quincenal Q141.50. Se registra en el módulo de adelantos como cualquier otro. */
+  var gab=(vendors||[]).find(function(v){ return normNm(vendorDisplay(v)+" "+(v.name||"")).indexOf("gabriel asturias")>=0; });
+  if(gab && !(list||[]).some(function(a){ return a.id==="adv_gabriel_planilla"; })){
+    list=(list||[]).concat([{
+      id:"adv_gabriel_planilla", vendorEmail:gab.email, vendorName:vendorDisplay(gab),
+      dpiNumber:gab.dpi||"", dpiPhoto:null, firma:null, monto:7691.5,
+      modo:"quincenal", cobroQuincenal:141.5, cobroSemanal:0, cuotas:Math.ceil(7691.5/141.5),
+      fechaInicio:"2026-07-30", fechaDeposito:"2026-07-30", status:"activo",
+      createdAt:Date.now(), pausas:[], ajustes:[], contractText:"", origen:"saldo migrado"
+    }]);
+    changed=true;
+  }
   var out=(list||[]).map(function(a){
     var b=Object.assign({},a);
     if(!Array.isArray(b.pausas)){ b.pausas=[]; changed=true; }
@@ -7585,6 +7658,36 @@ function adv_migrate(list, vendors){
   return {list:out, changed:changed};
 }
 function isEpiLimpieza(v){ return !!v && v.tipo==="interno" && v.categoria==="EPI Limpieza"; }
+/* ── Adelantos de PLANILLA (colaboradores administrativos con salario fijo).
+   No se cobran por semana trabajada sino dentro del comprobante de quincena.
+   Cuota 0 = no se descuenta: el saldo perdura hasta la liquidación. ── */
+function advIsPlanilla(a){ return !!a && a.modo==="quincenal"; }
+function advCuota(a){ return parseFloat((advIsPlanilla(a)?a.cobroQuincenal:a.cobroSemanal)||0)||0; }
+function advCuotaLabel(a){
+  if(!advIsPlanilla(a)) return "Q"+advQ(parseFloat(a&&a.cobroSemanal||0)||0)+"/sem";
+  var q=advCuota(a);
+  return q>0 ? "Q"+advQ(q)+"/quincena" : "Sin cuota · a la liquidación";
+}
+/* Lo ya debitado de un adelanto de planilla, leído de los comprobantes generados. */
+function advPlanillaDebitado(advId, pagos){
+  return Math.round(((pagos||ADV_PAGOS||[]).reduce(function(s,p){
+    var ds=p&&p.nomina&&p.nomina.advDebitos;
+    if(!ds||!ds.length) return s;
+    return s+ds.reduce(function(t,d){ return t+((d.advId===advId)?(parseFloat(d.monto)||0):0); },0);
+  },0))*100)/100;
+}
+/* Adelantos vivos de un colaborador de planilla. */
+function advPlanillaDe(adelantos, email, pagos){
+  var em=String(email||"").toLowerCase().trim();
+  return (adelantos||[]).filter(function(a){
+    return advIsPlanilla(a) && a.status==="activo" && String(a.vendorEmail||"").toLowerCase().trim()===em;
+  }).map(function(a){
+    var monto=parseFloat(a.monto||0)||0;
+    var rev=(a.ajustes||[]).reduce(function(s,x){ return s+(parseFloat(x.monto)||0); },0);
+    var saldo=Math.max(0, Math.round((monto - advPlanillaDebitado(a.id,pagos) + rev)*100)/100);
+    return {id:a.id, adv:a, monto:monto, cuota:advCuota(a), saldo:saldo};
+  });
+}
 function mondayOf(d){ var x=new Date(d); x.setHours(0,0,0,0); x.setDate(x.getDate()-((x.getDay()+6)%7)); return x; }
 function weekKeyOf(d){ return mondayOf(d).toISOString().slice(0,10); }
 function last8WeeksSum(reps,email){
@@ -7632,6 +7735,20 @@ function avgWeekPay(reps,email){
    debitada — salvo las semanas en `pausas`, que se saltan. */
 function advanceState(adv, reps){
   var monto=parseFloat(adv.monto||0)||0, semanal=parseFloat(adv.cobroSemanal||0)||0;
+  /* Adelanto de planilla: el ledger vive en los comprobantes de quincena. */
+  if(advIsPlanilla(adv)){
+    var qCuota=advCuota(adv);
+    var qRev=(adv.ajustes||[]).reduce(function(s,x){ return s+(parseFloat(x.monto)||0); },0);
+    var qDeb=Math.max(0, Math.min(monto, advPlanillaDebitado(adv.id) - qRev));
+    var qSaldo=Math.max(0, Math.round((monto-qDeb)*100)/100);
+    var qCuotas=qCuota>0?Math.ceil(monto/qCuota):0;
+    return { monto:monto, semanal:qCuota, cuota:qCuota, cuotas:qCuotas,
+             paidWeeks:qCuota>0?Math.round(qDeb/qCuota):0, debited:qDeb, saldo:qSaldo, revertido:qRev,
+             weeklyCharge:(adv.status==="activo"&&qSaldo>0)?Math.min(qCuota,qSaldo):0,
+             done:qSaldo<=0 && qCuota>0, planilla:true, pausas:[], weeks:{},
+             frozenDebited:0, frozenWeeks:0, chargedWeeks:0, fullyPaidWeeks:[], pausedDone:[],
+             startMon:mondayOf(new Date(advStart(adv)+"T12:00:00")) };
+  }
   /* Ledger congelado: Q ya debitado (`frozenDebited`) + nº de semanas ya contabilizadas
      (`frozenWeeks`). Cambiar la cuota semanal congela lo debitado hasta ese momento con la
      cuota vieja y solo aplica la nueva cuota a las semanas FUTURAS — el saldo nunca cambia
@@ -7731,7 +7848,7 @@ function mergeAdvances(list, reps){
 /* Detecta grupos de ≥2 adelantos ACTIVOS de la misma persona y los unifica en uno. */
 function autoUnify(list, reps){
   var groups={};
-  (list||[]).forEach(function(a){ if(a.status!=="activo") return; var k=advPersonKey(a); (groups[k]||(groups[k]=[])).push(a); });
+  (list||[]).forEach(function(a){ if(a.status!=="activo"||advIsPlanilla(a)) return; var k=advPersonKey(a); (groups[k]||(groups[k]=[])).push(a); });
   var changed=false, mergedById={};
   Object.keys(groups).forEach(function(k){
     if(groups[k].length>=2){
@@ -7847,17 +7964,39 @@ var ADV_MESES=["enero","febrero","marzo","abril","mayo","junio","julio","agosto"
 function fmtLongDateEs(ds){ if(!ds) return "____"; var d=new Date(ds+"T12:00:00"); if(isNaN(d.getTime())) return ds; return d.getDate()+" de "+ADV_MESES[d.getMonth()]+" de "+d.getFullYear(); }
 function fmtDMY(ds){ if(!ds) return "__/__/____"; var p=ds.split("-"); return p.length===3?p[2]+"/"+p[1]+"/"+p[0]:ds; }
 function payoffDateEs(ds,cuotas){ var d=new Date((ds||todayStr())+"T12:00:00"); d.setDate(d.getDate()+7*(cuotas||1)); return fmtLongDateEs(d.toISOString().slice(0,10)); }
+/* Cifra a dos decimales, formato guatemalteco. */
+function montoEnCifra(n){
+  var v=Math.round((parseFloat(n)||0)*100)/100;
+  return v.toLocaleString("es-GT",{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+/* Monto en letras. Con centavos: "… quetzales con cincuenta centavos"; sin ellos, "exactos". */
+function apocope(t){ return String(t).replace(/veintiuno$/,"veintiún").replace(/(^|\s)uno$/,"$1un"); }
+function montoEnLetras(n){
+  var v=Math.round((parseFloat(n)||0)*100)/100;
+  var ent=Math.floor(v), cts=Math.round((v-ent)*100);
+  return apocope(numToWordsEs(ent))+" quetzales "+(cts>0?("con "+apocope(numToWordsEs(cts))+" centavos"):"exactos");
+}
 function buildContractText(adv){
   var monto=parseFloat(adv.monto||0)||0, fecha=adv.fechaDeposito||todayStr();
   return [
     "Guatemala, "+fmtLongDateEs(fecha)+".","",
-    "Por este medio, yo, "+(adv.vendorName||"________")+", quien se identifica con el Documento Personal de Identificación número "+(adv.dpiNumber||"____ _____ ____")+" extendido por el Registro Nacional de las Personas de la República de Guatemala, quien actúa en su calidad de PERSONA INDIVIDUAL y quien es proveedor activo de Spacio AM, solicito y acepto un adelanto de pago conforme a las condiciones detalladas a continuación.","",
-    "1.  Monto total solicitado: Q. "+monto.toLocaleString("es-GT")+"  ("+numToWordsEs(monto)+" quetzales exactos)",
+    "Por este medio, yo, "+(adv.vendorName||"________")+", quien se identifica con el Documento Personal de Identificación número "+(adv.dpiNumber||"____ _____ ____")+" extendido por el Registro Nacional de las Personas de la República de Guatemala, quien actúa en su calidad de PERSONA INDIVIDUAL y quien es "+(advIsPlanilla(adv)?"colaborador en relación de dependencia de Spacio AM":"proveedor activo de Spacio AM")+", solicito y acepto un adelanto de pago conforme a las condiciones detalladas a continuación.","",
+    "1.  Monto total solicitado: Q. "+montoEnCifra(monto)+"  ("+montoEnLetras(monto)+")",
     "2.  Fecha del depósito: "+fmtDMY(fecha),
-    "3.  Número de cuotas: "+(adv.cuotas||"—"),
-    "4.  Periodicidad del descuento: Semanal  (Q"+(adv.cobroSemanal||0)+" por semana)",
-    "5.  Fecha de finalización del pago: "+payoffDateEs(fecha,adv.cuotas)+".","",
-    "Este adelanto será descontado automáticamente de mi pago en las fechas de pago correspondientes, conforme al calendario laboral. Autorizo expresamente a Spacio AM a realizar dichos descuentos sin necesidad de autorización adicional.","",
+    advIsPlanilla(adv)
+      ? "3.  Número de cuotas: "+(advCuota(adv)>0?Math.ceil(monto/advCuota(adv)):"—  (sin cuotas: saldo exigible a la liquidación)")
+      : "3.  Número de cuotas: "+(adv.cuotas||"—"),
+    advIsPlanilla(adv)
+      ? (advCuota(adv)>0
+          ? "4.  Periodicidad del descuento: Quincenal  (Q"+montoEnCifra(advCuota(adv))+" por quincena, los días 15 y 30)"
+          : "4.  Periodicidad del descuento: Ninguna. El saldo permanece vigente y se descontará íntegramente de mi liquidación al terminar la relación laboral.")
+      : "4.  Periodicidad del descuento: Semanal  (Q"+montoEnCifra(adv.cobroSemanal||0)+" por semana)",
+    advIsPlanilla(adv)
+      ? (advCuota(adv)>0 ? "5.  Modalidad: descuento automático en cada comprobante de quincena." : "5.  Modalidad: liquidación al finalizar la relación laboral.")
+      : "5.  Fecha de finalización del pago: "+payoffDateEs(fecha,adv.cuotas)+".","",
+    advIsPlanilla(adv)
+      ? "Este adelanto será descontado de mi salario en los comprobantes de quincena correspondientes o, en su defecto, del monto total de mi liquidación al finalizar la relación laboral. Autorizo expresamente a Spacio AM a realizar dicho descuento sin necesidad de autorización adicional."
+      : "Este adelanto será descontado automáticamente de mi pago en las fechas de pago correspondientes, conforme al calendario laboral. Autorizo expresamente a Spacio AM a realizar dichos descuentos sin necesidad de autorización adicional.","",
     "Declaro haber recibido el monto indicado y me comprometo a devolverlo en su totalidad bajo las condiciones acordadas, incluso en caso de terminación anticipada de mi relación con Spacio AM. En dicho caso, acepto que el saldo pendiente podrá descontarse de cualquier pago pendiente.","",
     "Reconozco que este adelanto no constituye un derecho adquirido ni recurrente, y que es una excepción otorgada de buena fe por la empresa."
   ].join("\n");
@@ -7942,7 +8081,12 @@ function pg_persist(list){
     }catch(e){}
   }
 }
-function pgMoney(n){ return "Q"+(Math.round(((n||0))*100)/100).toLocaleString("es-GT"); }
+function pgMoney(n){
+  var v=Math.round((n||0)*100)/100, d=(v*100)%100===0?0:2;
+  return "Q"+v.toLocaleString("es-GT",{minimumFractionDigits:d,maximumFractionDigits:2});
+}
+/* Igual que pgMoney pero sin el símbolo (para etiquetas que ya lo llevan). */
+function advQ(n){ return pgMoney(n).slice(1); }
 function pgFolio(list){
   var yr=new Date().getFullYear();
   var seq=((list||[]).filter(function(p){return String(p.folio||"").indexOf("CP-"+yr)===0;}).length)+1;
@@ -8068,8 +8212,8 @@ function printComprobante(pago, company, focusEmail){
     + "<link href='https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap' rel='stylesheet'>"
     + "<style>"+css+"</style></head><body>"
     + "<div class='hd'><img src='"+LOGO_STAMP+"' alt='Spacio AM'/><div class='co'><b>"+esc(coName)+"</b><br>NIT: "+esc(coNit)+"<br>hola@spacioam.com<br>+502 5690 9499</div></div>"
-    + "<div class='elig'>Comprobante de pago"+(pago.tipo==="individual"?" · individual":"")+"</div>"
-    + "<h1>"+(focusEmail&&techs[0]?esc(techs[0].vendorName):"Pago a técnicos")+"</h1>"
+    + "<div class='elig'>Comprobante de pago · "+pgTipoLabel(pago.tipo)+"</div>"
+    + "<h1>"+(((focusEmail||techs.length===1)&&techs[0])?esc(techs[0].vendorName):"Pago a técnicos")+"</h1>"
     + "<div class='meta'>"
     +   "<div><span>Folio</span><b>"+esc(pago.folio)+"</b></div>"
     +   "<div><span>Fecha de pago</span><b>"+fmtDate(pago.fechaPago)+"</b></div>"
@@ -8083,6 +8227,475 @@ function printComprobante(pago, company, focusEmail){
     + "</body></html>";
   var w=window.open("","_blank","width=860,height=920"); if(!w) return; w.document.write(html); w.document.close();
   setTimeout(function(){ try{ w.focus(); }catch(_){} }, 200);
+}
+
+
+/* ═════════════════════════════════════════════════════════════════
+   PLANILLA ADMINISTRATIVA — salario fijo, quincenas automáticas
+   Usuarios internos marcados con `planilla`: reciben un comprobante
+   automático el 15 y el 30 de cada mes, más Bono 14 (15 jul) y
+   Aguinaldo (15 dic) calculados por días trabajados.
+   Cálculo (igual a la hoja de Spacio AM):
+     bruto     = salario base + bonificación decreto + otras bonif.
+     IGSS      = 4.83% del salario base
+     total mes = bruto − IGSS − ISR − otros descuentos
+     quincena  = total mes ÷ 2 − cuota de adelanto ± ajustes
+     bono 14 / aguinaldo = (salario sin bonif. decreto × días) ÷ 365
+   ═════════════════════════════════════════════════════════════════ */
+var IGSS_RATE=0.0483;
+var NOM_NUMF={tarifaLimpieza:1,salarioBase:1,bonifDecreto:1,otrasBonif:1,isrMensual:1,otrosDesc:1,advSaldo:1,advCuota:1};
+var NOM_MES=["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+function nomN(x){ var v=parseFloat(x); return isNaN(v)?0:v; }
+function nom2(n){ return Math.round((n||0)*100)/100; }
+function nomPad(n){ return (n<10?"0":"")+n; }
+function nomISO(y,m,d){ return y+"-"+nomPad(m+1)+"-"+nomPad(d); }
+function nomLastDay(y,m){ return new Date(y,m+1,0).getDate(); }
+function isPlanilla(v){ return !!v && v.tipo==="interno" && !!v.planilla; }
+function nomBase(v){ return nomN(v&&v.salarioBase); }
+function nomBonif(v){ return (v&&v.bonifDecreto==null)?250:nomN(v&&v.bonifDecreto); }
+function nomOtras(v){ return nomN(v&&v.otrasBonif); }
+function nomBruto(v){ return nom2(nomBase(v)+nomBonif(v)+nomOtras(v)); }
+function nomIgss(v){ return nom2(nomBase(v)*IGSS_RATE); }
+function nomTotalMes(v){ return nom2(nomBruto(v)-nomIgss(v)-nomN(v&&v.isrMensual)-nomN(v&&v.otrosDesc)); }
+function nomQuincena(v){ return nom2(nomTotalMes(v)/2); }
+function nomVendorEmail(v){ return String((v&&v.email)||"").toLowerCase().trim(); }
+function nomIniciales(v){ return (vendorDisplay(v)||"").split(/\s+/).map(function(w){return (w.charAt(0)||"").toUpperCase();}).join("").slice(0,2); }
+function nomTipoNombre(t){ return t==="bono14"?"Bono 14":t==="aguinaldo"?"Aguinaldo":"Quincena"; }
+/* Períodos de pago cuyo día de pago cae dentro de [fromISO, toISO]. */
+function nomPeriodos(fromISO, toISO){
+  var out=[]; if(!fromISO||!toISO) return out;
+  var a=new Date(fromISO+"T12:00:00"), b=new Date(toISO+"T12:00:00");
+  if(isNaN(a.getTime())||isNaN(b.getTime())||b<a) return out;
+  var y=a.getFullYear(), m=a.getMonth(), guard=0;
+  function add(p){ if(p.pago>=fromISO && p.pago<=toISO) out.push(p); }
+  while(guard++<600){
+    var ld=nomLastDay(y,m);
+    add({key:y+"-"+nomPad(m+1)+"-Q1",tipo:"nomina",desde:nomISO(y,m,1),hasta:nomISO(y,m,15),pago:nomISO(y,m,15),label:"1–15 "+NOM_MES[m]+" "+y});
+    add({key:y+"-"+nomPad(m+1)+"-Q2",tipo:"nomina",desde:nomISO(y,m,16),hasta:nomISO(y,m,ld),pago:nomISO(y,m,Math.min(30,ld)),label:"16–"+ld+" "+NOM_MES[m]+" "+y});
+    if(m===6)  add({key:y+"-B14",tipo:"bono14",   desde:nomISO(y-1,6,1), hasta:nomISO(y,5,30), pago:nomISO(y,6,15), label:"Bono 14 "+y});
+    if(m===11) add({key:y+"-AGU",tipo:"aguinaldo",desde:nomISO(y-1,11,1),hasta:nomISO(y,10,30),pago:nomISO(y,11,15),label:"Aguinaldo "+y});
+    if(y>b.getFullYear()||(y===b.getFullYear()&&m>=b.getMonth())) break;
+    m++; if(m>11){ m=0; y++; }
+  }
+  out.sort(function(x,z){ return x.pago.localeCompare(z.pago); });
+  return out;
+}
+/* Promedio del salario ORDINARIO (sin bonificación decreto) del período de cálculo.
+   Decreto 42-92 / 76-78: se promedian los salarios ordinarios devengados en el período
+   (12 meses). El promedio se toma de los comprobantes de planilla ya generados; si aún
+   no hay historial, se usa el salario vigente. `nomPromMeses` permite acortar la
+   ventana (p. ej. 6 meses) si la empresa así lo maneja. */
+function nomPromMeses(v){ var n=parseInt(v&&v.promMeses,10); return (n===6||n===12)?n:12; }
+function nomSalarioProm(v, per, pagos){
+  var actual=nom2(nomBase(v)+nomOtras(v));
+  var meses=nomPromMeses(v), email=nomVendorEmail(v);
+  var fin=new Date((per&&per.hasta?per.hasta:todayStr())+"T12:00:00");
+  var ini=new Date(fin.getTime()); ini.setMonth(ini.getMonth()-meses);
+  var iniISO=ini.toISOString().slice(0,10), finISO=fin.toISOString().slice(0,10);
+  var porMes={};
+  (pagos||[]).forEach(function(p){
+    if(!p||!p.nomina||p.nomina.tipo!=="nomina"||p.nomina.email!==email) return;
+    if(!(p.fechaPago>=iniISO&&p.fechaPago<=finISO)) return;
+    porMes[p.fechaPago.slice(0,7)]=nom2(nomN(p.nomina.base)+nomN(p.nomina.otras));
+  });
+  var ks=Object.keys(porMes);
+  if(!ks.length) return actual;
+  /* Los meses sin comprobante se completan con el salario vigente. */
+  var suma=ks.reduce(function(s,k){ return s+porMes[k]; },0)+actual*Math.max(0,meses-ks.length);
+  return nom2(suma/meses);
+}
+/* Bono 14 / Aguinaldo: (salario ordinario promedio × días trabajados) ÷ 365 */
+function nomPrestacion(v, per, pagos){
+  var salario=nomSalarioProm(v, per, pagos);
+  var d0=new Date(per.desde+"T12:00:00"), d1=new Date(per.hasta+"T12:00:00");
+  var ini=(v&&v.inicioLaboral)?new Date(v.inicioLaboral+"T12:00:00"):null;
+  var from=(ini&&!isNaN(ini.getTime())&&ini>d0)?ini:d0;
+  var dias=Math.min(365, Math.max(0, Math.round((d1-from)/86400000)+1));
+  return {salario:salario, dias:dias, monto:nom2(salario*dias/365)};
+}
+/* Saldo vivo del adelanto: monto inicial menos lo ya debitado en comprobantes. */
+function nomAdvDebitado(pagos, email){
+  return nom2((pagos||[]).reduce(function(s,p){ return s + ((p&&p.nomina&&p.nomina.email===email)?nomN(p.nomina.adelanto):0); },0));
+}
+/* Adelantos vivos del colaborador, tomados del módulo de Adelantos. */
+function nomAdvs(v, adelantos, pagos){ return advPlanillaDe(adelantos, nomVendorEmail(v), pagos); }
+function nomAdvSaldo(v, adelantos, pagos){ return nom2(nomAdvs(v, adelantos, pagos).reduce(function(s,a){ return s+a.saldo; },0)); }
+function nomAdvCuota(v, adelantos, pagos){ return nom2(nomAdvs(v, adelantos, pagos).reduce(function(s,a){ return s+Math.min(a.cuota, a.saldo); },0)); }
+/* Estimación de liquidación: indemnización + aguinaldo y bono 14 proporcionales.
+   Es el techo natural de un adelanto que se salda al terminar la relación laboral. */
+function nomLiquidacion(v, pagos){
+  var hoy=todayStr();
+  var prom=nomSalarioProm(v,{hasta:hoy},pagos);
+  var ini=(v&&v.inicioLaboral)?new Date(v.inicioLaboral+"T12:00:00"):null;
+  if(!ini||isNaN(ini.getTime())) return 0;
+  var dias=Math.max(0, Math.round((new Date(hoy+"T12:00:00")-ini)/86400000));
+  var indem=prom*dias/365;
+  var y=new Date(hoy+"T12:00:00").getFullYear(), m=new Date(hoy+"T12:00:00").getMonth();
+  var b14ini=new Date(nomISO(m>=6?y:y-1,6,1)+"T12:00:00"), aguIni=new Date(nomISO(m>=11?y:y-1,11,1)+"T12:00:00");
+  var d14=Math.max(0,Math.round((new Date(hoy+"T12:00:00")-(ini>b14ini?ini:b14ini))/86400000));
+  var dAg=Math.max(0,Math.round((new Date(hoy+"T12:00:00")-(ini>aguIni?ini:aguIni))/86400000));
+  return nom2(indem + prom*d14/365 + prom*dAg/365);
+}
+/* Comprobante de un período para un usuario de planilla. */
+function nomBuildPago(v, per, opts){
+  opts=opts||{};
+  var email=nomVendorEmail(v), name=vendorDisplay(v), lineas=[];
+  function L(t,m){ lineas.push({concepto:t, monto:nom2(m)}); }
+  var det={email:email,tipo:per.tipo,periodo:per.key,label:per.label,puesto:(v&&v.puesto)||"",
+           base:nomBase(v),bonif:nomBonif(v),otras:nomOtras(v),igssMes:nomIgss(v),
+           isrMes:nomN(v&&v.isrMensual),otrosMes:nomN(v&&v.otrosDesc),totalMes:nomTotalMes(v)};
+  if(per.tipo==="nomina"){
+    L("Salario base — quincena", nomBase(v)/2);
+    if(nomBonif(v)>0) L("Bonificación decreto — quincena", nomBonif(v)/2);
+    if(nomOtras(v)>0) L("Otras bonificaciones — quincena", nomOtras(v)/2);
+    L("IGSS 4.83% — quincena", -nomIgss(v)/2);
+    if(nomN(v&&v.isrMensual)>0) L("ISR — quincena", -nomN(v.isrMensual)/2);
+    if(nomN(v&&v.otrosDesc)>0)  L("Otros descuentos — quincena", -nomN(v.otrosDesc)/2);
+  } else {
+    var pr=nomPrestacion(v, per, opts.pagos);
+    det.dias=pr.dias; det.salarioProm=pr.salario; det.promMeses=nomPromMeses(v);
+    L(nomTipoNombre(per.tipo)+" — "+pr.dias+" días · "+pgMoney(pr.salario)+" ÷ 365", pr.monto);
+  }
+  (opts.ajustes||[]).forEach(function(a){ L(a.label||(nomN(a.monto)<0?"Descuento":"Bono"), nomN(a.monto)); });
+  var subtotal=nom2(lineas.reduce(function(s,l){ return s+l.monto; },0));
+  var saldo=nom2(Math.max(0, nomN(opts.saldo)));
+  /* Descuento de adelantos: una línea por adelanto vivo con cuota > 0.
+     Los de cuota 0 no se debitan — su saldo espera a la liquidación. */
+  var desc=0, debitos=[], disp=Math.max(0,subtotal);
+  if(per.tipo==="nomina"){
+    (opts.advances||[]).forEach(function(a){
+      var m=nom2(Math.min(a.cuota, a.saldo, disp));
+      if(!(a.cuota>0)||m<=0) return;
+      debitos.push({advId:a.id, monto:m}); desc=nom2(desc+m); disp=nom2(disp-m);
+      lineas.push({concepto:"Descuento adelanto", monto:-m});
+    });
+  }
+  var saldoTot=nom2((opts.advances||[]).reduce(function(s,a){ return s+a.saldo; },0));
+  det.lineas=lineas; det.adelanto=desc; det.advDebitos=debitos;
+  det.saldoAntes=saldoTot; det.saldoDespues=nom2(saldoTot-desc);
+  var cat=nomTipoNombre(per.tipo)==="Quincena"?"Planilla":nomTipoNombre(per.tipo);
+  var tec={vendorEmail:email, vendorName:name,
+    trabajos:lineas.filter(function(l){ return l.concepto!=="Descuento adelanto"; }).map(function(l){ return {repId:"",propiedad:l.concepto,fecha:per.pago,categoria:cat,descripcion:"",monto:l.monto,pagadoPor:"Spacio AM"}; }),
+    subtotal:subtotal, adelanto:desc, neto:nom2(subtotal-desc)};
+  var pre=per.tipo==="nomina"?"NOM-":per.tipo==="bono14"?"B14-":"AGU-";
+  return {
+    id:"pg_"+per.key+"_"+(email||(v&&v.id)||"x")+"_"+Math.floor(Math.random()*1000),
+    folio: pre+per.key.replace(/-(B14|AGU)$/,"")+"-"+nomIniciales(v),
+    nomKey:(email||(v&&v.id))+"|"+per.key,
+    createdAt: Date.now(), fechaPago: per.pago, tipo: per.tipo,
+    generadoPor: opts.generadoPor||"Automático",
+    rangoDesde: per.desde, rangoHasta: per.hasta,
+    tecnicos:[tec], totalBruto: subtotal, totalDescuento: desc, totalNeto: nom2(subtotal-desc),
+    nomina: det, soporte: null
+  };
+}
+/* Ajustes pendientes que aplican a un período. Sin período asignado → el primero
+   cuyo día de pago sea posterior a la creación del ajuste. */
+function nomAjustesDe(ajustes, email, per){
+  return (ajustes||[]).filter(function(a){
+    if(a.aplicado) return false;
+    if(String(a.vendorEmail||"").toLowerCase().trim()!==email) return false;
+    if(a.periodo) return a.periodo===per.key;
+    return per.pago>=(a.desde||"0000-00-00");
+  });
+}
+/* Genera todos los comprobantes de planilla vencidos que aún no existen. */
+function nomGenerarPendientes(o){
+  o=o||{};
+  var hoy=todayStr(), nuevos=[], usados={};
+  var todos=(o.pagos||[]).slice();
+  (o.vendors||[]).forEach(function(v){
+    if(!isPlanilla(v) || v.active===false || nomBase(v)<=0) return;
+    var email=nomVendorEmail(v);
+    var desde=v.planillaDesde||v.inicioLaboral||(hoy.slice(0,8)+"01");
+    nomPeriodos(desde, hoy).forEach(function(per){
+      var key=(email||v.id)+"|"+per.key;
+      if(todos.some(function(p){ return p && p.nomKey===key; })) return;
+      var aj=nomAjustesDe(o.ajustes, email, per).filter(function(a){ return !usados[a.id]; });
+      var pago=nomBuildPago(v, per, {ajustes:aj, advances:advPlanillaDe(o.adelantos, email, todos), pagos:todos});
+      nuevos.push(pago); todos.push(pago);
+      aj.forEach(function(a){ usados[a.id]=per.key; });
+    });
+  });
+  nuevos.sort(function(a,b){ return (b.fechaPago||"").localeCompare(a.fechaPago||""); });
+  return {nuevos:nuevos, usados:usados};
+}
+/* Semilla de datos reales conocidos (no se persiste sola: solo rellena lo que falte). */
+function nom_seed(list){
+  return (list||[]).map(function(v){
+    var nm=normNm(vendorDisplay(v)+" "+(v.name||""));
+    if(nm.indexOf("gabriel asturias")>=0 && v.tipo==="interno"){
+      var u=Object.assign({},v);
+      if(u.planilla==null)      u.planilla=true;
+      if(u.puesto==null)        u.puesto="Happiness Hero";
+      if(u.salarioBase==null)   u.salarioBase=5250;
+      if(u.bonifDecreto==null)  u.bonifDecreto=250;
+      if(u.inicioLaboral==null) u.inicioLaboral="2024-06-17";
+      if(u.planillaDesde==null) u.planillaDesde="2026-07-16";
+      return u;
+    }
+    return v;
+  });
+}
+function pgTipoLabel(t){ return t==="nomina"?"Planilla":t==="bono14"?"Bono 14":t==="aguinaldo"?"Aguinaldo":t==="individual"?"Individual":"Lote"; }
+function pgTipoBg(t){ return t==="nomina"?"#EFEAF3":t==="bono14"||t==="aguinaldo"?"#FBEDE8":t==="individual"?"#EDEAE3":"#EDF5EF"; }
+function pgTipoFg(t){ return t==="nomina"?"#5d4b78":t==="bono14"||t==="aguinaldo"?"#b25a3c":t==="individual"?"#7a7050":C.green; }
+
+/* Campo numérico editable en línea (planilla) */
+function NomCampo({label, value, onSave}){
+  const [ed,setEd]=useState(false);
+  const [val,setVal]=useState(String(value==null?"":value));
+  useEffect(function(){ if(!ed) setVal(String(value==null?"":value)); },[value,ed]);
+  function commit(){ setEd(false); var n=parseFloat(val); if(!isNaN(n)&&n!==value) onSave(n); }
+  return (
+    <div style={{background:C.surfaceWarm,borderRadius:10,padding:"9px 11px"}}>
+      <div style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.earth}}>{label}</div>
+      {ed
+        ? <input autoFocus value={val} type="number" onChange={function(e){setVal(e.target.value);}} onBlur={commit} onKeyDown={function(e){ if(e.key==="Enter") commit(); if(e.key==="Escape") setEd(false); }} style={{width:"100%",marginTop:3,border:"1.5px solid "+C.black,borderRadius:6,padding:"2px 6px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",boxSizing:"border-box"}}/>
+        : <button onClick={function(){setEd(true);}} title="Editar" style={{marginTop:3,background:"none",border:"none",padding:0,fontSize:13,fontWeight:600,color:C.black,fontFamily:"Montserrat,sans-serif",fontVariantNumeric:"tabular-nums",cursor:"text",borderBottom:"1px dashed "+C.gray}}>{pgMoney(value)}</button>}
+    </div>
+  );
+}
+
+/* ─── Panel de planilla (solo administrador principal) */
+function NominaAdmin({vendors, pagos, adelantos, onSvPagos, ajustes, onSvAjustes, onSvV}) {
+  const [selEmail, setSel]   = useState("");
+  const [label,    setLabel] = useState("");
+  const [monto,    setMonto] = useState("");
+  const [signo,    setSigno] = useState("+");
+  const [periodo,  setPeriodo] = useState("");
+  const [nota,     setNota]  = useState("");
+  const [okMsg,    setOk]    = useState("");
+
+  var staff=(vendors||[]).filter(isPlanilla);
+  var hoy=todayStr();
+  var futuros=nomPeriodos(hoy, nomISO(new Date().getFullYear()+1, new Date().getMonth(), 28));
+  var pend=(ajustes||[]).filter(function(a){ return !a.aplicado; });
+  var hechos=(ajustes||[]).filter(function(a){ return a.aplicado; }).slice(0,8);
+
+  function nombreDe(em){ var v=staff.find(function(x){ return nomVendorEmail(x)===em; }); return v?vendorDisplay(v):em; }
+  function addAjuste(){
+    var m=parseFloat(monto)||0;
+    if(!selEmail || !label.trim() || !m) return;
+    var a={id:"aj_"+Date.now()+"_"+Math.floor(Math.random()*1000), vendorEmail:selEmail, label:label.trim(),
+           monto:(signo==="-"?-Math.abs(m):Math.abs(m)), periodo:periodo||"", desde:hoy, nota:nota.trim(), aplicado:false, createdAt:Date.now()};
+    if(onSvAjustes) onSvAjustes([a].concat(ajustes||[]));
+    setLabel(""); setMonto(""); setNota(""); setOk("Ajuste guardado — se aplicará al comprobante "+(periodo?(futuros.find(function(p){return p.key===periodo;})||{}).label:"de la próxima quincena")+".");
+    setTimeout(function(){ setOk(""); }, 4000);
+  }
+  function delAjuste(id){ if(onSvAjustes) onSvAjustes((ajustes||[]).filter(function(a){ return a.id!==id; })); }
+  /* Borra un comprobante de planilla: el motor lo vuelve a generar en el acto con los
+     valores actuales de salario, ajustes y saldo de adelanto. */
+  function recalcular(p){
+    if(!onSvPagos) return;
+    if(!confirm("¿Recalcular el comprobante "+p.folio+"? Se generará de nuevo con el salario y los ajustes vigentes.")) return;
+    onSvPagos((pagos||[]).filter(function(x){ return x.id!==p.id; }));
+  }
+
+  /* Edita un campo del colaborador desde la planilla misma. */
+  function setCampo(v, field, val){
+    if(!onSvV) return;
+    onSvV((vendors||[]).map(function(x){ return x.id===v.id?Object.assign({},x,(function(){var o={};o[field]=val;return o;})()):x; }));
+  }
+  /* Genera un comprobante antes de su fecha de pago (p. ej. se paga el 29 en vez del 30). */
+  function generarAhora(v, per){
+    if(!onSvPagos) return;
+    var email=nomVendorEmail(v);
+    var key=(email||v.id)+"|"+per.key;
+    if((pagos||[]).some(function(p){ return p.nomKey===key; })) return;
+    if(!confirm("¿Generar por adelantado el comprobante de "+per.label+" para "+vendorDisplay(v)+"?")) return;
+    var aj=nomAjustesDe(ajustes, email, per);
+    var p=nomBuildPago(v, per, {ajustes:aj, advances:advPlanillaDe(adelantos, email, pagos), pagos:pagos, generadoPor:"Adelantado"});
+    p.anticipado=true; p.fechaPago=todayStr();
+    onSvPagos([p].concat(pagos||[]));
+    if(aj.length&&onSvAjustes) onSvAjustes((ajustes||[]).map(function(a){ return aj.some(function(x){return x.id===a.id;})?Object.assign({},a,{aplicado:true,aplicadoEn:per.key}):a; }));
+  }
+
+  var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".13em",textTransform:"uppercase",display:"block",marginBottom:5};
+  var IN={width:"100%",border:"1.5px solid "+C.gray,borderRadius:9,padding:"8px 11px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",color:C.black,boxSizing:"border-box"};
+  var CARD={background:"#fff",borderRadius:16,border:"1px solid "+C.gray,padding:"18px 20px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+
+  return (
+    <div style={{padding:"22px 16px 80px",maxWidth:900,margin:"0 auto",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:16}}>
+      <div>
+        <div style={{fontSize:19,fontWeight:600,color:C.black,letterSpacing:".01em"}}>Planilla administrativa</div>
+        <div style={{fontSize:12,color:C.earth,marginTop:3}}>Comprobante automático el 15 y el 30 de cada mes, más Bono 14 (15 jul) y Aguinaldo (15 dic).</div>
+      </div>
+
+      {staff.length===0
+        ? <div style={{textAlign:"center",padding:"46px 20px",color:C.earth,fontSize:13,background:"#fff",borderRadius:16,border:"1px solid "+C.gray}}>Ningún usuario está marcado como administrativo. Actívalo en Configuración → Usuarios → Planilla.</div>
+        : staff.map(function(v){
+            var em=nomVendorEmail(v);
+            var advs=nomAdvs(v, adelantos, pagos);
+            var saldo=nom2(advs.reduce(function(s,a){ return s+a.saldo; },0));
+            var mios=(pagos||[]).filter(function(p){ return p.nomina && p.nomina.email===em; });
+            var prox=futuros.filter(function(p){ return p.tipo==="nomina" && !(pagos||[]).some(function(x){ return x.nomKey===(em||v.id)+"|"+p.key; }); })[0];
+            return (
+              <div key={v.id} style={CARD}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:14,flexWrap:"wrap"}}>
+                  <div>
+                    <div style={{fontSize:15.5,fontWeight:600,color:C.black}}>{vendorDisplay(v)}</div>
+                    <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{v.puesto||"—"} · {v.email}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:18,fontWeight:700,color:C.black,fontVariantNumeric:"tabular-nums"}}>{pgMoney(nomQuincena(v)-nomAdvCuota(v,adelantos,pagos))}</div>
+                    <div style={{fontSize:10.5,color:C.earth,marginTop:2}}>a recibir por quincena</div>
+                  </div>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(132px,1fr))",gap:10,marginTop:14}}>
+                  {[["Salario base","salarioBase",nomBase(v)],["Bonif. decreto","bonifDecreto",nomBonif(v)],["Otras bonif.","otrasBonif",nomOtras(v)],["ISR mensual","isrMensual",nomN(v.isrMensual)],["Otros desc.","otrosDesc",nomN(v.otrosDesc)]].map(function(x){
+                    return <NomCampo key={x[1]} label={x[0]} value={x[2]} onSave={function(n){ setCampo(v, x[1], n); }}/>;
+                  })}
+                  <div style={{background:C.surfaceWarm,borderRadius:10,padding:"9px 11px"}}>
+                    <div style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.earth}}>IGSS 4.83%</div>
+                    <div style={{fontSize:13,fontWeight:600,color:C.black,marginTop:5,fontVariantNumeric:"tabular-nums"}}>−{pgMoney(nomIgss(v))}</div>
+                  </div>
+                  <div style={{background:C.surfaceWarm,borderRadius:10,padding:"9px 11px"}}>
+                    <div style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.earth}}>Quincena bruta</div>
+                    <div style={{fontSize:13,fontWeight:600,color:C.black,marginTop:5,fontVariantNumeric:"tabular-nums"}}>{pgMoney(nomQuincena(v))}</div>
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginTop:11,flexWrap:"wrap",fontSize:11.5,color:C.earth}}>
+                  <span>Bono 14 y aguinaldo sobre el promedio de</span>
+                  {[12,6].map(function(n){ var s=nomPromMeses(v)===n; return (
+                    <button key={n} onClick={function(){ setCampo(v,"promMeses",n); }} style={{padding:"3px 11px",borderRadius:100,border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{n} meses</button>
+                  ); })}
+                  <span>· salario promedio actual <b style={{color:C.black}}>{pgMoney(nomSalarioProm(v,{hasta:hoy},pagos))}</b></span>
+                </div>
+                {advs.length>0&&(
+                  <div style={{marginTop:12,borderTop:"1px solid "+C.line,paddingTop:11}}>
+                    <div style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.earth,marginBottom:7}}>Adelantos vigentes · gestionados en Adelantos</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      {advs.map(function(a){
+                        return (
+                          <div key={a.id} style={{display:"flex",alignItems:"center",gap:10,fontSize:11.5,color:C.earth,flexWrap:"wrap"}}>
+                            <span style={{color:C.black,fontWeight:600}}>{pgMoney(a.monto)}</span>
+                            <span>{a.cuota>0?pgMoney(a.cuota)+" por quincena":"sin cuota · a la liquidación"}</span>
+                            <span style={{flex:1}}/>
+                            <span style={{fontWeight:700,color:a.saldo>0?C.peach:C.green,fontVariantNumeric:"tabular-nums"}}>Saldo {pgMoney(a.saldo)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                <div style={{marginTop:10,fontSize:11,color:C.taupe}}>
+                  {mios.length} comprobante{mios.length!==1?"s":""} generado{mios.length!==1?"s":""}{prox?" · próximo: "+prox.label+" (pago "+fmtDate(prox.pago)+")":""}
+                </div>
+                <div style={{marginTop:11,borderTop:"1px solid "+C.line,paddingTop:10}}>
+                  <div style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.earth,marginBottom:7}}>Por generar</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    {futuros.filter(function(p){ return !(pagos||[]).some(function(x){ return x.nomKey===(em||v.id)+"|"+p.key; }); }).slice(0,3).map(function(p){
+                      return (
+                        <div key={p.key} style={{display:"flex",alignItems:"center",gap:10,fontSize:11.5,color:C.earth}}>
+                          <span style={{color:C.black,fontWeight:600}}>{p.label}</span>
+                          <span>pago {fmtDate(p.pago)}</span>
+                          <span style={{flex:1}}/>
+                          <button onClick={function(){ generarAhora(v,p); }} style={{background:C.black,border:"none",borderRadius:100,padding:"4px 12px",fontSize:10.5,color:"#fff",fontWeight:600,cursor:"pointer"}}>Generar ahora</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                {mios.length>0&&(
+                  <div style={{marginTop:11,display:"flex",flexDirection:"column",gap:5}}>
+                    {mios.slice(0,6).map(function(p){
+                      return (
+                        <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,fontSize:11.5,color:C.earth,borderTop:"1px solid "+C.line,paddingTop:6}}>
+                          <span style={{fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>{p.folio}</span>
+                          <span>{pgTipoLabel(p.tipo)} · {fmtDate(p.fechaPago)}</span>
+                          <span style={{flex:1}}/>
+                          <span style={{fontWeight:700,color:C.black,fontVariantNumeric:"tabular-nums"}}>{pgMoney(p.totalNeto)}</span>
+                          <button onClick={function(){ recalcular(p); }} title="Recalcular con los valores actuales" style={{background:"none",border:"1px solid "+C.gray,borderRadius:100,padding:"2px 9px",fontSize:10.5,color:C.earth,cursor:"pointer"}}>↻ Recalcular</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+      {/* Formulario de bonos y ajustes */}
+      {staff.length>0&&(
+        <div style={CARD}>
+          <div style={{fontSize:15,fontWeight:600,color:C.black,marginBottom:3}}>Bonos y ajustes</div>
+          <div style={{fontSize:11.5,color:C.earth,marginBottom:14}}>Se suman o restan al comprobante de la quincena que elijas.</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12}}>
+            <div>
+              <span style={LBL}>Colaborador</span>
+              <select value={selEmail} onChange={function(e){ setSel(e.target.value); }} style={IN}>
+                <option value="">Elegir…</option>
+                {staff.map(function(v){ return <option key={v.id} value={nomVendorEmail(v)}>{vendorDisplay(v)}</option>; })}
+              </select>
+            </div>
+            <div>
+              <span style={LBL}>Concepto</span>
+              <input value={label} onChange={function(e){ setLabel(e.target.value); }} placeholder="Ej. Bono por desempeño" style={IN}/>
+            </div>
+            <div>
+              <span style={LBL}>Monto (Q)</span>
+              <div style={{display:"flex",gap:6}}>
+                <select value={signo} onChange={function(e){ setSigno(e.target.value); }} style={Object.assign({},IN,{width:64,flexShrink:0})}>
+                  <option value="+">+</option>
+                  <option value="-">−</option>
+                </select>
+                <input value={monto} onChange={function(e){ setMonto(e.target.value); }} type="number" placeholder="0.00" style={IN}/>
+              </div>
+            </div>
+            <div>
+              <span style={LBL}>Aplicar en</span>
+              <select value={periodo} onChange={function(e){ setPeriodo(e.target.value); }} style={IN}>
+                <option value="">Próximo comprobante</option>
+                {futuros.slice(0,8).map(function(p){ return <option key={p.key} value={p.key}>{p.label} · pago {fmtDate(p.pago)}</option>; })}
+              </select>
+            </div>
+          </div>
+          <div style={{marginTop:12}}>
+            <span style={LBL}>Nota interna (opcional)</span>
+            <input value={nota} onChange={function(e){ setNota(e.target.value); }} placeholder="Motivo o referencia" style={IN}/>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginTop:14,flexWrap:"wrap"}}>
+            <button onClick={addAjuste} disabled={!selEmail||!label.trim()||!(parseFloat(monto)||0)} style={{padding:"10px 20px",borderRadius:10,border:"none",background:(!selEmail||!label.trim()||!(parseFloat(monto)||0))?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",letterSpacing:".04em"}}>Guardar ajuste</button>
+            {okMsg&&<span style={{fontSize:11.5,color:C.green}}>{okMsg}</span>}
+          </div>
+
+          {pend.length>0&&(
+            <div style={{marginTop:18,borderTop:"1px solid "+C.line,paddingTop:14}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:9}}>Pendientes de aplicar</div>
+              <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                {pend.map(function(a){
+                  return (
+                    <div key={a.id} style={{display:"flex",alignItems:"center",gap:12,background:C.surfaceWarm,borderRadius:10,padding:"9px 12px"}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{a.label}</div>
+                        <div style={{fontSize:10.5,color:C.earth,marginTop:2}}>{nombreDe(a.vendorEmail)} · {a.periodo?(futuros.find(function(p){return p.key===a.periodo;})||{label:a.periodo}).label:"próximo comprobante"}{a.nota?" · "+a.nota:""}</div>
+                      </div>
+                      <div style={{fontSize:13,fontWeight:700,color:a.monto<0?C.peach:C.green,fontVariantNumeric:"tabular-nums"}}>{a.monto<0?"−":"+"}{pgMoney(Math.abs(a.monto))}</div>
+                      <button onClick={function(){ delAjuste(a.id); }} style={{background:"none",border:"none",color:C.taupe,fontSize:16,cursor:"pointer",lineHeight:1}}>×</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {hechos.length>0&&(
+            <div style={{marginTop:16,borderTop:"1px solid "+C.line,paddingTop:14}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:9}}>Ya aplicados</div>
+              <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                {hechos.map(function(a){
+                  return <div key={a.id} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:11.5,color:C.earth}}>
+                    <span>{a.label} · {nombreDe(a.vendorEmail)}</span>
+                    <span style={{fontVariantNumeric:"tabular-nums"}}>{a.monto<0?"−":"+"}{pgMoney(Math.abs(a.monto))} · {a.aplicadoEn||""}</span>
+                  </div>;
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /* ─── Historial de pagos — lista de comprobantes (admin y técnico) */
@@ -8122,6 +8735,9 @@ function PagosHistory({pagos, vendors, company, isAdmin, meEmails, onSvPagos}) {
             <option value="Todos">Todos</option>
             <option value="lote">Pago en lote</option>
             <option value="individual">Pago individual</option>
+            <option value="nomina">Planilla — quincena</option>
+            <option value="bono14">Bono 14</option>
+            <option value="aguinaldo">Aguinaldo</option>
           </select>
         </div>
       </div>
@@ -8136,7 +8752,7 @@ function PagosHistory({pagos, vendors, company, isAdmin, meEmails, onSvPagos}) {
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:5}}>
                       <span style={{fontSize:13.5,fontWeight:700,color:C.black,fontVariantNumeric:"tabular-nums"}}>{p.folio}</span>
-                      <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:100,background:p.tipo==="individual"?"#EDEAE3":"#EDF5EF",color:p.tipo==="individual"?"#7a7050":C.green}}>{p.tipo==="individual"?"Individual":"Lote"}</span>
+                      <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:100,background:pgTipoBg(p.tipo),color:pgTipoFg(p.tipo)}}>{pgTipoLabel(p.tipo)}</span>
                     </div>
                     <div style={{fontSize:12,color:C.earth}}>{fmtDate(p.fechaPago)} · {techs.length} técnico{techs.length!==1?"s":""} · {techs.slice(0,3).join(", ")}{techs.length>3?" +"+(techs.length-3):""}</div>
                   </div>
@@ -8169,7 +8785,7 @@ function pgComprobanteCardHTML(pago, company, focusEmail){
   var gDesc =techs.reduce(function(s,t){return s+t.adelanto;},0);
   var gNeto =techs.reduce(function(s,t){return s+t.neto;},0);
   var rango=(pago.rangoDesde||pago.rangoHasta)?(fmtDate(pago.rangoDesde)+(pago.rangoHasta&&pago.rangoHasta!==pago.rangoDesde?" — "+fmtDate(pago.rangoHasta):"")):"—";
-  var title=focusEmail&&techs[0]?techs[0].vendorName:"Pago a técnicos";
+  var title=((focusEmail||techs.length===1)&&techs[0])?techs[0].vendorName:"Pago a técnicos";
   var meta=[["Folio",pago.folio],["Fecha de pago",fmtDate(pago.fechaPago)],["Período",rango],["Tipo",pago.tipo==="individual"?"Individual":"Lote"]];
   var metaHtml=meta.map(function(m){return "<div><div style=\"font-size:9px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:#938B8A;margin-bottom:3px\">"+pgEsc(m[0])+"</div><div style=\"font-size:13px;font-weight:600;color:#3E3F3F\">"+pgEsc(m[1])+"</div></div>";}).join("");
   var groups=techs.map(function(t){
@@ -8196,7 +8812,7 @@ function pgComprobanteCardHTML(pago, company, focusEmail){
     +"<img src=\""+LOGO_STAMP+"\" style=\"width:54px;height:54px;object-fit:contain\"/>"
     +"<div style=\"text-align:right;font-size:10.5px;line-height:1.6;color:#938B8A\"><b style=\"color:#3E3F3F;font-size:12px\">"+pgEsc(coName)+"</b><br>NIT: "+pgEsc(coNit)+"<br>hola@spacioam.com<br>+502 5690 9499</div>"
     +"</div>"
-    +"<div style=\"font-size:9.5px;font-weight:700;letter-spacing:.26em;text-transform:uppercase;color:#E9826A;margin-bottom:8px\">Comprobante de pago"+(pago.tipo==="individual"?" · individual":"")+"</div>"
+    +"<div style=\"font-size:9.5px;font-weight:700;letter-spacing:.26em;text-transform:uppercase;color:#E9826A;margin-bottom:8px\">Comprobante de pago · "+pgTipoLabel(pago.tipo)+"</div>"
     +"<div style=\"font-size:26px;font-weight:600;font-family:Georgia,serif;margin-bottom:4px\">"+pgEsc(title)+"</div>"
     +"<div style=\"font-size:12px;color:#938B8A;margin-bottom:22px\">"+pgEsc(pago.folio)+" · "+fmtDate(pago.fechaPago)+"</div>"
     +"<div style=\"display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px\">"+metaHtml+"</div>"
@@ -8619,7 +9235,7 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             {vigentes.filter(function(a){return a.status!=="pendiente_tecnico";}).map(function(a){ var st=advanceState(a,reps); var isActivo=a.status==="activo"; var dot=isActivo?C.green:C.orange;
               var estado=isActivo?"activo":(a.status==="por_depositar"?"esperando depósito":"pendiente de aprobación");
-              var sub=isActivo?("Saldo Q"+st.saldo.toLocaleString()+" · Q"+(a.cobroSemanal||0)+"/sem"):(a.status==="por_depositar"?"Firmado · el admin realizará el depósito":"En revisión"); return (
+              var sub=isActivo?("Saldo Q"+advQ(st.saldo)+" · "+advCuotaLabel(a)):(a.status==="por_depositar"?"Firmado · el admin realizará el depósito":"En revisión"); return (
               <button key={a.id} onClick={function(){setPreview(a);}} style={{textAlign:"left",background:"#fff",border:"1px solid "+C.line,borderRadius:14,padding:"13px 15px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",boxShadow:"0 4px 16px rgba(62,63,63,.04)"}}>
                 <span style={{width:9,height:9,borderRadius:"50%",background:dot,flexShrink:0}}/>
                 <div style={{flex:1}}>
@@ -8834,7 +9450,8 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
   function createAdv(adv){ onSvAdelantos([adv].concat(list)); }
 
   var totalSaldo = active.reduce(function(s,a){return s+advanceState(a,reps).saldo;},0);
-  var totalSemanal = weeklyAdvanceCharge(list, reps);
+  var totalSemanal = weeklyAdvanceCharge((list||[]).filter(function(a){ return !advIsPlanilla(a); }), reps);
+  var totalQuincenal = (list||[]).reduce(function(s,a){ return s + ((advIsPlanilla(a)&&a.status==="activo")?advanceState(a,reps).weeklyCharge:0); },0);
 
   return (
     <div style={{maxWidth:760,margin:"0 auto",padding:"26px 16px 90px",fontFamily:"Montserrat,sans-serif"}}>
@@ -8850,7 +9467,7 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:24}}>
         <div style={{background:"#fff",borderRadius:16,padding:"16px 18px",border:"1px solid "+C.line,boxShadow:"0 4px 16px rgba(62,63,63,.05)"}}><div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Activos</div><div style={{fontSize:24,fontWeight:600,color:C.black}}>{active.length}</div></div>
         <div style={{background:"#fff",borderRadius:16,padding:"16px 18px",border:"1px solid "+C.line,boxShadow:"0 4px 16px rgba(62,63,63,.05)"}}><div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Saldo total</div><div style={{fontSize:24,fontWeight:600,color:C.black}}>Q{totalSaldo.toLocaleString()}</div></div>
-        <div style={{background:C.black,borderRadius:16,padding:"16px 18px"}}><div style={{fontSize:9.5,fontWeight:700,color:"rgba(255,255,255,.6)",letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Descuento / semana</div><div style={{fontSize:24,fontWeight:600,color:C.peach}}>Q{totalSemanal.toLocaleString()}</div></div>
+        <div style={{background:C.black,borderRadius:16,padding:"16px 18px"}}><div style={{fontSize:9.5,fontWeight:700,color:"rgba(255,255,255,.6)",letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Descuento</div><div style={{fontSize:24,fontWeight:600,color:C.peach}}>Q{advQ(totalSemanal)}<span style={{fontSize:12,fontWeight:600,color:"rgba(255,255,255,.55)"}}> /sem</span></div>{totalQuincenal>0&&<div style={{fontSize:12,fontWeight:600,color:"rgba(255,255,255,.75)",marginTop:2}}>Q{advQ(totalQuincenal)}<span style={{fontSize:11,color:"rgba(255,255,255,.5)"}}> /quincena · planilla</span></div>}</div>
       </div>
 
       {/* Firmados — por depositar (adelantos iniciados por el admin, ya firmados) */}
@@ -8868,7 +9485,7 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
                     </div>
                     <div style={{display:"flex",gap:18}}>
                       <AdvStat label="Monto" value={"Q"+(a.monto||0).toLocaleString()}/>
-                      <AdvStat label="Semanal" value={"Q"+(a.cobroSemanal||0).toLocaleString()} accent/>
+                      <AdvStat label={advIsPlanilla(a)?"Quincenal":"Semanal"} value={advIsPlanilla(a)&&!advCuota(a)?"—":"Q"+advQ(advCuota(a))} accent/>
                     </div>
                   </div>
                   <div style={{fontSize:11.5,color:C.earth,lineHeight:1.6,marginBottom:12}}>El técnico ya subió su DPI y firmó el contrato. Sube el comprobante de depósito para activar el adelanto.</div>
@@ -8922,7 +9539,7 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
                   </div>
                   <div style={{display:"flex",gap:18}}>
                     <AdvStat label="Monto" value={"Q"+(a.monto||0).toLocaleString()}/>
-                    <AdvStat label="Semanal" value={"Q"+(a.cobroSemanal||0).toLocaleString()} accent/>
+                    <AdvStat label={advIsPlanilla(a)?"Quincenal":"Semanal"} value={advIsPlanilla(a)&&!advCuota(a)?"—":"Q"+advQ(advCuota(a))} accent/>
                     <AdvStat label="Cuotas" value={a.cuotas}/>
                   </div>
                 </div>
@@ -8941,13 +9558,13 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
       <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",marginBottom:12}}>Adelantos activos · {active.length}</div>
       {active.length===0&&<div style={{textAlign:"center",padding:"30px",color:C.earth,fontSize:13}}>No hay adelantos activos.</div>}
       <div style={{display:"flex",flexDirection:"column",gap:12}}>
-        {active.map(function(a){ var st=advanceState(a,reps); var pct=st.monto>0?Math.round(st.debited/st.monto*100):0; var avgPay=avgWeekPay(reps,a.vendorEmail); var pctPay=avgPay>0?Math.round(st.semanal/avgPay*100):0; var nextK=nextChargeableWeek(a,reps); var pausasFut=(a.pausas||[]).filter(function(k){ var w=st.weeks[k]; return !(w&&w.n>0&&w.paid===w.n); }); return (
+        {active.map(function(a){ var st=advanceState(a,reps); var pct=st.monto>0?Math.round(st.debited/st.monto*100):0; var avgPay=avgWeekPay(reps,a.vendorEmail); var esPl=advIsPlanilla(a); var pctPay=(!esPl&&avgPay>0)?Math.round(st.semanal/avgPay*100):0; var nextK=esPl?null:nextChargeableWeek(a,reps); var pausasFut=(a.pausas||[]).filter(function(k){ var w=st.weeks[k]; return !(w&&w.n>0&&w.paid===w.n); }); return (
           <div key={a.id} style={{background:"#fff",borderRadius:16,border:"1px solid "+C.line,overflow:"hidden",boxShadow:"0 4px 16px rgba(62,63,63,.05)"}}>
             <div style={{padding:"16px 18px"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:14,flexWrap:"wrap"}}>
                 <div>
                   <div style={{fontSize:15,fontWeight:700,color:C.black}}>{a.vendorName||a.vendorEmail}{!a.vendorEmail&&<span style={{fontSize:9,fontWeight:700,color:C.red,background:"#F5EDEC",padding:"2px 7px",borderRadius:100,marginLeft:8,letterSpacing:".06em"}}>SIN LIGAR</span>}</div>
-                  <div style={{fontSize:11,color:C.earth,marginTop:2}}>Inicio {fmtDMY(advStart(a))}{a.dpiNumber?" \u00b7 DPI "+a.dpiNumber:""}{a.unified?" \u00b7 "+advContracts(a).length+" contratos unificados":""}</div>
+                  <div style={{fontSize:11,color:C.earth,marginTop:2}}>{esPl?"Planilla · quincenal · ":""}Inicio {fmtDMY(advStart(a))}{a.dpiNumber?" \u00b7 DPI "+a.dpiNumber:""}{a.unified?" \u00b7 "+advContracts(a).length+" contratos unificados":""}</div>
                 </div>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase"}}>Saldo</div>
@@ -8957,12 +9574,16 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
               {/* progress */}
               <div style={{height:6,borderRadius:100,background:C.surfaceWarm,overflow:"hidden",marginBottom:8}}><div style={{height:"100%",width:pct+"%",background:C.green,borderRadius:100,transition:"width .3s"}}/></div>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.earth,marginBottom:12,flexWrap:"wrap",gap:6}}>
-                <span>{st.paidWeeks} / {st.cuotas} cuotas · Q{st.debited.toLocaleString()} debitado{st.revertido>0?" · Q"+st.revertido.toLocaleString()+" revertido":""}</span>
-                <span style={{color:C.peach,fontWeight:700}}>Q{st.weeklyCharge.toLocaleString()} / semana{pctPay>0?" \u00b7 "+pctPay+"% del pago":""}</span>
+                <span>{esPl&&!st.cuotas?"Q"+st.debited.toLocaleString()+" debitado":st.paidWeeks+" / "+st.cuotas+" cuotas · Q"+st.debited.toLocaleString()+" debitado"}{st.revertido>0?" · Q"+st.revertido.toLocaleString()+" revertido":""}</span>
+                <span style={{color:C.peach,fontWeight:700}}>{esPl?(advCuota(a)>0?"Q"+advCuota(a).toLocaleString()+" / quincena":"Sin cuota · a la liquidación"):("Q"+st.weeklyCharge.toLocaleString()+" / semana"+(pctPay>0?" \u00b7 "+pctPay+"% del pago":""))}</span>
               </div>
               {/* próximo cobro / pausas */}
               <div style={{background:C.surfaceWarm,borderRadius:10,padding:"9px 12px",marginBottom:12,fontSize:11,color:C.earth,lineHeight:1.6}}>
-                <span style={{fontWeight:700,color:C.black}}>Cobro automático.</span> Se debita Q{st.semanal.toLocaleString()} cuando se pagan todos los trabajos de la semana.{nextK&&<> Próximo: <span style={{fontWeight:700,color:C.black}}>{weekLabel(nextK)}</span>.</>}
+                {esPl
+                  ? (advCuota(a)>0
+                      ? <><span style={{fontWeight:700,color:C.black}}>Cobro automático en planilla.</span> Se debita Q{advCuota(a).toLocaleString()} dentro del comprobante de cada quincena (15 y 30).</>
+                      : <><span style={{fontWeight:700,color:C.black}}>Sin cuota quincenal.</span> El saldo permanece vigente y se descontará íntegro de la liquidación al terminar la relación laboral.</>)
+                  : <><span style={{fontWeight:700,color:C.black}}>Cobro automático.</span> Se debita Q{st.semanal.toLocaleString()} cuando se pagan todos los trabajos de la semana.{nextK&&<> Próximo: <span style={{fontWeight:700,color:C.black}}>{weekLabel(nextK)}</span>.</>}</>}
                 {pausasFut.length>0&&<div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}><span style={{fontWeight:700,color:C.orange}}>En pausa:</span>{pausasFut.map(function(k){return <button key={k} onClick={function(){unpauseWeek(a,k);}} title="Reanudar esta semana" style={{fontSize:10,fontWeight:700,color:C.orange,background:"#fff",border:"1px solid "+C.orange+"66",borderRadius:100,padding:"2px 9px",cursor:"pointer"}}>{weekLabel(k)} ×</button>;})}</div>}
               </div>
               {/* Comprobantes de depósito — se ven aquí y en el contrato/recibo */}
@@ -8980,7 +9601,7 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
                 })}
               </div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                <button onClick={function(){pauseNext(a);}} disabled={!nextK} style={{flex:1,minWidth:150,padding:"10px",borderRadius:100,border:"1.5px solid "+(nextK?C.orange:C.gray),background:"#fff",color:nextK?C.orange:C.gray,fontSize:12,fontWeight:700,cursor:nextK?"pointer":"not-allowed"}}>Pausar próximo cobro</button>
+                {!esPl&&<button onClick={function(){pauseNext(a);}} disabled={!nextK} style={{flex:1,minWidth:150,padding:"10px",borderRadius:100,border:"1.5px solid "+(nextK?C.orange:C.gray),background:"#fff",color:nextK?C.orange:C.gray,fontSize:12,fontWeight:700,cursor:nextK?"pointer":"not-allowed"}}>Pausar próximo cobro</button>}
                 <button onClick={function(){setPreview(a);}} style={{padding:"10px 16px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:600,cursor:"pointer"}}>Contrato</button>
                 <button onClick={function(){setAdjust(adjust===a.id?null:a.id);}} style={{padding:"10px 16px",borderRadius:100,border:"1.5px solid "+(adjust===a.id?C.black:C.gray),background:adjust===a.id?C.black:"#fff",color:adjust===a.id?"#fff":C.black,fontSize:12,fontWeight:600,cursor:"pointer"}}>Ajustar</button>
                 <button onClick={function(){delAdv(a);}} title="Eliminar" style={{padding:"10px 14px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,cursor:"pointer"}}><Icon name="trash" size={15} stroke={C.earth}/></button>
@@ -9025,19 +9646,25 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
   const [dpiNum,setDpiNum]= useState("");
   const [err,setErr]     = useState("");
   var vendor = internos.find(function(v){return v.id===vid;});
+  /* Colaborador de planilla: no tiene ingreso por trabajos — su adelanto se descuenta
+     de la quincena, o queda vivo hasta la liquidación si la cuota es 0. */
+  var esPlanilla = isPlanilla(vendor);
+  const [quincenal,setQuincenal] = useState("0");
   var emails = vendor?vendorEmailSet(vendor):[];
   var sum8   = incomeLast8(reps, emails);
   var maxWeekly = Math.floor(sum8/8*0.25);
   var maxTotal = maxWeekly*12;
   var vigentes = (adelantos||[]).filter(function(a){return (a.status==="activo"||a.status==="pendiente") && emails.indexOf((a.vendorEmail||"").toLowerCase().trim())>=0;});
   var saldoVigente = vigentes.reduce(function(s,a){return s+(a.status==="activo"?advanceState(a,reps).saldo:(parseFloat(a.monto)||0));},0);
-  var disponible = Math.max(0, maxTotal - saldoVigente);
   var montoN = parseFloat(monto||0)||0;
+  var qCuota = Math.max(0, parseFloat(quincenal||0)||0);
+  if(esPlanilla){ maxTotal = nomLiquidacion(vendor, ADV_PAGOS); maxWeekly = 0; }
+  var disponible = Math.max(0, maxTotal - saldoVigente);
   /* Tope de cuota semanal: 25% del promedio de ingreso semanal (últimas 8 semanas). */
   var minCuotas = (maxWeekly>0 && montoN>0) ? Math.min(12, Math.ceil(montoN/maxWeekly)) : 1;
   var semanal = cuotas>0?Math.ceil(montoN/cuotas):0;
-  var ok = vendor && montoN>0 && montoN<=disponible && (maxWeekly<=0 || semanal<=maxWeekly);
-  useEffect(function(){ if(cuotas<minCuotas) setCuotas(minCuotas); },[minCuotas]);
+  var ok = vendor && montoN>0 && montoN<=disponible && (esPlanilla || maxWeekly<=0 || semanal<=maxWeekly);
+  useEffect(function(){ if(!esPlanilla && cuotas<minCuotas) setCuotas(minCuotas); },[minCuotas,esPlanilla]);
   function crear(){
     setErr("");
     if(!vendor) return setErr("Elige un técnico interno.");
@@ -9046,11 +9673,13 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
     /* Adelanto iniciado por el admin: primero le llega al TÉCNICO para subir DPI y firmar.
        Queda 'pendiente_tecnico' (NO cobra) hasta que el técnico complete y el admin deposite. */
     var adv={id:"adv_"+Date.now(), vendorEmail:vendor.email, vendorName:vendorDisplay(vendor), dpiNumber:dpiNum||"", dpiPhoto:null, firma:null,
-      monto:montoN, cuotas:cuotas, cobroSemanal:semanal, fechaDeposito:fecha,
+      monto:montoN, fechaDeposito:fecha, fechaInicio:fecha,
       status:"pendiente_tecnico", createdAt:Date.now(), pausas:[], creadoPorAdmin:true};
+    if(esPlanilla){ adv.modo="quincenal"; adv.cobroQuincenal=qCuota; adv.cobroSemanal=0; adv.cuotas=qCuota>0?Math.ceil(montoN/qCuota):0; }
+    else { adv.cuotas=cuotas; adv.cobroSemanal=semanal; }
     adv.contractText=buildContractText(adv);
     onCreate(adv);
-    try{ notifyTemplate(resolveNotifRecipients("adelantoFirma", ADV_VENDORS, [vendor.email]), "adelantoFirma", {tecnico:vendorDisplay(vendor), monto:"Q"+montoN.toLocaleString(), cuotas:cuotas+" semanas", cuota:"Q"+semanal.toLocaleString()}); }catch(_){}
+    try{ notifyTemplate(resolveNotifRecipients("adelantoFirma", ADV_VENDORS, [vendor.email]), "adelantoFirma", {tecnico:vendorDisplay(vendor), monto:"Q"+montoN.toLocaleString(), cuotas:esPlanilla?(qCuota>0?Math.ceil(montoN/qCuota)+" quincenas":"a la liquidación"):(cuotas+" semanas"), cuota:esPlanilla?(qCuota>0?"Q"+qCuota.toLocaleString()+"/quincena":"sin cuota"):"Q"+semanal.toLocaleString()}); }catch(_){}
     onClose();
   }
   return (
@@ -9059,16 +9688,29 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
         <div style={{fontSize:9.5,fontWeight:600,color:C.earth,letterSpacing:".24em",textTransform:"uppercase",marginBottom:6}}>Nuevo adelanto</div>
         <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,color:C.black,marginBottom:18}}>Crear adelanto</div>
         {internos.length===0 ? (
-          <div style={{fontSize:13,color:C.earth,lineHeight:1.6,padding:"10px 0 20px"}}>No hay técnicos internos registrados.</div>
+          <div style={{fontSize:13,color:C.earth,lineHeight:1.6,padding:"10px 0 20px"}}>No hay colaboradores internos registrados.</div>
         ) : (
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <F label="Técnico interno"><select value={vid} onChange={function(e){setVid(e.target.value);setErr("");}}>{internos.map(function(v){return <option key={v.id} value={v.id}>{vendorDisplay(v)}{v.categoria?" · "+v.categoria:""}</option>;})}</select></F>
+          <F label="Colaborador interno"><select value={vid} onChange={function(e){setVid(e.target.value);setErr("");}}>{internos.map(function(v){return <option key={v.id} value={v.id}>{vendorDisplay(v)}{v.categoria?" · "+v.categoria:""}</option>;})}</select></F>
           <div style={{background:C.black,borderRadius:14,padding:"14px 16px",color:"#fff"}}>
-            <div style={{fontSize:9,fontWeight:600,letterSpacing:".2em",textTransform:"uppercase",opacity:.7,marginBottom:5}}>Disponible para este técnico</div>
+            <div style={{fontSize:9,fontWeight:600,letterSpacing:".2em",textTransform:"uppercase",opacity:.7,marginBottom:5}}>Disponible para {esPlanilla?"este colaborador":"este técnico"}</div>
             <div style={{fontSize:26,fontWeight:600,color:disponible>0?"#fff":C.peach}}>Q{disponible.toLocaleString()}</div>
-            <div style={{fontSize:10.5,opacity:.62,marginTop:6,lineHeight:1.6}}>Máx. (25% del ingreso semanal promedio × 12 cuotas; ingreso 8 sem. Q{sum8.toLocaleString()}): <b style={{color:"#fff"}}>Q{maxTotal.toLocaleString()}</b>{saldoVigente>0?" · Vigente: Q"+saldoVigente.toLocaleString():""}</div>
+            <div style={{fontSize:10.5,opacity:.62,marginTop:6,lineHeight:1.6}}>{esPlanilla
+              ? <>Máx. = liquidación estimada a hoy (indemnización + prestaciones proporcionales): <b style={{color:"#fff"}}>Q{maxTotal.toLocaleString()}</b>{saldoVigente>0?" · Vigente: Q"+saldoVigente.toLocaleString():""}</>
+              : <>Máx. (25% del ingreso semanal promedio × 12 cuotas; ingreso 8 sem. Q{sum8.toLocaleString()}): <b style={{color:"#fff"}}>Q{maxTotal.toLocaleString()}</b>{saldoVigente>0?" · Vigente: Q"+saldoVigente.toLocaleString():""}</>}</div>
           </div>
           <F label={"Monto (máx. Q"+disponible.toLocaleString()+")"}><input type="number" inputMode="numeric" value={monto} placeholder={"Ej. "+Math.min(500,disponible||500)} onChange={function(e){setMonto(e.target.value);setErr("");}}/></F>
+          {esPlanilla ? (
+            <div>
+              <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:9}}>Cuota quincenal</div>
+              <input type="number" inputMode="decimal" value={quincenal} onChange={function(e){setQuincenal(e.target.value);}} placeholder="0.00" style={{width:"100%",border:"1.5px solid "+C.gray,borderRadius:10,padding:"11px 13px",fontSize:14,fontFamily:"Montserrat,sans-serif",boxSizing:"border-box"}}/>
+              <div style={{fontSize:10.5,color:C.earth,marginTop:8,lineHeight:1.6}}>
+                {qCuota>0
+                  ? <>Se descontará Q{qCuota.toLocaleString()} en cada comprobante de quincena — {montoN>0?Math.ceil(montoN/qCuota)+" quincenas":"—"}.</>
+                  : <><b style={{color:C.black}}>Cuota 0 — sin descuento quincenal.</b> El saldo permanece vigente y se cobrará íntegro en la liquidación al terminar la relación laboral.</>}
+              </div>
+            </div>
+          ) : (
           <div>
             <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:9}}>Cuotas semanales{minCuotas>1?" — mín. "+minCuotas:""} · máx. 12</div>
             <div style={{display:"flex",alignItems:"center",gap:14}}>
@@ -9077,21 +9719,22 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
             </div>
             {maxWeekly>0&&<div style={{fontSize:10.5,color:semanal>maxWeekly?C.red:C.earth,marginTop:8,lineHeight:1.5,fontWeight:semanal>maxWeekly?700:400}}>Cuota Q{semanal.toLocaleString()} · tope Q{maxWeekly.toLocaleString()} (25% del ingreso semanal promedio){semanal>maxWeekly?" — excede el tope":""}</div>}
           </div>
+          )}
           <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
             <div style={{flex:1,minWidth:150}}><F label="Fecha del depósito"><input type="date" value={fecha} onChange={function(e){setFecha(e.target.value);}}/></F></div>
             <div style={{flex:1,minWidth:150}}><F label="DPI (opcional)"><input value={dpiNum} onChange={function(e){setDpiNum(e.target.value);setErr("");}} placeholder="0000 00000 0000" inputMode="numeric"/></F></div>
           </div>
           {montoN>0&&(
             <div style={{background:C.peach12||"rgba(233,130,106,.12)",borderRadius:12,padding:"12px 15px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <span style={{fontSize:12,color:C.black,fontWeight:600}}>Descuento semanal automático</span><span style={{fontSize:17,fontWeight:700,color:C.peach}}>Q{semanal.toLocaleString()}</span>
+              <span style={{fontSize:12,color:C.black,fontWeight:600}}>{esPlanilla?(qCuota>0?"Descuento quincenal automático":"Sin descuento · a la liquidación"):"Descuento semanal automático"}</span><span style={{fontSize:17,fontWeight:700,color:C.peach}}>{esPlanilla?(qCuota>0?"Q"+qCuota.toLocaleString():"Q0"):"Q"+semanal.toLocaleString()}</span>
             </div>
           )}
           {err&&<Err msg={err}/>}
           <div style={{display:"flex",gap:10,marginTop:4}}>
             <button onClick={onClose} style={{flex:1,padding:"13px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
-            <button onClick={crear} disabled={!ok} style={{flex:2,padding:"13px",borderRadius:100,border:"none",background:ok?C.green:C.gray,color:"#fff",fontSize:13,fontWeight:700,cursor:ok?"pointer":"not-allowed"}}>Enviar al técnico →</button>
+            <button onClick={crear} disabled={!ok} style={{flex:2,padding:"13px",borderRadius:100,border:"none",background:ok?C.green:C.gray,color:"#fff",fontSize:13,fontWeight:700,cursor:ok?"pointer":"not-allowed"}}>{esPlanilla?"Enviar al colaborador →":"Enviar al técnico →"}</button>
           </div>
-          <div style={{fontSize:10.5,color:C.earth,textAlign:"center",lineHeight:1.6}}>Le llegará al técnico para que suba su DPI y firme el contrato. Cuando firme, sube el comprobante de depósito para activarlo.</div>
+          <div style={{fontSize:10.5,color:C.earth,textAlign:"center",lineHeight:1.6}}>Le llegará {esPlanilla?"al colaborador":"al técnico"} para que suba su DPI y firme el contrato. Cuando firme, sube el comprobante de depósito para activarlo.</div>
         </div>
         )}
       </div>
@@ -9107,7 +9750,8 @@ function AdvAdjustPanel({adv, st, onUpdate}) {
   var ajustes = adv.ajustes||[];
   var semVal  = parseFloat(semanal)||0;
   var revVal  = parseFloat(revMonto)||0;
-  var semDis  = !(semVal>0)||semVal===parseFloat(adv.cobroSemanal||0);
+  var esPl    = advIsPlanilla(adv);
+  var semDis  = esPl ? (semVal===advCuota(adv)) : (!(semVal>0)||semVal===parseFloat(adv.cobroSemanal||0));
   var revDis  = !(revVal>0)||revVal>st.debited;
   function saveSemanal(){
     if(semDis) return;
@@ -9115,6 +9759,7 @@ function AdvAdjustPanel({adv, st, onUpdate}) {
        futuras. El saldo NO cambia por ajustar la cuota (bug #6). */
     var monto=parseFloat(adv.monto||0)||0;
     var frozen=Math.min(monto, (st.debited||0) + (st.revertido||0));
+    if(esPl){ onUpdate({cobroQuincenal:semVal, cuotas:semVal>0?Math.ceil((parseFloat(adv.monto||0)||0)/semVal):0}); return; }
     onUpdate({cobroSemanal:semVal, frozenDebited:frozen, frozenWeeks:st.paidWeeks});
   }
   function revertir(){
