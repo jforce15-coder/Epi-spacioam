@@ -1511,9 +1511,14 @@ function App() {
     /* Resolver el vendor FRESCO desde config (la sesión guarda un snapshot; así los permisos
        de supervisión asignados después del login aplican sin re-loguear) */
     var freshV = vendors.find(function(x){return x.id===sess.vendor.id;}) || vendors.find(function(x){return x.email===sess.vendor.email;}) || sess.vendor;
+    /* Un técnico no debe recibir la programación de sus compañeros ni en memoria. */
+    var misEmails = vendorEmailSet(freshV);
+    var misSchedules = (schedules||[]).filter(function(s){
+      return s && misEmails.indexOf(String(s.vendorEmail||"").toLowerCase())>=0;
+    });
     var needsOnb = isEpiLimpieza(freshV) && !freshV.notifSetupDone && !onbDone;
     try{ if(localStorage.getItem("epi_onboard_done_"+freshV.id)) needsOnb=false; }catch(_){}
-    inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={schedules} ausencias={ausencias} onSvAusencias={svAusencias} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
+    inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={misSchedules} ausencias={ausencias} onSvAusencias={svAusencias} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
   } else {
     inner = <AdminApp reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
   }
@@ -1910,7 +1915,7 @@ function AdminApp({reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegS
         tab={tab} setTab={setTab}
         alertCount={alerts.length} pendingQA={pendingQA} sheetsOk={sheetsOk} adminLabel={adminVendor?vendorDisplay(adminVendor):"Admin"}
         navItems={[["dash","Dashboard","dash"],["form","Formulario","edit"],["sched","Programa","calendar"],["qa","Calidad","star"],["adv","Adelantos","coins"]]}
-        onConfig={canNotif?function(){setTab("cfg");}:null} configActive={tab==="cfg"}
+        onConfig={function(){setTab("cfg");}} configActive={tab==="cfg"}
         onLogout={onLogout}
         role="Admin"
       />
@@ -1934,7 +1939,7 @@ function AdminApp({reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegS
               ? <AdvanceRequest vendor={adminVendor} reps={(reps||[]).filter(function(r){return repMatchesVendor(r,adminVendor);})} adelantos={(adelantos||[]).filter(function(a){return vendorEmailSet(adminVendor).map(function(e){return String(e).toLowerCase();}).indexOf(String(a.vendorEmail||"").toLowerCase())>=0;})} onSvAdelantos={onSvAdelantos}/>
               : null)}
       </div>
-      {canNotif&&<div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  regSol={regSol} onSvRegSol={onSvRegSol} reps={reps} vendors={vendors} props={props} adminPin={adminPin} company={company} extCats={extCats||[]} notifPrefs={notifPrefs} canNotif={canNotif} onSvNotifPrefs={onSvNotifPrefs} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>}
+      <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  regSol={regSol} onSvRegSol={onSvRegSol} reps={reps} vendors={vendors} props={props} adminPin={adminPin} company={company} extCats={extCats||[]} notifPrefs={notifPrefs} canNotif={canNotif} onSvNotifPrefs={onSvNotifPrefs} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
 
       {detail&&<DetailModal rep={detail} vendors={vendors} props={props} hasLinkedDmg={reps.some(function(x){return isDanos(x.categoria)&&String(x._linkedToReport||"")===String(detail.id);})} onExtract={extractDanios} onClose={function(){setDetail(null);}} onMarkPaid={function(p){markPaid(detail.id,p);setDetail(function(x){return Object.assign({},x,{paid:p});});}} onSave={function(r){onUpsert(r);setDetail(r);}} onQA={qaUpdate} onDelete={function(){setCDel(detail.id);}}/>}
       {cDel&&<Overlay><ConfirmDel onCancel={function(){setCDel(null);}} onConfirm={function(){onDelete(cDel);setCDel(null);setDetail(null);}}/></Overlay>}
@@ -4098,13 +4103,27 @@ function OrphanEmailLinker({reps, vendors, onSvV}) {
 /* ─── Config */
 function CfgView({regSol,onSvRegSol,canNotif:_cn,reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,notifPrefs,canNotif,onSvNotifPrefs,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback}) {
   const [tab,setTab] = useState("vendors");
+  /* Los ajustes sensibles son del administrador principal. Un administrador
+     secundario entra solo para enviar los enlaces de registro. */
+  if(!canNotif) return (
+    <div style={{maxWidth:640,margin:"0 auto",padding:"28px 18px 60px",fontFamily:"Montserrat,sans-serif"}}>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:9.5,fontWeight:600,color:C.earth,letterSpacing:".28em",textTransform:"uppercase",marginBottom:8}}>Equipo</div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:28,fontWeight:400,color:C.black}}>Enlaces de registro</div>
+      </div>
+      <RegistroCfg regSol={regSol||[]} onSvRegSol={onSvRegSol} vendors={vendors} onSaveVendors={onSvV} puedeAprobar={false}/>
+      <div style={{fontSize:11.5,color:C.earth,lineHeight:1.7,background:C.surfaceWarm,borderRadius:10,padding:"12px 14px",textWrap:"pretty"}}>
+        El resto de los ajustes los administra el administrador principal.
+      </div>
+    </div>
+  );
   return (
     <div style={{maxWidth:640,margin:"0 auto",padding:"28px 18px 60px",fontFamily:"Montserrat,sans-serif"}}>
       <div style={{marginBottom:20}}><div style={{fontSize:9.5,fontWeight:600,color:C.earth,letterSpacing:".28em",textTransform:"uppercase",marginBottom:8}}>Configuración</div><div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:28,fontWeight:400,color:C.black}}>Ajustes del sistema</div></div>
       <div style={{display:"flex",background:"#fff",borderRadius:10,padding:4,gap:3,marginBottom:18,border:"1px solid "+C.gray,flexWrap:"wrap"}}>
         {[["vendors","Equipo"],["props","Propiedades"]].concat(canNotif?[["notif","Notificaciones"]]:[]).concat([["feedback","Sugerencias"],["company","Empresa"],["security","Seguridad"]]).map(function(it){ var k=it[0],l=it[1]; return <button key={k} onClick={function(){setTab(k);}} style={{flex:1,minWidth:90,padding:"9px 6px",borderRadius:8,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,fontSize:12,letterSpacing:".06em",transition:"all .2s"}}>{l}</button>; })}
       </div>
-      <div style={{display:tab==="vendors"  ?"block":"none"}}>{_cn&&<RegistroCfg regSol={regSol||[]} onSvRegSol={onSvRegSol} vendors={vendors} onSaveVendors={onSvV}/>}<VendorsCfg  vendors={vendors} extCats={extCats||[]} onSave={onSvV} onSaveExtCats={onSvExtCats} props={props||[]} reps={reps||[]}/><OrphanEmailLinker reps={reps} vendors={vendors} onSvV={onSvV}/></div>
+      <div style={{display:tab==="vendors"  ?"block":"none"}}><RegistroCfg regSol={regSol||[]} onSvRegSol={onSvRegSol} vendors={vendors} onSaveVendors={onSvV} puedeAprobar={true}/><VendorsCfg  vendors={vendors} extCats={extCats||[]} onSave={onSvV} onSaveExtCats={onSvExtCats} props={props||[]} reps={reps||[]}/><OrphanEmailLinker reps={reps} vendors={vendors} onSvV={onSvV}/></div>
       {canNotif&&<div style={{display:tab==="notif"?"block":"none"}}><NotifCfg prefs={notifPrefs} vendors={vendors} onSave={onSvNotifPrefs} readOnly={false}/></div>}
       <div style={{display:tab==="feedback"?"block":"none"}}><FeedbackCfg feedback={feedback||[]} onSave={onSvFeedback}/></div>
       <div style={{display:tab==="props"   ?"block":"none"}}><PropsCfg    props={props}     onSave={onSvP}/></div>
@@ -4165,20 +4184,56 @@ function regLink(tipo){
   var base=(typeof location!=="undefined") ? (location.origin+location.pathname) : "";
   return base+"#/registro/"+tipo;
 }
+var REG_LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6,lineHeight:1.5};
+/* 16px de base: menos que eso hace que iOS haga zoom al enfocar el campo. */
+var REG_IN={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:10,padding:"13px",fontSize:16,fontFamily:"Montserrat,sans-serif",letterSpacing:"normal",outline:"none",background:"#fff",color:C.black,minHeight:48};
+function RegField({label,value,onChange,ph,type,opt}){
+  return (
+    <div>
+      <span style={REG_LBL}>{label}{opt?<span style={{color:C.taupe,fontWeight:600,letterSpacing:0,textTransform:"none"}}> · opcional</span>:""}</span>
+      <input value={value} type={type||"text"} onChange={onChange} placeholder={ph||""} style={REG_IN}/>
+    </div>
+  );
+}
+
 function RegistroPublico({tipo, company}) {
   var cfg = REG_TIPOS[tipo] || REG_TIPOS.proveedor;
   const [f,     setF]    = useState({primerNombre:"",segundoNombre:"",primerApellido:"",segundoApellido:"",empresa:"",email:"",phone:"",dpi:"",nit:"",direccion:"",banco:"",tipoCuenta:"Monetaria",cuenta:"",titular:"",servicios:"",nota:""});
+  const [paso,  setPaso] = useState(0);
   const [busy,  setBusy] = useState(false);
   const [done,  setDone] = useState(false);
   const [err,   setErr]  = useState("");
 
   function set(k,v){ setF(function(p){ var u=Object.assign({},p); u[k]=v; return u; }); }
-  var faltan = !f.primerNombre.trim() || !f.primerApellido.trim() || !f.email.trim() || !f.phone.trim() || (cfg.empresa && !f.empresa.trim());
   var mailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim());
 
+  /* Por pasos: de golpe eran veinte campos y nadie los llenaba completos.
+     Los proveedores empiezan con el pitch de por qué vale la pena entrar. */
+  var pasos = (cfg.pitch?["pitch"]:[]).concat(["quien","contacto","pago"]);
+  var total = pasos.length;
+  var actual = pasos[Math.min(paso,total-1)];
+  var formPasos = pasos.filter(function(p){ return p!=="pitch"; });
+
+  function faltaEnPaso(p){
+    if(p==="quien")    return !f.primerNombre.trim() || !f.primerApellido.trim() || (cfg.empresa && !f.empresa.trim());
+    if(p==="contacto") return !f.email.trim() || !f.phone.trim() || !mailOk;
+    return false;
+  }
+  function avanzar(){
+    if(faltaEnPaso(actual)){
+      setErr(actual==="contacto" && f.email.trim() && !mailOk
+        ? "Revisa el correo — no parece válido."
+        : "Completa los campos obligatorios para seguir.");
+      return;
+    }
+    setErr(""); setPaso(paso+1);
+    try{ window.scrollTo(0,0); }catch(_){}
+  }
+  function atras(){ setErr(""); setPaso(Math.max(0,paso-1)); try{ window.scrollTo(0,0); }catch(_){} }
+
   async function enviar(){
-    if(faltan||busy) return;
-    if(!mailOk){ setErr("Revisa el correo — no parece válido."); return; }
+    if(busy) return;
+    if(faltaEnPaso("quien")||faltaEnPaso("contacto")){ setErr("Faltan datos obligatorios en los pasos anteriores."); return; }
     setBusy(true); setErr("");
     try{
       var d = await loadAllData();
@@ -4197,127 +4252,158 @@ function RegistroPublico({tipo, company}) {
     setBusy(false);
   }
 
-  var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6};
-  var IN={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:10,padding:"12px 13px",fontSize:13.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",color:C.black,minHeight:46};
-  function F({label,k,ph,type,opt}){
-    return (
-      <div>
-        <span style={LBL}>{label}{opt?<span style={{color:C.taupe,fontWeight:600,letterSpacing:0,textTransform:"none"}}> · opcional</span>:""}</span>
-        <input value={f[k]} type={type||"text"} onChange={function(e){set(k,e.target.value);}} placeholder={ph||""} style={IN}/>
-      </div>
-    );
-  }
-  var G={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:13};
+  var LBL=REG_LBL, IN=REG_IN;
+  /* Cada campo se escribe con RegField, que vive fuera del componente. Nada de
+     envoltorios locales: su identidad cambiaría en cada render y React
+     desmontaría el input tras cada tecla. */
+  function chg(k){ return function(e){ set(k, e.target.value); }; }
+  /* Una sola columna en móvil: dos campos de 200px lado a lado apretaban el texto. */
+  var G={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,240px),1fr))",gap:14};
+  var CARD={background:"#fff",borderRadius:20,padding:"clamp(22px,5vw,30px)",boxShadow:"0 4px 16px rgba(62,63,63,.05)"};
+  var BTN={padding:"16px 22px",borderRadius:100,border:"none",fontSize:14,fontWeight:600,letterSpacing:".03em",cursor:"pointer",minHeight:54,fontFamily:"Montserrat,sans-serif"};
+  var SERIF="'Valky','Cormorant Garamond',Georgia,serif";
 
   if(done) return (
     <div style={{minHeight:"100vh",background:C.beige,fontFamily:"Montserrat,sans-serif",display:"flex",alignItems:"center",justifyContent:"center",padding:"28px 18px"}}>
-      <div style={{background:"#fff",borderRadius:20,maxWidth:460,padding:"44px 34px",textAlign:"center",boxShadow:"0 4px 16px rgba(62,63,63,.05)"}}>
-        <div style={{fontSize:34,color:C.green,lineHeight:1}}>✦</div>
-        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:26,color:C.black,marginTop:14,lineHeight:1.25}}>Recibimos tus datos</div>
-        <div style={{fontSize:13.5,color:C.earth,lineHeight:1.75,marginTop:12,textWrap:"pretty"}}>Alguien del equipo los revisa y te escribe a <b style={{color:C.black}}>{f.email}</b> con tu usuario y contraseña. Ya puedes cerrar esta página.</div>
+      <div style={{background:"#fff",borderRadius:20,maxWidth:460,padding:"44px 30px",textAlign:"center",boxShadow:"0 4px 16px rgba(62,63,63,.05)"}}>
+        <div style={{display:"flex",justifyContent:"center",marginBottom:22}}><LogoWordmark width={148}/></div>
+        <svg viewBox="0 0 100 100" width={26} height={26} fill={C.peach} aria-hidden="true" style={{display:"block",margin:"0 auto"}}><path d="M50 4 C 52 32, 58 42, 96 50 C 58 58, 52 68, 50 96 C 48 68, 42 58, 4 50 C 42 42, 48 32, 50 4 Z"/></svg>
+        <div style={{fontFamily:SERIF,fontSize:26,color:C.black,marginTop:14,lineHeight:1.25}}>Recibimos tus datos</div>
+        <div style={{fontSize:14,color:C.earth,lineHeight:1.75,marginTop:12,textWrap:"pretty"}}>Alguien del equipo los revisa y te escribe a <b style={{color:C.black}}>{f.email}</b> con tu usuario y contraseña. Ya puedes cerrar esta página.</div>
       </div>
     </div>
   );
 
   return (
-    <div style={{minHeight:"100vh",background:C.beige,fontFamily:"Montserrat,sans-serif",padding:"0 0 60px"}}>
-      <div style={{maxWidth:640,margin:"0 auto",padding:"0 18px"}}>
-        <div style={{padding:"46px 0 30px",textAlign:"center"}}>
-          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,letterSpacing:".22em",color:C.black}}>SPACIO</div>
-          <div style={{fontSize:9.5,letterSpacing:".5em",color:C.earth,marginTop:3}}>A — M</div>
+    <div style={{minHeight:"100vh",background:C.beige,fontFamily:"Montserrat,sans-serif",padding:"0 0 56px"}}>
+      <div style={{maxWidth:600,margin:"0 auto",padding:"0 clamp(14px,4vw,20px)"}}>
+        <div style={{padding:"clamp(30px,7vw,46px) 0 26px",display:"flex",justifyContent:"center"}}>
+          <LogoWordmark width={158}/>
         </div>
 
-        <div style={{background:"#fff",borderRadius:20,padding:"32px 28px",boxShadow:"0 4px 16px rgba(62,63,63,.05)",marginBottom:16}}>
-          <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".28em",textTransform:"uppercase"}}>{cfg.corto}</div>
-          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:30,color:C.black,marginTop:9,lineHeight:1.2,textWrap:"balance"}}>{cfg.intro}</div>
-          <div style={{fontSize:14,color:C.earth,lineHeight:1.75,marginTop:11,textWrap:"pretty"}}>{cfg.sub}</div>
+        {actual!=="pitch"&&(
+          <div style={{marginBottom:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8,gap:10}}>
+              <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".22em",textTransform:"uppercase"}}>{cfg.corto}</span>
+              <span style={{fontSize:11,color:C.taupe,fontVariantNumeric:"tabular-nums"}}>Paso {formPasos.indexOf(actual)+1} de {formPasos.length}</span>
+            </div>
+            <div style={{display:"flex",gap:5}}>
+              {formPasos.map(function(p,i){
+                return <div key={p} style={{flex:1,height:3,borderRadius:100,background:i<=formPasos.indexOf(actual)?C.black:C.gray,transition:"background 360ms cubic-bezier(.22,.61,.36,1)"}}/>;
+              })}
+            </div>
+          </div>
+        )}
 
-          {cfg.pitch&&(
-            <div style={{marginTop:26,borderTop:"1px solid "+C.line,paddingTop:24,display:"flex",flexDirection:"column",gap:18}}>
-              <div style={{fontSize:13.5,color:C.black,lineHeight:1.8,textWrap:"pretty"}}>
+        {actual==="pitch"&&(
+          <div style={CARD}>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".28em",textTransform:"uppercase"}}>{cfg.corto}</div>
+            <div style={{fontFamily:SERIF,fontSize:"clamp(26px,7vw,32px)",color:C.black,marginTop:10,lineHeight:1.2,textWrap:"balance"}}>{cfg.intro}</div>
+            <div style={{fontSize:14.5,color:C.earth,lineHeight:1.75,marginTop:12,textWrap:"pretty"}}>{cfg.sub}</div>
+            <div style={{marginTop:24,borderTop:"1px solid "+C.line,paddingTop:22,display:"flex",flexDirection:"column",gap:18}}>
+              <div style={{fontSize:14,color:C.black,lineHeight:1.8,textWrap:"pretty"}}>
                 Trabajamos con un sistema propio donde vive todo lo que pasa entre nosotros. No es un trámite — es lo que hace que te paguemos a tiempo y sin discusiones.
               </div>
               {REG_PITCH.map(function(p,i){
                 return (
                   <div key={i} style={{display:"flex",gap:14,alignItems:"flex-start"}}>
-                    <div style={{width:26,flexShrink:0,fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:17,color:C.peach,lineHeight:1.3}}>{("0"+(i+1)).slice(-2)}</div>
+                    <div style={{width:26,flexShrink:0,fontFamily:SERIF,fontSize:18,color:C.peach,lineHeight:1.3}}>{("0"+(i+1)).slice(-2)}</div>
                     <div style={{minWidth:0}}>
-                      <div style={{fontSize:13.5,fontWeight:600,color:C.black}}>{p[0]}</div>
-                      <div style={{fontSize:12.5,color:C.earth,lineHeight:1.7,marginTop:3,textWrap:"pretty"}}>{p[1]}</div>
+                      <div style={{fontSize:14,fontWeight:600,color:C.black,lineHeight:1.5}}>{p[0]}</div>
+                      <div style={{fontSize:13,color:C.earth,lineHeight:1.7,marginTop:4,textWrap:"pretty"}}>{p[1]}</div>
                     </div>
                   </div>
                 );
               })}
             </div>
-          )}
-        </div>
+            <button onClick={avanzar} style={Object.assign({},BTN,{width:"100%",marginTop:26,background:C.black,color:"#fff"})}>Empecemos →</button>
+            <div style={{fontSize:11.5,color:C.taupe,textAlign:"center",lineHeight:1.7,marginTop:12}}>Son tres pasos cortos. No toma más de dos minutos.</div>
+          </div>
+        )}
 
-        <div style={{background:"#fff",borderRadius:20,padding:"28px",boxShadow:"0 4px 16px rgba(62,63,63,.05)",display:"flex",flexDirection:"column",gap:20}}>
-          <div>
-            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".22em",textTransform:"uppercase",marginBottom:14}}>Tus datos</div>
-            <div style={G}>
-              <F label="Primer nombre"   k="primerNombre"/>
-              <F label="Segundo nombre"  k="segundoNombre" opt/>
-              <F label="Primer apellido" k="primerApellido"/>
-              <F label="Segundo apellido"k="segundoApellido" opt/>
-            </div>
-          </div>
-          {cfg.empresa&&(
-            <div style={G}>
-              <F label="Empresa o nombre comercial" k="empresa"/>
-              <F label="Servicios que ofreces" k="servicios" ph="Ej. plomería, cerrajería" opt/>
-            </div>
-          )}
-          <div>
-            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".22em",textTransform:"uppercase",marginBottom:14}}>Contacto</div>
-            <div style={G}>
-              <F label="Correo"   k="email" type="email" ph="tu@correo.com"/>
-              <F label="Teléfono" k="phone" type="tel"   ph="5555 5555"/>
-            </div>
-          </div>
-          <div>
-            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".22em",textTransform:"uppercase",marginBottom:14}}>Identificación</div>
-            <div style={G}>
-              <F label="DPI" k="dpi" ph="0000 00000 0000" opt/>
-              <F label={cfg.factura?"NIT":"NIT"} k="nit" opt/>
-            </div>
-            <div style={{marginTop:13}}><F label="Dirección" k="direccion" opt/></div>
-          </div>
-          <div>
-            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".22em",textTransform:"uppercase",marginBottom:6}}>Cuenta para tus pagos</div>
-            <div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6,marginBottom:14}}>Ahí depositamos. Puedes dejarlo en blanco y darlo después.</div>
-            <div style={G}>
-              <F label="Banco" k="banco" opt/>
-              <div>
-                <span style={LBL}>Tipo de cuenta</span>
-                <select value={f.tipoCuenta} onChange={function(e){set("tipoCuenta",e.target.value);}} style={Object.assign({},IN,{cursor:"pointer"})}>
-                  <option value="Monetaria">Monetaria</option>
-                  <option value="Ahorro">Ahorro</option>
-                </select>
+        {actual==="quien"&&(
+          <div style={CARD}>
+            <div style={{fontFamily:SERIF,fontSize:"clamp(23px,6vw,27px)",color:C.black,lineHeight:1.25,textWrap:"balance"}}>¿Cómo te llamas?</div>
+            <div style={{fontSize:13,color:C.earth,lineHeight:1.7,marginTop:8,marginBottom:22,textWrap:"pretty"}}>Como aparece en tu DPI — así salen tus comprobantes de pago.</div>
+            <div style={{display:"flex",flexDirection:"column",gap:16}}>
+              <div style={G}>
+                <RegField label="Primer nombre"    value={f.primerNombre}    onChange={chg("primerNombre")}/>
+                <RegField label="Segundo nombre"   value={f.segundoNombre}   onChange={chg("segundoNombre")} opt/>
+                <RegField label="Primer apellido"  value={f.primerApellido}  onChange={chg("primerApellido")}/>
+                <RegField label="Segundo apellido" value={f.segundoApellido} onChange={chg("segundoApellido")} opt/>
               </div>
-              <F label="Número de cuenta" k="cuenta" opt/>
-              <F label="A nombre de" k="titular" opt/>
+              {cfg.empresa&&(
+                <div style={G}>
+                  <RegField label="Empresa o nombre comercial" value={f.empresa} onChange={chg("empresa")}/>
+                  <RegField label="Servicios que ofreces" value={f.servicios} onChange={chg("servicios")} ph="Ej. plomería, cerrajería" opt/>
+                </div>
+              )}
             </div>
           </div>
-          <div>
-            <span style={LBL}>Algo más que debamos saber · opcional</span>
-            <textarea value={f.nota} onChange={function(e){set("nota",e.target.value);}} rows={3} placeholder="Horarios, zonas donde trabajas, lo que quieras contarnos."
-              style={Object.assign({},IN,{lineHeight:1.7,resize:"vertical",minHeight:80})}/>
-          </div>
+        )}
 
-          {err&&<div style={{fontSize:12.5,color:C.red,background:"#F5EDEC",padding:"11px 13px",borderRadius:9,lineHeight:1.5}}>{err}</div>}
-          <button onClick={enviar} disabled={faltan||busy} style={{padding:"16px",borderRadius:100,border:"none",background:faltan||busy?C.gray:C.black,color:"#fff",fontSize:13.5,fontWeight:600,letterSpacing:".05em",cursor:faltan||busy?"default":"pointer",minHeight:52}}>
-            {busy?"Enviando…":"Enviar mis datos →"}
-          </button>
-          <div style={{fontSize:11,color:C.taupe,textAlign:"center",lineHeight:1.7}}>Usamos tus datos solo para gestionar tu relación de trabajo con Spacio AM.</div>
-        </div>
+        {actual==="contacto"&&(
+          <div style={CARD}>
+            <div style={{fontFamily:SERIF,fontSize:"clamp(23px,6vw,27px)",color:C.black,lineHeight:1.25,textWrap:"balance"}}>¿Dónde te encontramos?</div>
+            <div style={{fontSize:13,color:C.earth,lineHeight:1.7,marginTop:8,marginBottom:22,textWrap:"pretty"}}>Al correo te llega tu acceso al sistema y cada aviso de pago.</div>
+            <div style={{display:"flex",flexDirection:"column",gap:16}}>
+              <div style={G}>
+                <RegField label="Correo"   value={f.email} onChange={chg("email")} type="email" ph="tu@correo.com"/>
+                <RegField label="Teléfono" value={f.phone} onChange={chg("phone")} type="tel"   ph="5555 5555"/>
+              </div>
+              <div style={G}>
+                <RegField label="DPI" value={f.dpi} onChange={chg("dpi")} ph="0000 00000 0000" opt/>
+                <RegField label="NIT" value={f.nit} onChange={chg("nit")} opt/>
+              </div>
+              <RegField label="Dirección" value={f.direccion} onChange={chg("direccion")} opt/>
+            </div>
+          </div>
+        )}
+
+        {actual==="pago"&&(
+          <div style={CARD}>
+            <div style={{fontFamily:SERIF,fontSize:"clamp(23px,6vw,27px)",color:C.black,lineHeight:1.25,textWrap:"balance"}}>¿Dónde te depositamos?</div>
+            <div style={{fontSize:13,color:C.earth,lineHeight:1.7,marginTop:8,marginBottom:22,textWrap:"pretty"}}>Puedes dejarlo en blanco y darnos la cuenta después.</div>
+            <div style={{display:"flex",flexDirection:"column",gap:16}}>
+              <div style={G}>
+                <RegField label="Banco" value={f.banco} onChange={chg("banco")} opt/>
+                <div>
+                  <span style={LBL}>Tipo de cuenta</span>
+                  <select value={f.tipoCuenta} onChange={function(e){set("tipoCuenta",e.target.value);}} style={Object.assign({},IN,{cursor:"pointer"})}>
+                    <option value="Monetaria">Monetaria</option>
+                    <option value="Ahorro">Ahorro</option>
+                  </select>
+                </div>
+                <RegField label="Número de cuenta" value={f.cuenta} onChange={chg("cuenta")} opt/>
+                <RegField label="A nombre de" value={f.titular} onChange={chg("titular")} opt/>
+              </div>
+              <div>
+                <span style={LBL}>Algo más que debamos saber<span style={{color:C.taupe,fontWeight:600,letterSpacing:0,textTransform:"none"}}> · opcional</span></span>
+                <textarea value={f.nota} onChange={function(e){set("nota",e.target.value);}} rows={3} placeholder="Horarios, zonas donde trabajas, lo que quieras contarnos."
+                  style={Object.assign({},IN,{lineHeight:1.7,resize:"vertical",minHeight:88})}/>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {err&&<div style={{marginTop:13,fontSize:13,color:C.red,background:"#F5EDEC",padding:"12px 14px",borderRadius:10,lineHeight:1.6}}>{err}</div>}
+
+        {actual!=="pitch"&&(
+          <div style={{display:"flex",gap:10,marginTop:16,flexWrap:"wrap"}}>
+            {paso>0&&<button onClick={atras} style={Object.assign({},BTN,{background:"#fff",border:"1.5px solid "+C.gray,color:C.earth,flex:"0 0 auto",padding:"16px 20px"})}>← Atrás</button>}
+            {actual!=="pago"
+              ? <button onClick={avanzar} style={Object.assign({},BTN,{flex:"1 1 160px",background:C.black,color:"#fff"})}>Continuar →</button>
+              : <button onClick={enviar} disabled={busy} style={Object.assign({},BTN,{flex:"1 1 160px",background:busy?C.gray:C.black,color:"#fff",cursor:busy?"default":"pointer"})}>{busy?"Enviando…":"Enviar mis datos →"}</button>}
+          </div>
+        )}
+        <div style={{fontSize:11.5,color:C.taupe,textAlign:"center",lineHeight:1.7,marginTop:18,textWrap:"pretty"}}>Usamos tus datos solo para gestionar tu relación de trabajo con Spacio AM.</div>
       </div>
     </div>
   );
 }
 
 /* ─── Enlaces de registro y solicitudes recibidas (Configuración › Usuarios) */
-function RegistroCfg({regSol, onSvRegSol, vendors, onSaveVendors}) {
+function RegistroCfg({regSol, onSvRegSol, vendors, onSaveVendors, puedeAprobar}) {
   const [copiado, setCopiado] = useState("");
   const [abierta, setAbierta] = useState(null);
   const [pass,    setPass]    = useState("");
@@ -4384,6 +4470,15 @@ function RegistroCfg({regSol, onSvRegSol, vendors, onSaveVendors}) {
         </div>
       </Card>
 
+      {puedeAprobar===false
+        ? (nuevas.length>0&&(
+            <Card title={"Solicitudes recibidas · "+nuevas.length}>
+              <div style={{fontSize:12,color:C.earth,lineHeight:1.65,textWrap:"pretty"}}>
+                {nuevas.length===1?"Hay una solicitud":"Hay "+nuevas.length+" solicitudes"} esperando. El administrador principal las revisa y crea el usuario.
+              </div>
+            </Card>
+          ))
+        : (<>
       <Card title={"Solicitudes recibidas"+(nuevas.length?" · "+nuevas.length+" nueva"+(nuevas.length===1?"":"s"):"")}>
         <div style={{fontSize:12,color:C.earth,lineHeight:1.65,marginBottom:14,textWrap:"pretty"}}>Revisa los datos, define una contraseña y el usuario queda creado.</div>
         {nuevas.length===0
@@ -4450,6 +4545,7 @@ function RegistroCfg({regSol, onSvRegSol, vendors, onSaveVendors}) {
           </div>
         )}
       </Card>
+      </>)}
     </div>
   );
 }
