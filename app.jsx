@@ -1920,7 +1920,7 @@ function AdminApp({reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegS
         role="Admin"
       />
 
-      <div style={{display:tab==="dash"?"block":"none"}}><DashView nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} meEmails={adminVendor?vendorEmailSet(adminVendor):[]} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh}/></div>
+      <div style={{display:tab==="dash"?"block":"none"}}><DashView props={props} nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} meEmails={adminVendor?vendorEmailSet(adminVendor):[]} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh}/></div>
       <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
       <div style={{display:tab==="sched"?"block":"none"}}>
         <ProgramacionAdmin schedules={schedules||[]} onSvSchedules={onSvSchedules} vendors={vendors||[]} props={props||[]}
@@ -1949,7 +1949,7 @@ function AdminApp({reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegS
 }
 
 /* ─── Dashboard container */
-function DashView({nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews,rvCasos,rvIA,reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
+function DashView({props,nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews,rvCasos,rvIA,reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
   const [sub,setSub] = useState("ops");
   return (
     <div>
@@ -1959,7 +1959,7 @@ function DashView({nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews,rvCas
           <button key={k} onClick={function(){setSub(k);}} style={{padding:"14px 16px",border:"none",borderBottom:"1.5px solid "+(sub===k?C.black:"transparent"),background:"none",fontSize:13,fontWeight:600,cursor:"pointer",color:sub===k?C.black:C.taupe,transition:"all .2s"}}>{l}</button>
         ); })}
       </div>
-      <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} adelantos={adelantos} onMarkPaidBatch={onMarkPaidBatch} onSelect={onSelect} onMarkPaid={onMarkPaid} onRefresh={onRefresh}/></div>
+      <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} props={props} vendors={vendors} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} adelantos={adelantos} onMarkPaidBatch={onMarkPaidBatch} onSelect={onSelect} onMarkPaid={onMarkPaid} onRefresh={onRefresh}/></div>
       <div style={{display:sub==="exec"?"block":"none"}}><ExecDash reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos}/></div>
       {/* Historial de pagos: el admin principal ve todos los comprobantes; un admin
           secundario solo los suyos, igual que un técnico. */}
@@ -1970,7 +1970,7 @@ function DashView({nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews,rvCas
 }
 
 /* ─── Operational Dashboard */
-function OpsDash({reps,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
+function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
   const [view,     setView]     = useState("table");
   const [fVend,    setFVend]    = useState("Todos");
   const [fStatus,  setFStatus]  = useState("Todos");
@@ -1990,20 +1990,50 @@ function OpsDash({reps,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBatch,on
   function reset() { setFVend("Todos"); setFStatus("Todos"); setFCat("Todos"); setFPagador("Todos"); setFZona("Todas"); setFEdif("Todos"); setFUnidad("Todas"); setFDesde(""); setFHasta(""); setShowAll(false); }
 
   /* Zona › edificio › apartamento salen del propio nombre de la propiedad
-     ("Z10 - Fiamene - 404"). Cada nivel acota las opciones del siguiente. */
-  var allProps = uniq((reps||[]).map(function(r){return r.propiedad;}).filter(Boolean));
-  var zonaOpts = uniq(allProps.map(propZona).filter(Boolean)).sort();
-  var edifOpts = uniq(allProps.filter(function(n){return fZona==="Todas"||propZona(n)===fZona;})
-                              .map(propEdificio).filter(Boolean)).sort();
-  var unidOpts = uniq(allProps.filter(function(n){
+     ("Z10 - Fiamene - 404"). El universo es el PORTAFOLIO — así aparecen también
+     las propiedades que todavía no tienen ninguna limpieza registrada — más los
+     nombres de reportes que correspondan a una propiedad real.
+     Los reportes cuyo campo propiedad guarda otra cosa ("Supervisión de calidad")
+     quedan fuera: no son propiedades y ensuciaban el filtro. */
+  var propNames = (props||[]).map(function(p){ return p.name||p.nombre||""; }).filter(Boolean);
+  var enPortafolio = {};
+  propNames.forEach(function(n){ enPortafolio[rvPropKey(n)]=n; });
+  var deReportes = uniq((reps||[]).map(function(r){return r.propiedad;}).filter(Boolean))
+    .filter(function(n){
+      /* Vale si está en el portafolio o si al menos trae zona ("Z10 - …"):
+         eso descarta etiquetas de categoría que se colaron como propiedad. */
+      return enPortafolio[rvPropKey(n)] || /^z\s*\d+$/i.test(propParts(n).zona||"");
+    });
+  /* Un solo nombre por propiedad: la grafía del portafolio manda, así
+     "Centro Vivo" y "Centro vivo" dejan de aparecer dos veces. */
+  var canon = {};
+  propNames.concat(deReportes).forEach(function(n){
+    var k=rvPropKey(n); if(!k) return;
+    if(!canon[k] || enPortafolio[k]===n) canon[k]=enPortafolio[k]||canon[k]||n;
+  });
+  var allProps = Object.keys(canon).map(function(k){ return canon[k]; });
+  /* Los niveles se comparan sin distinguir mayúsculas ni acentos. */
+  function edifKey(n){ return rvPropKey(propEdificio(n)); }
+  /* Una propiedad suelta ("Likin", "Casa Monterrico") o sin número de apartamento
+     ("Z7 - Monaco") es su propia unidad: si no, desaparece del filtro. */
+  function unidadDe(n){ var p=propParts(n); return p.unidad||p.edificio||p.full||""; }
+  function dedupSort(list){
+    var seen={}, out=[];
+    list.forEach(function(v){ var k=rvPropKey(v); if(!k||seen[k]) return; seen[k]=1; out.push(v); });
+    return out.sort(function(a,b){ return a.localeCompare(b,"es",{sensitivity:"base"}); });
+  }
+  var zonaOpts = dedupSort(allProps.map(propZona).filter(Boolean));
+  var edifOpts = dedupSort(allProps.filter(function(n){return fZona==="Todas"||rvPropKey(propZona(n))===rvPropKey(fZona);})
+                              .map(propEdificio).filter(Boolean));
+  var unidOpts = dedupSort(allProps.filter(function(n){
                                 var p=propParts(n);
-                                return (fZona==="Todas"||p.zona===fZona)&&(fEdif==="Todos"||p.edificio===fEdif);
-                              }).map(function(n){return propParts(n).unidad;}).filter(Boolean)).sort();
+                                return (fZona==="Todas"||rvPropKey(p.zona)===rvPropKey(fZona))&&(fEdif==="Todos"||edifKey(n)===rvPropKey(fEdif));
+                              }).map(unidadDe).filter(Boolean));
   function matchProp(r){
     var p=propParts(r.propiedad);
-    if(fZona!=="Todas"   && p.zona!==fZona)     return false;
-    if(fEdif!=="Todos"   && p.edificio!==fEdif) return false;
-    if(fUnidad!=="Todas" && p.unidad!==fUnidad) return false;
+    if(fZona!=="Todas"   && rvPropKey(p.zona)!==rvPropKey(fZona))         return false;
+    if(fEdif!=="Todos"   && rvPropKey(p.edificio)!==rvPropKey(fEdif))     return false;
+    if(fUnidad!=="Todas" && rvPropKey(unidadDe(r.propiedad))!==rvPropKey(fUnidad)) return false;
     return true;
   }
 
@@ -5008,7 +5038,9 @@ function ZonasPicker({v, vendors, onSave, props, reps}){
           </button>
         </div>
       )}
-      {asignadas.length===0&&<div style={{fontSize:10.5,color:C.orange,marginTop:7,fontWeight:600}}>Sin zonas: el motor solo le asignará si no queda alternativa.</div>}
+      {asignadas.length===0
+        ? <div style={{fontSize:10.5,color:C.orange,marginTop:7,fontWeight:600}}>Sin zonas marcadas no recibirá ninguna limpieza automática.</div>
+        : <div style={{fontSize:10.5,color:C.earth,marginTop:7,lineHeight:1.6,textWrap:"pretty"}}>El motor solo le asigna limpiezas en estas zonas. Fuera de ellas, únicamente por asignación manual.</div>}
       {asignadas.length>0&&<div style={{fontSize:10.5,color:C.earth,marginTop:7}}>{asignadas.length} zona{asignadas.length===1?"":"s"}{pref.length?" · prefiere "+pref.map(SCHED.zonaLabel).join(", "):""}</div>}
     </div>
   );
@@ -11913,7 +11945,20 @@ function RatingDashCard({reviews, reps, vendors, rvCasos, soloGrupo, rvIA, propF
   var uno    = soloGrupo ? (con.filter(function(g){return g.value===soloGrupo.value;})[0]||null) : null;
   if(soloGrupo && !uno) return null;
   var valid  = (uno ? stats[uno.value].rows : att.rows.filter(function(r){return !r.excluded;}));
-  if(!valid.length) return null;
+  if(!valid.length) {
+    var porQue = !(reviews||[]).length
+      ? "Todavía no hay reviews importadas de las plataformas."
+      : !revScope.length
+        ? "Ninguna review corresponde al filtro seleccionado."
+        : "Hay "+revScope.length+" review"+(revScope.length===1?"":"s")+", pero ninguna se pudo ligar a una limpieza registrada.";
+    return (
+      <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:12,padding:"15px 17px",marginBottom:16}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Calidad percibida</div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:19,fontWeight:400,color:C.black,marginTop:4}}>Rating de limpieza de los huéspedes</div>
+        <div style={{fontSize:11.5,color:C.earth,marginTop:8,lineHeight:1.6,textWrap:"pretty"}}>{porQue}</div>
+      </div>
+    );
+  }
 
   function iaDe(g){
     if(!g) return null;

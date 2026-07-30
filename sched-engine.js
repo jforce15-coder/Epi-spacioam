@@ -328,26 +328,55 @@
 
   /* Rating normalizado 0..1 sobre las últimas 5 semanas. Sin datos → 0.6,
      ni castigo ni premio: nadie debe perder trabajo por falta de reviews. */
+  var RATING_MIN_N = 5;   /* reseñas para que una nota valga por sí sola */
+
   function ratingNorm(email, ratings) {
     var r = (ratings || {})[String(email || "").toLowerCase()];
     if (!r || !r.n) return 0.6;
+    /* Un 5.00 sacado de una sola reseña no puede pesar igual que un 5.00 de nueve:
+       la nota se encoge hacia el centro del equipo (4.6) según cuántas reseñas la
+       respaldan. Protege en los dos sentidos — ni una reseña perfecta suelta gana
+       todo el trabajo, ni una mala reseña suelta hunde a alguien. */
+    var n = Math.max(0, r.n || 0), score = Number(r.score);
+    if (isFinite(score) && n > 0 && n < RATING_MIN_N) {
+      var k = RATING_MIN_N - n;
+      r = { score: (score * n + 4.6 * k) / RATING_MIN_N, n: n };
+    }
     var s = parseFloat(r.score);
     if (isNaN(s)) return 0.6;
     return Math.max(0, Math.min(1, (s - 3) / 2));   /* 3.0★ → 0 · 5.0★ → 1 */
   }
 
-  /* Reparto histórico por zona, para poder rotar al personal. */
-  function zonasRecientes(email, existentes, hoy) {
-    var em = String(email || "").toLowerCase(), tot = 0, porZona = {};
+  var ROT_DIAS = 30;   /* ventana de rotación */
+
+  /* Reparto histórico de un técnico en los últimos ROT_DIAS: cuántas veces estuvo
+     en cada zona y en cada apartamento. De aquí sale la rotación — que nadie se
+     quede pegado a una zona ni repita el mismo apartamento muchas veces.
+     Cuenta lo ya programado (existentes) y lo efectivamente trabajado (historial). */
+  function rotacionReciente(email, existentes, historial, hoy) {
+    var em = String(email || "").toLowerCase();
+    var tot = 0, porZona = {}, porProp = {};
+    function suma(propiedad, zona, fechaStr) {
+      var f = String(fechaStr || "").slice(0, 10);
+      if (!f || dias(f, hoy) > ROT_DIAS || f > hoy) return;
+      var z = zonaKey(zona || partes(propiedad).zona);
+      if (z) porZona[z] = (porZona[z] || 0) + 1;
+      var pk = norm(propiedad);
+      if (pk) porProp[pk] = (porProp[pk] || 0) + 1;
+      tot++;
+    }
     for (var i = 0; i < (existentes || []).length; i++) {
       var s = existentes[i];
       if (!s || String(s.vendorEmail || "").toLowerCase() !== em) continue;
-      if (dias(String(s.fecha).slice(0, 10), hoy) > 21) continue;
-      var z = zonaKey(s.zona || partes(s.propiedad).zona);
-      if (!z) continue;
-      porZona[z] = (porZona[z] || 0) + 1; tot++;
+      suma(s.propiedad, s.zona, s.fecha);
     }
-    return { porZona: porZona, total: tot };
+    for (var j = 0; j < (historial || []).length; j++) {
+      var h = historial[j];
+      if (!h || String(h.reportadoPor || h.vendorEmail || "").toLowerCase() !== em) continue;
+      if (esProfunda(h.tipo || h.categoria)) continue;
+      suma(h.propiedad, h.zona, h.fecha);
+    }
+    return { porZona: porZona, porProp: porProp, total: tot };
   }
 
   /* Semana ISO (lunes) — la compensación se mide de lunes a domingo. */
@@ -415,7 +444,7 @@
         base: { zonasBase: zPref.concat(zAsig) },
         semana: cargaSemana(em, existentes, f),
         rating: ratingNorm(em, ratings),
-        rot: zonasRecientes(em, existentes, o.hoy || f),
+        rot: rotacionReciente(em, existentes, o.historial, o.hoy || f),
         bloqueado: bloqueado,
         motivoBloqueo: ausente(v, f, ausencias) ? "ausencia aprobada" : (descansa(v, f) ? "día de descanso" : "")
       };
@@ -447,8 +476,14 @@
       if (!res.tec) {
         /* Una profunda no asignada no es una falta: queda pendiente para el próximo
            día en que haya limpieza en esa propiedad y espacio en la ruta. */
+        var razonBase = res.razon || "Sin técnico disponible";
+        var conZona = 0;
+        for (var cz = 0; cz < disponibles.length; cz++) {
+          if (disponibles[cz].zonas.indexOf(zonaKey(lim.zona)) >= 0) conZona++;
+        }
+        if (!conZona) razonBase = "Ningún técnico tiene " + zonaLabel(lim.zona) + " asignada — asignar a mano";
         if (esProfunda(lim.tipo)) postergadas.push({ lim: lim, razon: res.razon || "Sin espacio en la ruta" });
-        else sinAsignar.push({ lim: lim, razon: res.razon || "Sin técnico disponible" });
+        else sinAsignar.push({ lim: lim, razon: razonBase });
         continue;
       }
 
@@ -556,13 +591,21 @@
       var z = zonaKey(lim.zona);
       var s = 0, notas = [];
 
-      /* Agrupación geográfica: edificio > zona > preferencia > cercanía. */
+      /* REGLA DURA: solo se asigna dentro de las zonas que el técnico tiene
+         marcadas. Sin la zona no es candidato — ni por cercanía, ni por falta de
+         alternativa, ni en la segunda pasada. Lo que sigue solo ordena entre los
+         que ya pueden trabajar ahí. */
+      if (!z || t.zonas.indexOf(z) < 0) continue;
+
+      /* Agrupación geográfica de la ruta del día: juntar paradas es lo que ahorra
+         traslado, así que pesa más que la preferencia. */
       if (!primera && prev.edificio && lim.edificio && norm(prev.edificio) === norm(lim.edificio)) { s += 40; notas.push("mismo edificio"); }
-      else if (!primera && zonaKey(prev.zona) === z && z) { s += 28; notas.push("misma zona"); }
-      else if (t.pref.indexOf(z) >= 0) { s += 22; notas.push("zona de preferencia"); }
-      else if (t.zonas.indexOf(z) >= 0) { s += 12; notas.push("zona asignada"); }
-      else if (viaje <= 25) { s += 4; notas.push("zona cercana"); }
-      else { s -= 12; notas.push("fuera de sus zonas"); }
+      else if (!primera && zonaKey(prev.zona) === z && z) { s += 26; notas.push("misma zona"); }
+
+      /* La preferencia da prioridad DENTRO de sus zonas, sin volverse jaula: el
+         bono es moderado para que la rotación pueda ganarle. */
+      if (t.pref.indexOf(z) >= 0) { s += 14; notas.push("zona de preferencia"); }
+      else { s += 6; notas.push("zona asignada"); }
 
       s -= viaje * 0.5;
 
@@ -575,8 +618,18 @@
       s += dif * 8;
       if (dif >= 1) notas.push("va abajo esta semana");
 
-      /* Rotación: la preferencia no es exclusividad. */
-      if (t.rot.total >= 6 && z && (t.rot.porZona[z] || 0) / t.rot.total > 0.6) { s -= 14; notas.push("rotación"); }
+      /* Rotación por zona: cuando una zona ya domina el mes de un técnico, cede el
+         turno. Es lo que evita que varios con la misma preferencia se queden
+         siempre con la misma zona. */
+      if (t.rot.total >= 5 && z) {
+        var shareZ = (t.rot.porZona[z] || 0) / t.rot.total;
+        if (shareZ > 0.45) { s -= Math.min(26, (shareZ - 0.45) * 70); notas.push("rotación de zona"); }
+      }
+      /* Rotación por apartamento: repetir el mismo apartamento se penaliza de forma
+         creciente. Un apartamento visto muchas veces se deja de mirar con ojo
+         fresco, y la supervisión pierde valor. */
+      var vecesProp = t.rot.porProp[norm(lim.propiedad)] || 0;
+      if (vecesProp >= 2) { s -= Math.min(20, (vecesProp - 1) * 7); notas.push("ya lo limpió " + vecesProp + " veces este mes"); }
 
       s -= t.usados * 7;
       if (t.usados >= MAX_DIA_DEF) { s -= 40; notas.push("sobre el tope de " + MAX_DIA_DEF); }
@@ -640,7 +693,7 @@
 
       var r = planearDia({
         fecha: f, hoy: hoy, limpiezas: delDia, vendors: o.vendors,
-        ratings: o.ratings, ausencias: o.ausencias,
+        ratings: o.ratings, ausencias: o.ausencias, historial: o.historial,
         existentes: acumulado.concat(manualesDia), pesoRating: o.pesoRating
       });
       /* Solo el día siguiente se confirma y se notifica; los demás son tentativos. */
@@ -684,7 +737,7 @@
 
     var r = planearDia({
       fecha: hoy, hoy: hoy, limpiezas: nuevas, vendors: o.vendors,
-      ratings: o.ratings, ausencias: o.ausencias, existentes: existentes,
+      ratings: o.ratings, ausencias: o.ausencias, historial: o.historial, existentes: existentes,
       pesoRating: o.pesoRating
     });
     for (var a = 0; a < r.asignaciones.length; a++) {
@@ -721,7 +774,7 @@
                  unidad: s.unidad || "", habitaciones: s.habitaciones || 1, tipo: s.tipo,
                  entradaHoy: !!s.entradaHoy, codigoAcceso: s.codigoAcceso || "" };
       }),
-      vendors: libres, ratings: o.ratings,
+      vendors: libres, ratings: o.ratings, historial: o.historial,
       ausencias: (o.ausencias || []).concat([{ vendorEmail: em, fecha: f, estado: "aprobada" }]),
       existentes: resto, pesoRating: o.pesoRating
     });
@@ -814,7 +867,8 @@
     limpiezasRequeridas: limpiezasRequeridas, agregarProfundas: agregarProfundas,
     planearDia: planearDia, programar: programar,
     revisionMatutina: revisionMatutina, reajustePorAusencia: reajustePorAusencia,
-    rutaTexto: rutaTexto, ratingNorm: ratingNorm, cargaSemana: cargaSemana,
+    rutaTexto: rutaTexto, ratingNorm: ratingNorm, cargaSemana: cargaSemana, RATING_MIN_N: RATING_MIN_N,
+    rotacionReciente: rotacionReciente, ROT_DIAS: ROT_DIAS,
     estadoProfundas: estadoProfundas
   };
 })(typeof window !== "undefined" ? window : this);
