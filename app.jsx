@@ -6919,13 +6919,33 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
     try{ saveConfigItem("schedRatings", ratings); }catch(_){}
   },[ratings]);
 
+  /* Al abrir Programación se sincroniza solo si los datos están viejos (más de
+     2 horas) o si las reservas cargadas no sirven para programar. El botón queda
+     como refresco manual, no como requisito. */
+  const autoSyncRef = useRef(false);
+  useEffect(function(){
+    if(autoSyncRef.current) return;
+    autoSyncRef.current = true;
+    var lista = reservas||[];
+    var utiles = lista.filter(function(x){ return x && x.propiedad; }).length;
+    var sello = 0;
+    try{ sello = parseInt(localStorage.getItem("epi_resSync")||"0",10)||0; }catch(_){}
+    var viejo = (Date.now()-sello) > 2*3600*1000;
+    if(!utiles || viejo) sincronizar(true);
+  },[]);
+
+  /* Solo las reservas con propiedad identificada pueden programarse: sin nombre
+     no hay zona, edificio ni habitaciones. */
+  var resUtiles = (reservas||[]).filter(function(x){ return x && x.propiedad; }).length;
+
   /* ─── Traer reservas de Hospitable (checkouts + check-ins + habitaciones) */
-  async function sincronizar(){
+  async function sincronizar(silencioso){
     setBusy("sync");
     try{
       var r = await apiCall("syncReservas", {days:21});
       var list = (r && r.reservas) || [];
-      if(!list.length){ aviso("Hospitable no devolvió reservas para los próximos 21 días.", false); }
+      try{ localStorage.setItem("epi_resSync", String(Date.now())); }catch(_){}
+      if(!list.length){ if(!silencioso) aviso("Hospitable no devolvió reservas para los próximos 21 días.", false); }
       else {
         onSvReservas(list);
         /* Las habitaciones vienen con la propiedad: se guardan para el motor. */
@@ -6937,9 +6957,11 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           });
           onSvP(upd);
         }
-        aviso(list.length+" reservas sincronizadas.");
+        if(!silencioso||r.descartadas) aviso(list.length+" reservas sincronizadas."
+          +(r.descartadas?" · "+r.descartadas+" sin propiedad identificable (revisar Hospitable)":"")
+          +(r.sinHabitaciones?" · "+r.sinHabitaciones+" sin habitaciones":""));
       }
-    }catch(e){ aviso("No se pudo conectar con Hospitable: "+(e&&e.message||""), false); }
+    }catch(e){ if(!silencioso) aviso("No se pudo conectar con Hospitable: "+(e&&e.message||""), false); }
     setBusy("");
   }
 
@@ -7149,30 +7171,41 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           <div>
             <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:20,color:C.black,lineHeight:1.2}}>Programación</div>
             <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>
-              El motor corre a las 6:00 pm y programa los próximos 3 días. A las 6:00 am revisa si entraron reservas nuevas. Horario de limpieza: {SCHED.HORA_INI} a {SCHED.HORA_FIN}.
+              El motor corre a las 6:00 pm y programa los próximos 3 días. A las 6:00 am revisa si entraron reservas nuevas. Las reservas de Hospitable se sincronizan solas cada 3 horas. Horario de limpieza: {SCHED.HORA_INI} a {SCHED.HORA_FIN}.
             </div>
           </div>
           <div style={{textAlign:"right",flexShrink:0}}>
             <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Reservas</div>
-            <div style={{fontSize:17,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>{(reservas||[]).length}</div>
+            <div style={{fontSize:17,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>{resUtiles}</div>
+            {resUtiles<(reservas||[]).length&&(
+              <div style={{fontSize:9.5,color:C.orange,marginTop:2,fontWeight:600}}>{(reservas||[]).length-resUtiles} sin propiedad</div>
+            )}
           </div>
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:14}}>
           <button onClick={sincronizar} disabled={!!busy} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:busy?"default":"pointer"}}>
-            {busy==="sync"?"Sincronizando…":"↻ Traer reservas"}
+            {busy==="sync"?"Sincronizando…":"↻ Actualizar ahora"}
           </button>
-          <button onClick={generar} disabled={!!busy||!(reservas||[]).length} style={{flex:1,minWidth:170,padding:"11px 16px",minHeight:44,borderRadius:100,border:"none",background:busy||!(reservas||[]).length?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:busy?"default":"pointer",letterSpacing:".03em"}}>
+          <button onClick={generar} disabled={!!busy||!resUtiles} style={{flex:1,minWidth:170,padding:"11px 16px",minHeight:44,borderRadius:100,border:"none",background:(busy||!resUtiles)?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:(busy||!resUtiles)?"default":"pointer",letterSpacing:".03em"}}>
             {busy==="gen"?"Programando…":"Programar 3 días"}
           </button>
           <button onClick={revisarHoy} disabled={!!busy} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:busy?"default":"pointer"}}>
             Revisar hoy
           </button>
-          <button onClick={function(){ simular(dia); }} disabled={!(reservas||[]).length} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px dashed "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:(reservas||[]).length?"pointer":"default"}}>
+          <button onClick={function(){ simular(dia); }} disabled={!resUtiles} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px dashed "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:resUtiles?"pointer":"default",opacity:resUtiles?1:.5}}>
             Simulacro del día
           </button>
         </div>
         {msg&&<div style={{marginTop:11,fontSize:11.5,fontWeight:600,color:msg.ok?C.green:C.red,lineHeight:1.5}}>{msg.txt}</div>}
-        {!(reservas||[]).length&&<div style={{marginTop:11,fontSize:11.5,color:C.earth,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",lineHeight:1.6}}>Primero trae las reservas: de ahí salen los checkouts que generan cada limpieza.</div>}
+        {!resUtiles&&(
+          <div style={{marginTop:11,fontSize:11.5,color:C.earth,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",lineHeight:1.6,textWrap:"pretty"}}>
+            {busy==="sync"
+              ? "Sincronizando reservas con Hospitable…"
+              : (reservas||[]).length
+                ? "Llegaron "+(reservas||[]).length+" reservas pero ninguna trae la propiedad identificada, así que no se puede saber la zona ni las habitaciones. Republica el Code.gs y presiona Actualizar ahora."
+                : "Aún no hay reservas cargadas. Se traen solas al abrir esta pestaña; si no aparecen, presiona Actualizar ahora."}
+          </div>
+        )}
       </div>
 
       {/* Ausencias por aprobar */}

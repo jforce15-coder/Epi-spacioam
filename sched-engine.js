@@ -181,7 +181,8 @@
       if (!r || !r.checkOut) continue;
       var f = String(r.checkOut).slice(0, 10);
       if (f < desde || f > hasta) continue;
-      var nombre = r.propiedad || "";
+      var nombre = String(r.propiedad || "").trim();
+      if (!nombre) continue;
       var k = f + "|" + norm(nombre);
       if (vistos[k]) continue;
       vistos[k] = 1;
