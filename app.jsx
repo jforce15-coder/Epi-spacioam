@@ -728,7 +728,8 @@ var NOTIF_DEFAULTS = {
   listaSupervision:{supervisores:1}, correccionAtendida:{supervisores:1,adminPrincipal:1,adminSecundarios:1},
   ratingRevision:{adminPrincipal:1,adminSecundarios:1,supervisores:1},
   danoUrgente:{adminPrincipal:1,adminSecundarios:1}, solicitudAdelanto:{adminPrincipal:1,adminSecundarios:1},
-  adelantoFirma:{tecnico:1}, adelantoDepositado:{tecnico:1}, comprobantePago:{tecnico:1}
+  adelantoFirma:{tecnico:1}, adelantoDepositado:{tecnico:1}, comprobantePago:{tecnico:1},
+  ausencia:{adminPrincipal:1,adminSecundarios:1}
 };
 function notifPrefFor(type){ var p=NOTIF_PREFS&&NOTIF_PREFS[type]; return p?p:(NOTIF_DEFAULTS[type]||{}); }
 /* Admin principal: el marcado con adminPrincipal, o (por defecto) el usuario "Juan Ovalle". */
@@ -830,12 +831,15 @@ function ls_loadAll(){
     feedback:  ls_get("c:fb")||null,
     notifprefs: ls_get("c:notif")||null,
     nomAjustes: ls_get("c:nomaj")||null,
+    regSol: ls_get("c:regsol")||null,
+    reservas: ls_get("c:resv")||null,
+    ausencias: ls_get("c:aus")||null,
   };
   return {reports:reps.sort(function(a,b){return (b.createdAt||b.id)-(a.createdAt||a.id);}), ...cfg};
 }
 function ls_saveReport(rep){ls_set("m:"+rep.id,rep);}
 function ls_deleteReport(id){ls_del("m:"+id);}
-function ls_saveConfig(key,value){var km={vendors:"c:v",props:"c:p",adminpin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj"};ls_set(km[key]||key,value);}
+function ls_saveConfig(key,value){var km={vendors:"c:v",props:"c:p",adminpin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus"};ls_set(km[key]||key,value);}
 
 /* Rescate de arreglos JSON dañados. Si una celda de Config quedó con JSON válido
    seguido de basura (p.ej. una restauración que dejó '...]" por "[...]'), extrae el
@@ -907,6 +911,9 @@ async function loadAllData() {
       reviews:   d.reviews || [],
       rvCasos:   d.rvCasos || [],
       nomAjustes: d.nomAjustes || [],
+      regSol: d.regSol || [],
+      reservas: d.reservas || [],
+      ausencias: d.ausencias || [],
     };
   }
   /* Carga SECUENCIAL (no Promise.all): el Apps Script ocasionalmente mezcla las
@@ -943,6 +950,9 @@ async function loadAllData() {
     rvCasos: Array.isArray(cfg.rvCasos) ? cfg.rvCasos : [],
     rvIA: (cfg.rvIA && typeof cfg.rvIA==="object") ? cfg.rvIA : {},
     nomAjustes: Array.isArray(cfg.nomAjustes) ? cfg.nomAjustes : [],
+    regSol: Array.isArray(cfg.regSol) ? cfg.regSol : [],
+    reservas: Array.isArray(cfg.reservas) ? cfg.reservas : [],
+    ausencias: Array.isArray(cfg.ausencias) ? cfg.ausencias : [],
   };
 }
 
@@ -1113,7 +1123,7 @@ async function deleteReportById(id) {
 
 async function saveConfigItem(key, value) {
   if(IS_CLAUDE_SANDBOX){
-    var ls_km={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj"};
+    var ls_km={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus"};
     ls_set(ls_km[key]||key,value);
     return;
   }
@@ -1138,7 +1148,7 @@ async function saveConfigItem(key, value) {
   } catch(e) {
     console.error("saveConfig failed for key "+key+":", e.message);
     /* Fallback to localStorage so data isn't lost */
-    var ls_km2={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj"};
+    var ls_km2={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus"};
     ls_set(ls_km2[key]||key,value);
   }
 }
@@ -1239,6 +1249,15 @@ function App() {
   /* Planilla administrativa: bonos y ajustes asignados por el admin principal. */
   const [nomAjustes, setNomAjustes] = useState([]);
   async function svNomAjustes(v){ setNomAjustes(v); saveConfigItem("nomAjustes", v); }
+  /* Solicitudes recibidas por los enlaces públicos de registro. */
+  const [regSol, setRegSol] = useState([]);
+  async function svRegSol(v){ setRegSol(v); saveConfigItem("regSol", v); }
+  /* Programación propia: reservas traídas de Hospitable (de ahí salen los checkouts
+     que generan cada limpieza) y ausencias reportadas por los técnicos. */
+  const [reservas, setReservas] = useState([]);
+  const [ausencias, setAusencias] = useState([]);
+  async function svReservas(v){ setReservas(v); saveConfigItem("reservas", v); }
+  async function svAusencias(v){ setAusencias(v); saveConfigItem("ausencias", v); }
   const [notifPrefs, setNotifPrefs] = useState({});
   /* Reviews de huéspedes (calificación de limpieza importada de las plataformas) */
   const [reviews, setReviews] = useState([]);
@@ -1329,6 +1348,9 @@ function App() {
       }
       setPagos(pgFinal);
       setNomAjustes(Array.isArray(d.nomAjustes)?d.nomAjustes:[]);
+      setRegSol(Array.isArray(d.regSol)?d.regSol:[]);
+      setReservas(Array.isArray(d.reservas)?d.reservas:[]);
+      setAusencias(Array.isArray(d.ausencias)?d.ausencias:[]);
       setNotifPrefs(d.notifprefs||{}); NOTIF_PREFS=d.notifprefs||{};
       setSheetsOk(!IS_CLAUDE_SANDBOX);
       setReady(true); setSyncing(false);
@@ -1476,6 +1498,10 @@ function App() {
     setSess(null);
   }
 
+  /* Enlace público de registro — no requiere sesión ni datos cargados. */
+  var _rutaReg=String((typeof location!=="undefined"&&location.hash)||"").match(/^#\/?registro\/([a-z]+)/i);
+  if(_rutaReg) return <ErrorBoundary><RegistroPublico tipo={String(_rutaReg[1]).toLowerCase()} company={company}/></ErrorBoundary>;
+
   var inner;
   if (!ready) {
     inner = <Loader/>;
@@ -1487,9 +1513,9 @@ function App() {
     var freshV = vendors.find(function(x){return x.id===sess.vendor.id;}) || vendors.find(function(x){return x.email===sess.vendor.email;}) || sess.vendor;
     var needsOnb = isEpiLimpieza(freshV) && !freshV.notifSetupDone && !onbDone;
     try{ if(localStorage.getItem("epi_onboard_done_"+freshV.id)) needsOnb=false; }catch(_){}
-    inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
+    inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={schedules} ausencias={ausencias} onSvAusencias={svAusencias} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
   } else {
-    inner = <AdminApp nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
+    inner = <AdminApp reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
   }
   return <ErrorBoundary>{inner}</ErrorBoundary>;
 }
@@ -1757,7 +1783,7 @@ function NotifCfg({prefs, vendors, onSave, readOnly}){
 }
 
 /* ═══ ADMIN */
-function AdminApp({nomAjustes,onSvNomAjustes,reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
+function AdminApp({reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegSol,nomAjustes,onSvNomAjustes,reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
   const [tab,    setTab]    = useState("dash");
   const [detail, setDetail] = useState(null);
   const [cDel,   setCDel]   = useState(null);
@@ -1772,7 +1798,23 @@ function AdminApp({nomAjustes,onSvNomAjustes,reviews,onSvReviews,rvCasos,onSvRvC
     if(!vendors||!vendors.length) return;
     /* Migración: comprobantes creados antes de que los adelantos vivieran en el módulo
        de Adelantos (descuento sin `advDebitos`) se descartan y se regeneran. */
-    var limpios=(pagos||[]).filter(function(p){ return !(p&&p.nomina&&!p.nomina.advDebitos); });
+    /* Un comprobante cuyo débito no coincide con la cuota vigente del adelanto quedó
+       desfasado (cambió la cuota después de emitirlo): se descarta y se vuelve a generar. */
+    function debitoDesfasado(p){
+      var ds=(p.nomina&&p.nomina.advDebitos)||[];
+      return ds.some(function(d){
+        var a=(adelantos||[]).find(function(x){ return x.id===d.advId; });
+        if(!a) return false;
+        var q=advCuota(a);
+        return q>0 && Math.abs(nomN(d.monto)-q)>0.005 && nomN(d.monto)<q;
+      });
+    }
+    var limpios=(pagos||[]).filter(function(p){
+      if(!(p&&p.nomina)) return true;
+      if(!p.nomina.advDebitos) return false;
+      if(p.anticipado&&p.fechaPago==="2026-07-29") return false;
+      return !debitoDesfasado(p);
+    });
     if(limpios.length!==(pagos||[]).length){ if(onSvPagos) onSvPagos(limpios); return; }
     var res=nomGenerarPendientes({vendors:vendors,pagos:pagos,ajustes:nomAjustes,adelantos:adelantos});
     if(!res.nuevos.length) return;
@@ -1868,54 +1910,41 @@ function AdminApp({nomAjustes,onSvNomAjustes,reviews,onSvReviews,rvCasos,onSvRvC
         tab={tab} setTab={setTab}
         alertCount={alerts.length} pendingQA={pendingQA} sheetsOk={sheetsOk} adminLabel={adminVendor?vendorDisplay(adminVendor):"Admin"}
         navItems={[["dash","Dashboard","dash"],["form","Formulario","edit"],["sched","Programa","calendar"],["qa","Calidad","star"],["adv","Adelantos","coins"]]}
-        onConfig={function(){setTab("cfg");}} configActive={tab==="cfg"}
+        onConfig={canNotif?function(){setTab("cfg");}:null} configActive={tab==="cfg"}
         onLogout={onLogout}
         role="Admin"
       />
 
-      <div style={{display:tab==="dash"?"block":"none"}}><DashView nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh}/></div>
+      <div style={{display:tab==="dash"?"block":"none"}}><DashView nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} meEmails={adminVendor?vendorEmailSet(adminVendor):[]} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh}/></div>
       <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
       <div style={{display:tab==="sched"?"block":"none"}}>
-        <ScheduleCfg schedules={schedules||[]} vendors={vendors||[]} props={props||[]} hospUrlDay={hospUrlDay||""} hospUrlWeek={hospUrlWeek||""} onSave={onSvSchedules} onSaveHospUrlDay={onSvHospUrlDay} onSaveHospUrlWeek={onSvHospUrlWeek}/>
-        {/* Hospitable iframes — reference view for admin */}
-        {(hospUrlDay||hospUrlWeek)&&(
-          <div style={{padding:"0 16px 60px",fontFamily:"Montserrat,sans-serif",maxWidth:700,margin:"0 auto"}}>
-            {hospUrlDay&&(
-              <div style={{marginBottom:20}}>
-                <div style={{fontSize:9.5,fontWeight:700,color:"#938B8A",letterSpacing:".18em",textTransform:"uppercase",marginBottom:8}}>Programa de hoy (Hospitable)</div>
-                <div style={{borderRadius:10,overflow:"hidden",border:"1px solid #D8D4CE"}}>
-                  <iframe src={hospUrlDay} title="Hoy" style={{width:"100%",height:420,border:"none",display:"block"}} sandbox="allow-scripts allow-same-origin allow-popups allow-forms"/>
-                </div>
-                <a href={hospUrlDay} target="_blank" rel="noopener noreferrer" style={{display:"block",textAlign:"center",marginTop:8,fontSize:11.5,color:"#938B8A",textDecoration:"none"}}>↗ Abrir en pantalla completa</a>
-              </div>
-            )}
-            {hospUrlWeek&&(
-              <div>
-                <div style={{fontSize:9.5,fontWeight:700,color:"#938B8A",letterSpacing:".18em",textTransform:"uppercase",marginBottom:8}}>Programa semanal (Hospitable)</div>
-                <div style={{borderRadius:10,overflow:"hidden",border:"1px solid #D8D4CE"}}>
-                  <iframe src={hospUrlWeek} title="Semana" style={{width:"100%",height:460,border:"none",display:"block"}} sandbox="allow-scripts allow-same-origin allow-popups allow-forms"/>
-                </div>
-                <a href={hospUrlWeek} target="_blank" rel="noopener noreferrer" style={{display:"block",textAlign:"center",marginTop:8,fontSize:11.5,color:"#938B8A",textDecoration:"none"}}>↗ Abrir en pantalla completa</a>
-              </div>
-            )}
-          </div>
-        )}
+        <ProgramacionAdmin schedules={schedules||[]} onSvSchedules={onSvSchedules} vendors={vendors||[]} props={props||[]}
+          reservas={reservas||[]} onSvReservas={onSvReservas} ausencias={ausencias||[]} onSvAusencias={onSvAusencias}
+          reps={reps} reviews={reviews} rvCasos={rvCasos} onSvP={onSvP} canNom={canNotif}/>
       </div>
       <div style={{display:tab==="qa"?"block":"none"}}>
         <AdminQAPanel reps={reps} vendors={vendors} reviews={reviews} onSvReviews={onSvReviews} rvCasos={rvCasos} onSvRvCasos={onSvRvCasos} rvIA={rvIA} onSvRvIA={onSvRvIA} onQA={qaUpdate} onSelect={setDetail} onUpdate={onUpsert} isAdmin={true} me={adminVendor}/>
       </div>
-      <div style={{display:tab==="adv"?"block":"none"}}><AdvancesAdmin adelantos={adelantos} reps={reps} vendors={vendors} onSvAdelantos={onSvAdelantos}/></div>
-      <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  reps={reps} vendors={vendors} props={props} adminPin={adminPin} company={company} extCats={extCats||[]} notifPrefs={notifPrefs} canNotif={canNotif} onSvNotifPrefs={onSvNotifPrefs} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
+      {/* Adelantos: gestión completa solo para el admin principal. Un admin secundario
+          ve únicamente los suyos y puede solicitar, como cualquier colaborador. */}
+      <div style={{display:tab==="adv"?"block":"none"}}>
+        {canNotif
+          ? <AdvancesAdmin adelantos={adelantos} reps={reps} vendors={vendors} onSvAdelantos={onSvAdelantos}/>
+          : (adminVendor
+              ? <AdvanceRequest vendor={adminVendor} reps={(reps||[]).filter(function(r){return repMatchesVendor(r,adminVendor);})} adelantos={(adelantos||[]).filter(function(a){return vendorEmailSet(adminVendor).map(function(e){return String(e).toLowerCase();}).indexOf(String(a.vendorEmail||"").toLowerCase())>=0;})} onSvAdelantos={onSvAdelantos}/>
+              : null)}
+      </div>
+      {canNotif&&<div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  regSol={regSol} onSvRegSol={onSvRegSol} reps={reps} vendors={vendors} props={props} adminPin={adminPin} company={company} extCats={extCats||[]} notifPrefs={notifPrefs} canNotif={canNotif} onSvNotifPrefs={onSvNotifPrefs} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>}
 
       {detail&&<DetailModal rep={detail} vendors={vendors} props={props} hasLinkedDmg={reps.some(function(x){return isDanos(x.categoria)&&String(x._linkedToReport||"")===String(detail.id);})} onExtract={extractDanios} onClose={function(){setDetail(null);}} onMarkPaid={function(p){markPaid(detail.id,p);setDetail(function(x){return Object.assign({},x,{paid:p});});}} onSave={function(r){onUpsert(r);setDetail(r);}} onQA={qaUpdate} onDelete={function(){setCDel(detail.id);}}/>}
       {cDel&&<Overlay><ConfirmDel onCancel={function(){setCDel(null);}} onConfirm={function(){onDelete(cDel);setCDel(null);setDetail(null);}}/></Overlay>}
-      {pagoDetail&&<PagoComprobanteModal pago={pagoDetail} company={company} isAdmin={true} focusEmail={null} pagos={pagos} onSvPagos={onSvPagos} onClose={function(){setPagoDetail(null);}}/>}
+      {pagoDetail&&<PagoComprobanteModal pago={pagoDetail} company={company} isAdmin={canNotif} focusEmail={canNotif?null:((adminVendor&&adminVendor.email)||null)} pagos={pagos} onSvPagos={onSvPagos} onClose={function(){setPagoDetail(null);}}/>}
     </div>
   );
 }
 
 /* ─── Dashboard container */
-function DashView({nomAjustes,onSvNomAjustes,canNom,onSvV,reviews,rvCasos,rvIA,reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
+function DashView({nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews,rvCasos,rvIA,reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
   const [sub,setSub] = useState("ops");
   return (
     <div>
@@ -1927,7 +1956,9 @@ function DashView({nomAjustes,onSvNomAjustes,canNom,onSvV,reviews,rvCasos,rvIA,r
       </div>
       <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} adelantos={adelantos} onMarkPaidBatch={onMarkPaidBatch} onSelect={onSelect} onMarkPaid={onMarkPaid} onRefresh={onRefresh}/></div>
       <div style={{display:sub==="exec"?"block":"none"}}><ExecDash reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos}/></div>
-      <div style={{display:sub==="pagos"?"block":"none"}}><PagosHistory pagos={pagos} vendors={vendors} company={company} isAdmin={true} onSvPagos={onSvPagos}/></div>
+      {/* Historial de pagos: el admin principal ve todos los comprobantes; un admin
+          secundario solo los suyos, igual que un técnico. */}
+      <div style={{display:sub==="pagos"?"block":"none"}}><PagosHistory pagos={pagos} vendors={vendors} company={company} isAdmin={canNom} meEmails={canNom?null:meEmails} onSvPagos={canNom?onSvPagos:null}/></div>
       {canNom&&<div style={{display:sub==="planilla"?"block":"none"}}><NominaAdmin vendors={vendors} pagos={pagos} adelantos={adelantos} onSvPagos={onSvPagos} ajustes={nomAjustes||[]} onSvAjustes={onSvNomAjustes} onSvV={onSvV}/></div>}
     </div>
   );
@@ -4065,7 +4096,7 @@ function OrphanEmailLinker({reps, vendors, onSvV}) {
 }
 
 /* ─── Config */
-function CfgView({reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,notifPrefs,canNotif,onSvNotifPrefs,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback}) {
+function CfgView({regSol,onSvRegSol,canNotif:_cn,reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,notifPrefs,canNotif,onSvNotifPrefs,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback}) {
   const [tab,setTab] = useState("vendors");
   return (
     <div style={{maxWidth:640,margin:"0 auto",padding:"28px 18px 60px",fontFamily:"Montserrat,sans-serif"}}>
@@ -4073,10 +4104,7 @@ function CfgView({reps,vendors,props,adminPin,company,extCats,schedules,hospUrlD
       <div style={{display:"flex",background:"#fff",borderRadius:10,padding:4,gap:3,marginBottom:18,border:"1px solid "+C.gray,flexWrap:"wrap"}}>
         {[["vendors","Equipo"],["props","Propiedades"]].concat(canNotif?[["notif","Notificaciones"]]:[]).concat([["feedback","Sugerencias"],["company","Empresa"],["security","Seguridad"]]).map(function(it){ var k=it[0],l=it[1]; return <button key={k} onClick={function(){setTab(k);}} style={{flex:1,minWidth:90,padding:"9px 6px",borderRadius:8,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,fontSize:12,letterSpacing:".06em",transition:"all .2s"}}>{l}</button>; })}
       </div>
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:18,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:8,padding:"9px 13px",fontSize:11.5,color:C.earth,lineHeight:1.5}}>
-        ℹ La <strong>programación</strong> se gestiona en su propia pestaña. La <strong>recuperación de fotos</strong> ahora es automática (3 min después de cada limpieza y revisión periódica).
-      </div>
-      <div style={{display:tab==="vendors"  ?"block":"none"}}><VendorsCfg  vendors={vendors} extCats={extCats||[]} onSave={onSvV} onSaveExtCats={onSvExtCats}/><OrphanEmailLinker reps={reps} vendors={vendors} onSvV={onSvV}/></div>
+      <div style={{display:tab==="vendors"  ?"block":"none"}}>{_cn&&<RegistroCfg regSol={regSol||[]} onSvRegSol={onSvRegSol} vendors={vendors} onSaveVendors={onSvV}/>}<VendorsCfg  vendors={vendors} extCats={extCats||[]} onSave={onSvV} onSaveExtCats={onSvExtCats} props={props||[]} reps={reps||[]}/><OrphanEmailLinker reps={reps} vendors={vendors} onSvV={onSvV}/></div>
       {canNotif&&<div style={{display:tab==="notif"?"block":"none"}}><NotifCfg prefs={notifPrefs} vendors={vendors} onSave={onSvNotifPrefs} readOnly={false}/></div>}
       <div style={{display:tab==="feedback"?"block":"none"}}><FeedbackCfg feedback={feedback||[]} onSave={onSvFeedback}/></div>
       <div style={{display:tab==="props"   ?"block":"none"}}><PropsCfg    props={props}     onSave={onSvP}/></div>
@@ -4087,7 +4115,346 @@ function CfgView({reps,vendors,props,adminPin,company,extCats,schedules,hospUrlD
 }
 
 
-function VendorsCfg({vendors, extCats, onSave, onSaveExtCats}) {
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   REGISTRO POR ENLACE
+   Cada perfil tiene su propio enlace. La persona llena sus datos una sola vez
+   y al administrador le llega una solicitud lista para convertir en usuario.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var REG_TIPOS = {
+  interno: {
+    label:"Equipo de limpieza",
+    corto:"Interno · limpieza",
+    intro:"Bienvenida al equipo",
+    sub:"Necesitamos tus datos para darte acceso al sistema y programar tus pagos.",
+    pitch:false, empresa:false, factura:false,
+    tipo:"interno", categoria:"EPI Limpieza"
+  },
+  mantenimiento: {
+    label:"Equipo de mantenimiento",
+    corto:"Interno · mantenimiento",
+    intro:"Bienvenido al equipo",
+    sub:"Necesitamos tus datos para darte acceso al sistema y programar tus pagos.",
+    pitch:false, empresa:false, factura:false,
+    tipo:"interno", categoria:"EPI Mantenimiento"
+  },
+  administrativo: {
+    label:"Colaborador administrativo",
+    corto:"Administrativo · planilla",
+    intro:"Bienvenido a Spacio AM",
+    sub:"Con estos datos preparamos tu contrato, tu planilla y tu acceso al sistema.",
+    pitch:false, empresa:false, factura:false,
+    tipo:"interno", categoria:"Administrativo"
+  },
+  proveedor: {
+    label:"Proveedor externo",
+    corto:"Externo · proveedor",
+    intro:"Trabajemos juntos",
+    sub:"Registrarte toma dos minutos y cambia por completo la forma en que trabajamos contigo.",
+    pitch:true, empresa:true, factura:true,
+    tipo:"externo", categoria:""
+  }
+};
+var REG_PITCH = [
+  ["Tus pagos, a la vista","Cada trabajo que reportas queda registrado con su monto. Ves qué está pendiente, qué ya se pagó y con qué comprobante — sin llamadas ni recordatorios."],
+  ["Reportas desde el teléfono","Terminas un trabajo, subes las fotos y queda documentado. Eso es lo que autoriza tu pago: sin reporte no hay cómo respaldarlo."],
+  ["Facturas ordenadas","Subes tu factura al mismo sistema y queda ligada a los trabajos que cubre. Nada se traspapela."],
+  ["Un solo historial","Todo lo que has hecho con nosotros en un solo lugar — útil para ti y para nosotros cuando toca revisar."]
+];
+function regLink(tipo){
+  var base=(typeof location!=="undefined") ? (location.origin+location.pathname) : "";
+  return base+"#/registro/"+tipo;
+}
+function RegistroPublico({tipo, company}) {
+  var cfg = REG_TIPOS[tipo] || REG_TIPOS.proveedor;
+  const [f,     setF]    = useState({primerNombre:"",segundoNombre:"",primerApellido:"",segundoApellido:"",empresa:"",email:"",phone:"",dpi:"",nit:"",direccion:"",banco:"",tipoCuenta:"Monetaria",cuenta:"",titular:"",servicios:"",nota:""});
+  const [busy,  setBusy] = useState(false);
+  const [done,  setDone] = useState(false);
+  const [err,   setErr]  = useState("");
+
+  function set(k,v){ setF(function(p){ var u=Object.assign({},p); u[k]=v; return u; }); }
+  var faltan = !f.primerNombre.trim() || !f.primerApellido.trim() || !f.email.trim() || !f.phone.trim() || (cfg.empresa && !f.empresa.trim());
+  var mailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email.trim());
+
+  async function enviar(){
+    if(faltan||busy) return;
+    if(!mailOk){ setErr("Revisa el correo — no parece válido."); return; }
+    setBusy(true); setErr("");
+    try{
+      var d = await loadAllData();
+      var lista = Array.isArray(d.regSol) ? d.regSol.slice() : [];
+      var ya = lista.some(function(s){ return String(s.email||"").toLowerCase().trim()===f.email.toLowerCase().trim() && s.estado!=="rechazada"; });
+      if(ya){ setDone(true); setBusy(false); return; }
+      lista.unshift(Object.assign({}, f, {
+        id:"rs_"+Date.now()+"_"+Math.floor(Math.random()*1000),
+        perfil:tipo, perfilLabel:cfg.corto, estado:"nueva", fecha:todayStr(), createdAt:Date.now()
+      }));
+      await saveConfigItem("regSol", lista);
+      setDone(true);
+    }catch(e){
+      setErr("No pudimos enviar el formulario. Revisa tu conexión e inténtalo otra vez.");
+    }
+    setBusy(false);
+  }
+
+  var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6};
+  var IN={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:10,padding:"12px 13px",fontSize:13.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",color:C.black,minHeight:46};
+  function F({label,k,ph,type,opt}){
+    return (
+      <div>
+        <span style={LBL}>{label}{opt?<span style={{color:C.taupe,fontWeight:600,letterSpacing:0,textTransform:"none"}}> · opcional</span>:""}</span>
+        <input value={f[k]} type={type||"text"} onChange={function(e){set(k,e.target.value);}} placeholder={ph||""} style={IN}/>
+      </div>
+    );
+  }
+  var G={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:13};
+
+  if(done) return (
+    <div style={{minHeight:"100vh",background:C.beige,fontFamily:"Montserrat,sans-serif",display:"flex",alignItems:"center",justifyContent:"center",padding:"28px 18px"}}>
+      <div style={{background:"#fff",borderRadius:20,maxWidth:460,padding:"44px 34px",textAlign:"center",boxShadow:"0 4px 16px rgba(62,63,63,.05)"}}>
+        <div style={{fontSize:34,color:C.green,lineHeight:1}}>✦</div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:26,color:C.black,marginTop:14,lineHeight:1.25}}>Recibimos tus datos</div>
+        <div style={{fontSize:13.5,color:C.earth,lineHeight:1.75,marginTop:12,textWrap:"pretty"}}>Alguien del equipo los revisa y te escribe a <b style={{color:C.black}}>{f.email}</b> con tu usuario y contraseña. Ya puedes cerrar esta página.</div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{minHeight:"100vh",background:C.beige,fontFamily:"Montserrat,sans-serif",padding:"0 0 60px"}}>
+      <div style={{maxWidth:640,margin:"0 auto",padding:"0 18px"}}>
+        <div style={{padding:"46px 0 30px",textAlign:"center"}}>
+          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,letterSpacing:".22em",color:C.black}}>SPACIO</div>
+          <div style={{fontSize:9.5,letterSpacing:".5em",color:C.earth,marginTop:3}}>A — M</div>
+        </div>
+
+        <div style={{background:"#fff",borderRadius:20,padding:"32px 28px",boxShadow:"0 4px 16px rgba(62,63,63,.05)",marginBottom:16}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".28em",textTransform:"uppercase"}}>{cfg.corto}</div>
+          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:30,color:C.black,marginTop:9,lineHeight:1.2,textWrap:"balance"}}>{cfg.intro}</div>
+          <div style={{fontSize:14,color:C.earth,lineHeight:1.75,marginTop:11,textWrap:"pretty"}}>{cfg.sub}</div>
+
+          {cfg.pitch&&(
+            <div style={{marginTop:26,borderTop:"1px solid "+C.line,paddingTop:24,display:"flex",flexDirection:"column",gap:18}}>
+              <div style={{fontSize:13.5,color:C.black,lineHeight:1.8,textWrap:"pretty"}}>
+                Trabajamos con un sistema propio donde vive todo lo que pasa entre nosotros. No es un trámite — es lo que hace que te paguemos a tiempo y sin discusiones.
+              </div>
+              {REG_PITCH.map(function(p,i){
+                return (
+                  <div key={i} style={{display:"flex",gap:14,alignItems:"flex-start"}}>
+                    <div style={{width:26,flexShrink:0,fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:17,color:C.peach,lineHeight:1.3}}>{("0"+(i+1)).slice(-2)}</div>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:13.5,fontWeight:600,color:C.black}}>{p[0]}</div>
+                      <div style={{fontSize:12.5,color:C.earth,lineHeight:1.7,marginTop:3,textWrap:"pretty"}}>{p[1]}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div style={{background:"#fff",borderRadius:20,padding:"28px",boxShadow:"0 4px 16px rgba(62,63,63,.05)",display:"flex",flexDirection:"column",gap:20}}>
+          <div>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".22em",textTransform:"uppercase",marginBottom:14}}>Tus datos</div>
+            <div style={G}>
+              <F label="Primer nombre"   k="primerNombre"/>
+              <F label="Segundo nombre"  k="segundoNombre" opt/>
+              <F label="Primer apellido" k="primerApellido"/>
+              <F label="Segundo apellido"k="segundoApellido" opt/>
+            </div>
+          </div>
+          {cfg.empresa&&(
+            <div style={G}>
+              <F label="Empresa o nombre comercial" k="empresa"/>
+              <F label="Servicios que ofreces" k="servicios" ph="Ej. plomería, cerrajería" opt/>
+            </div>
+          )}
+          <div>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".22em",textTransform:"uppercase",marginBottom:14}}>Contacto</div>
+            <div style={G}>
+              <F label="Correo"   k="email" type="email" ph="tu@correo.com"/>
+              <F label="Teléfono" k="phone" type="tel"   ph="5555 5555"/>
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".22em",textTransform:"uppercase",marginBottom:14}}>Identificación</div>
+            <div style={G}>
+              <F label="DPI" k="dpi" ph="0000 00000 0000" opt/>
+              <F label={cfg.factura?"NIT":"NIT"} k="nit" opt/>
+            </div>
+            <div style={{marginTop:13}}><F label="Dirección" k="direccion" opt/></div>
+          </div>
+          <div>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".22em",textTransform:"uppercase",marginBottom:6}}>Cuenta para tus pagos</div>
+            <div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6,marginBottom:14}}>Ahí depositamos. Puedes dejarlo en blanco y darlo después.</div>
+            <div style={G}>
+              <F label="Banco" k="banco" opt/>
+              <div>
+                <span style={LBL}>Tipo de cuenta</span>
+                <select value={f.tipoCuenta} onChange={function(e){set("tipoCuenta",e.target.value);}} style={Object.assign({},IN,{cursor:"pointer"})}>
+                  <option value="Monetaria">Monetaria</option>
+                  <option value="Ahorro">Ahorro</option>
+                </select>
+              </div>
+              <F label="Número de cuenta" k="cuenta" opt/>
+              <F label="A nombre de" k="titular" opt/>
+            </div>
+          </div>
+          <div>
+            <span style={LBL}>Algo más que debamos saber · opcional</span>
+            <textarea value={f.nota} onChange={function(e){set("nota",e.target.value);}} rows={3} placeholder="Horarios, zonas donde trabajas, lo que quieras contarnos."
+              style={Object.assign({},IN,{lineHeight:1.7,resize:"vertical",minHeight:80})}/>
+          </div>
+
+          {err&&<div style={{fontSize:12.5,color:C.red,background:"#F5EDEC",padding:"11px 13px",borderRadius:9,lineHeight:1.5}}>{err}</div>}
+          <button onClick={enviar} disabled={faltan||busy} style={{padding:"16px",borderRadius:100,border:"none",background:faltan||busy?C.gray:C.black,color:"#fff",fontSize:13.5,fontWeight:600,letterSpacing:".05em",cursor:faltan||busy?"default":"pointer",minHeight:52}}>
+            {busy?"Enviando…":"Enviar mis datos →"}
+          </button>
+          <div style={{fontSize:11,color:C.taupe,textAlign:"center",lineHeight:1.7}}>Usamos tus datos solo para gestionar tu relación de trabajo con Spacio AM.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Enlaces de registro y solicitudes recibidas (Configuración › Usuarios) */
+function RegistroCfg({regSol, onSvRegSol, vendors, onSaveVendors}) {
+  const [copiado, setCopiado] = useState("");
+  const [abierta, setAbierta] = useState(null);
+  const [pass,    setPass]    = useState("");
+
+  var lista=(regSol||[]).slice().sort(function(a,b){return (b.createdAt||0)-(a.createdAt||0);});
+  var nuevas=lista.filter(function(s){return (s.estado||"nueva")==="nueva";});
+  var listas=lista.filter(function(s){return (s.estado||"nueva")!=="nueva";}).slice(0,10);
+
+  function copiar(tipo){
+    var url=regLink(tipo);
+    try{ navigator.clipboard.writeText(url); }catch(_){}
+    setCopiado(tipo); setTimeout(function(){ setCopiado(""); },2200);
+  }
+  function crearUsuario(s){
+    var cfg=REG_TIPOS[s.perfil]||REG_TIPOS.proveedor;
+    var pw=String(pass||"").trim();
+    if(pw.length<4){ return; }
+    var yaExiste=(vendors||[]).some(function(v){ return String(v.email||"").toLowerCase().trim()===String(s.email||"").toLowerCase().trim(); });
+    if(yaExiste && !window.confirm("Ya hay un usuario con ese correo. ¿Crear otro de todos modos?")) return;
+    var nuevo={
+      id:"v"+Date.now(),
+      name:[s.primerNombre,s.primerApellido].filter(Boolean).join(" "),
+      primerNombre:s.primerNombre||"", segundoNombre:s.segundoNombre||"",
+      primerApellido:s.primerApellido||"", segundoApellido:s.segundoApellido||"",
+      empresa:s.empresa||"", tipo:cfg.tipo, categoria:cfg.categoria||s.servicios||"",
+      email:String(s.email||"").trim(), password:pw, phone:s.phone||"",
+      dpi:s.dpi||"", nit:s.nit||"", direccion:s.direccion||"",
+      banco:s.banco||"", tipoCuenta:s.tipoCuenta||"", cuenta:s.cuenta||"", titular:s.titular||"",
+      tarifaLimpieza:0, active:true, isAdmin:false
+    };
+    if(s.perfil==="administrativo"){ nuevo.planilla=true; nuevo.bonifDecreto=250; nuevo.planillaDesde=todayStr().slice(0,8)+"01"; }
+    onSaveVendors((vendors||[]).concat([nuevo]));
+    onSvRegSol&&onSvRegSol((regSol||[]).map(function(x){ return x.id===s.id?Object.assign({},x,{estado:"creada",vendorId:nuevo.id,resueltaEn:todayStr()}):x; }));
+    setAbierta(null); setPass("");
+  }
+  function rechazar(s){
+    if(!window.confirm("¿Descartar la solicitud de "+[s.primerNombre,s.primerApellido].filter(Boolean).join(" ")+"?")) return;
+    onSvRegSol&&onSvRegSol((regSol||[]).map(function(x){ return x.id===s.id?Object.assign({},x,{estado:"rechazada",resueltaEn:todayStr()}):x; }));
+  }
+
+  var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6};
+  return (
+    <div style={{marginBottom:22}}>
+      <Card title="Enlaces de registro">
+        <div style={{fontSize:12,color:C.earth,lineHeight:1.65,marginBottom:14,textWrap:"pretty"}}>Envía el enlace que corresponda. La persona llena sus datos y aquí te llega la solicitud lista para crear el usuario.</div>
+        <div style={{display:"flex",flexDirection:"column",gap:9}}>
+          {Object.keys(REG_TIPOS).map(function(k){
+            var t=REG_TIPOS[k];
+            return (
+              <div key={k} style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",background:C.surfaceWarm,borderRadius:11,padding:"12px 14px"}}>
+                <div style={{flex:"1 1 190px",minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,color:C.black}}>{t.label}</div>
+                  <div style={{fontSize:10.5,color:C.taupe,marginTop:2,wordBreak:"break-all"}}>{regLink(k)}</div>
+                </div>
+                <button onClick={function(){copiar(k);}} style={{padding:"9px 16px",minHeight:44,borderRadius:100,border:"none",background:copiado===k?C.green:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer",flexShrink:0}}>
+                  {copiado===k?"✓ Copiado":"Copiar enlace"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{fontSize:11.5,color:C.earth,lineHeight:1.7,marginTop:14,background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"11px 13px"}}>
+          El enlace de <b style={{color:C.black}}>proveedor externo</b> abre con una explicación de por qué le conviene entrar al sistema — control de pagos, reportes de trabajo y facturas ordenadas. Los enlaces internos van directo al formulario.
+        </div>
+      </Card>
+
+      <Card title={"Solicitudes recibidas"+(nuevas.length?" · "+nuevas.length+" nueva"+(nuevas.length===1?"":"s"):"")}>
+        <div style={{fontSize:12,color:C.earth,lineHeight:1.65,marginBottom:14,textWrap:"pretty"}}>Revisa los datos, define una contraseña y el usuario queda creado.</div>
+        {nuevas.length===0
+          ? <div style={{fontSize:12.5,color:C.earth,padding:"6px 0"}}>Sin solicitudes por atender.</div>
+          : <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              {nuevas.map(function(s){
+                var nm=[s.primerNombre,s.segundoNombre,s.primerApellido,s.segundoApellido].filter(Boolean).join(" ");
+                var ab=abierta===s.id;
+                return (
+                  <div key={s.id} style={{border:"1px solid "+C.gray,borderRadius:12,padding:"14px 16px",background:"#fff"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:12,flexWrap:"wrap",alignItems:"flex-start"}}>
+                      <div style={{flex:"1 1 200px",minWidth:0}}>
+                        <div style={{fontSize:14,fontWeight:600,color:C.black}}>{nm||"—"}</div>
+                        <div style={{fontSize:11.5,color:C.earth,marginTop:3}}>{s.perfilLabel||s.perfil} · {fmtDate(s.fecha)}</div>
+                      </div>
+                      <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"3px 9px",borderRadius:100,background:"#F7EFE2",color:"#8a6320",flexShrink:0}}>Nueva</span>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:9,marginTop:12}}>
+                      {[["Correo",s.email],["Teléfono",s.phone],["Empresa",s.empresa],["Servicios",s.servicios],["DPI",s.dpi],["NIT",s.nit],["Dirección",s.direccion],["Banco",[s.banco,s.tipoCuenta,s.cuenta].filter(Boolean).join(" · ")],["A nombre de",s.titular]].filter(function(x){return String(x[1]||"").trim();}).map(function(x,i){
+                        return (
+                          <div key={i} style={{background:C.surfaceWarm,borderRadius:9,padding:"8px 11px"}}>
+                            <div style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.earth}}>{x[0]}</div>
+                            <div style={{fontSize:12,color:C.black,marginTop:3,wordBreak:"break-word"}}>{x[1]}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {String(s.nota||"").trim()&&<div style={{fontSize:12,color:C.earth,lineHeight:1.7,marginTop:10,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px"}}>“{s.nota}”</div>}
+                    {ab ? (
+                      <div style={{marginTop:12,borderTop:"1px solid "+C.line,paddingTop:12,display:"flex",flexDirection:"column",gap:10}}>
+                        <div>
+                          <span style={LBL}>Contraseña inicial</span>
+                          <input autoFocus value={pass} onChange={function(e){setPass(e.target.value);}} placeholder="Mínimo 4 caracteres — se la compartes tú"
+                            style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:10,padding:"11px 13px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",minHeight:46}}/>
+                        </div>
+                        <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+                          <button onClick={function(){crearUsuario(s);}} disabled={String(pass||"").trim().length<4} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:100,border:"none",background:String(pass||"").trim().length<4?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:String(pass||"").trim().length<4?"default":"pointer"}}>Crear usuario</button>
+                          <button onClick={function(){setAbierta(null);setPass("");}} style={{padding:"12px 18px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{display:"flex",gap:9,flexWrap:"wrap",marginTop:12}}>
+                        <button onClick={function(){setAbierta(s.id);setPass("");}} style={{padding:"10px 18px",minHeight:44,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>Crear usuario →</button>
+                        <button onClick={function(){rechazar(s);}} style={{padding:"10px 16px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.red,fontSize:12,fontWeight:600,cursor:"pointer"}}>Descartar</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>}
+        {listas.length>0&&(
+          <div style={{marginTop:16,borderTop:"1px solid "+C.line,paddingTop:13}}>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:9}}>Ya atendidas</div>
+            <div style={{display:"flex",flexDirection:"column",gap:5}}>
+              {listas.map(function(s){
+                return (
+                  <div key={s.id} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:11.5,color:C.earth,flexWrap:"wrap"}}>
+                    <span>{[s.primerNombre,s.primerApellido].filter(Boolean).join(" ")} · {s.perfilLabel||s.perfil}</span>
+                    <span style={{fontWeight:600,color:s.estado==="creada"?C.green:C.taupe}}>{s.estado==="creada"?"Usuario creado":"Descartada"} · {fmtDate(s.resueltaEn)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, reps:cfgReps}) {
   const blankNew = {primerNombre:"",segundoNombre:"",primerApellido:"",segundoApellido:"",empresa:"",tipo:"interno",categoria:"EPI Limpieza",email:"",password:"",phone:"",tarifaLimpieza:""};
   const [newV,     setNewV]     = useState(blankNew);
   const [newExtCat,setNewExtCat]= useState("");
@@ -4215,6 +4582,38 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats}) {
                     {v.isSupervisor?"Supervisión activa":"Sin supervisión"}
                   </button>
                   {v.isSupervisor&&<span style={{fontSize:10.5,color:C.taupe}}>Revisa limpiezas del equipo y clasifica daños</span>}
+                  {v.isAdmin&&(isAdminPrincipalVendor(v,vendors)
+                    ? <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"3px 9px",borderRadius:100,background:C.black,color:"#fff"}}>Admin principal</span>
+                    : <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"3px 9px",borderRadius:100,background:C.surfaceWarm,color:C.earth,border:"1px solid "+C.gray}}>Admin secundario</span>)}
+                </div>
+              )}
+              {/* Programación: zonas, preferencias, tope y descansos */}
+              {SCHED.esLimpieza(v)&&(
+                <div style={{paddingTop:8,borderTop:"1px solid "+C.line}}>
+                  <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase",marginBottom:9}}>Programación</div>
+                  <ZonasPicker v={v} vendors={vendors} onSave={onSave} props={cfgProps} reps={cfgReps}/>
+                  <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:9}}>
+                    {EditRow("maxDia", "Máx. por día", v.maxDia==null?2:v.maxDia, "number")}
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:9,marginTop:10,flexWrap:"wrap"}}>
+                    <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase"}}>Descansa</span>
+                    {["D","L","M","M","J","V","S"].map(function(d,i){
+                      var on=((v.descansos)||[]).indexOf(i)>=0;
+                      return <button key={i} onClick={function(){
+                        var cur=((v.descansos)||[]).slice();
+                        var ix=cur.indexOf(i); if(ix>=0) cur.splice(ix,1); else cur.push(i);
+                        onSave(vendors.map(function(x){ return x.id===v.id?Object.assign({},x,{descansos:cur}):x; }));
+                      }} style={{width:32,height:32,borderRadius:"50%",border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",color:on?"#fff":C.earth,fontSize:11,fontWeight:700,cursor:"pointer"}}>{d}</button>;
+                    })}
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginTop:10,flexWrap:"wrap"}}>
+                    <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase"}}>Profundas</span>
+                    <button onClick={function(){ onSave(vendors.map(function(x){ return x.id===v.id?Object.assign({},x,{puedeProfunda:x.puedeProfunda===false}):x; })); }}
+                      style={{display:"flex",alignItems:"center",gap:8,padding:"5px 12px",borderRadius:6,border:"1px solid "+C.gray,background:v.puedeProfunda!==false?"#1E1E1E":"#fff",color:v.puedeProfunda!==false?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>
+                      <span style={{width:14,height:14,borderRadius:"50%",background:v.puedeProfunda!==false?C.green:"#ccc",display:"inline-block",flexShrink:0}}/>
+                      {v.puedeProfunda!==false?"Puede hacer profundas":"Solo tradicionales"}
+                    </button>
+                  </div>
                 </div>
               )}
               {/* Planilla administrativa — salario fijo, quincenas automáticas */}
@@ -4238,8 +4637,6 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats}) {
                       {EditRow("otrosDesc",     "Otros desc.",    v.otrosDesc||0,"number")}
                       {EditRow("inicioLaboral", "Inicio laboral", v.inicioLaboral||"","date")}
                       {EditRow("planillaDesde", "Generar desde",  v.planillaDesde||"","date")}
-                      {EditRow("advSaldo",      "Adelanto Q",     v.advSaldo||0,"number")}
-                      {EditRow("advCuota",      "Cuota quinc.",   v.advCuota||0,"number")}
                       <div style={{fontSize:11.5,color:C.earth,background:C.surfaceWarm,borderRadius:8,padding:"8px 11px"}}>
                         Bruto mensual <b style={{color:C.black}}>{pgMoney(nomBruto(v))}</b> · IGSS <b style={{color:C.black}}>{pgMoney(nomIgss(v))}</b> · Líquido por quincena <b style={{color:C.green}}>{pgMoney(nomQuincena(v))}</b>
                       </div>
@@ -4450,6 +4847,77 @@ function VBlock({title,hint,children}){
   );
 }
 function VRow({name}){ return <div style={{background:C.beige,borderRadius:8,padding:"9px 12px",fontSize:12.5,color:C.black}}>{name}</div>; }
+/* Zonas del técnico: las que puede cubrir y las que prefiere por cercanía.
+   La preferencia da ventaja en el reparto, no exclusividad — el motor rota. */
+function ZonasPicker({v, vendors, onSave, props, reps}){
+  var hist=SCHED.zonasEnUso?schedZonasHistorial(reps, v):{orden:[],cuenta:{},total:0};
+  var todas=SCHED.zonasEnUso(props);
+  var asignadas=(v.zonas||[]).map(SCHED.zonaKey);
+  var pref=(v.zonasPref||[]).map(SCHED.zonaKey);
+  function set(campo, lista){ onSave(vendors.map(function(x){ return x.id===v.id?Object.assign({},x,(function(){var o={};o[campo]=lista;return o;})()):x; })); }
+  function toggle(z){
+    var cur=asignadas.slice(), ix=cur.indexOf(z);
+    if(ix>=0){
+      cur.splice(ix,1);
+      /* Una zona quitada no puede seguir siendo preferida: se guardan los dos
+         campos juntos, o el segundo guardado pisa al primero. */
+      onSave(vendors.map(function(x){
+        return x.id===v.id ? Object.assign({},x,{zonas:cur, zonasPref:pref.filter(function(p){ return p!==z; })}) : x;
+      }));
+    } else { cur.push(z); set("zonas",cur); }
+  }
+  function togglePref(z){
+    var cur=pref.slice(), ix=cur.indexOf(z);
+    if(ix>=0) cur.splice(ix,1); else cur.push(z);
+    set("zonasPref",cur);
+  }
+  /* Si alguien tiene guardada una zona que ya no está en el portafolio, se sigue
+     mostrando para poder quitarla. */
+  var visibles=todas.slice();
+  asignadas.concat(pref).forEach(function(z){ if(z&&visibles.indexOf(z)<0) visibles.push(z); });
+  if(!visibles.length) return (
+    <div style={{fontSize:11,color:C.earth,lineHeight:1.6,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px"}}>
+      Las zonas salen del nombre de cada propiedad (“Z10 - Airali - 1508”). Aún no hay propiedades cargadas con ese formato.
+    </div>
+  );
+  return (
+    <div>
+      <div style={{fontSize:10.5,color:C.taupe,lineHeight:1.6,marginBottom:8,textWrap:"pretty"}}>Toca una zona para asignarla. Toca de nuevo una asignada para marcarla como preferida por cercanía. Doble toque la quita.</div>
+      <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+        {visibles.map(function(z){
+          var on=asignadas.indexOf(z)>=0, pf=pref.indexOf(z)>=0;
+          return (
+            <button key={z} onClick={function(){ if(!on) toggle(z); else togglePref(z); }}
+              onDoubleClick={function(){ if(on) toggle(z); }}
+              title={pf?"Preferida":on?"Asignada":"Sin asignar"}
+              style={{padding:"5px 10px",borderRadius:100,fontSize:10.5,fontWeight:600,cursor:"pointer",
+                border:"1.5px solid "+(pf?C.peach:on?C.black:C.gray),
+                background:pf?C.peach:on?C.black:"#fff",
+                color:(pf||on)?"#fff":C.taupe}}>
+              {SCHED.zonaLabel(z)}{pf?" ★":""}
+            </button>
+          );
+        })}
+      </div>
+      {hist.total>0&&(
+        <div style={{marginTop:9,background:C.surfaceWarm,borderRadius:9,padding:"9px 11px"}}>
+          <div style={{fontSize:10.5,color:C.earth,lineHeight:1.6}}>
+            Ya ha trabajado en {hist.orden.slice(0,5).map(function(z){ return SCHED.zonaLabel(z)+" ("+hist.cuenta[z]+")"; }).join(" · ")}
+          </div>
+          <button onClick={function(){
+            var top=hist.orden.slice(0,4);
+            onSave(vendors.map(function(x){ return x.id===v.id?Object.assign({},x,{zonas:top,zonasPref:hist.orden.slice(0,2)}):x; }));
+          }} style={{marginTop:8,padding:"6px 12px",minHeight:34,borderRadius:100,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:10.5,fontWeight:600,cursor:"pointer"}}>
+            Usar su historial como zonas
+          </button>
+        </div>
+      )}
+      {asignadas.length===0&&<div style={{fontSize:10.5,color:C.orange,marginTop:7,fontWeight:600}}>Sin zonas: el motor solo le asignará si no queda alternativa.</div>}
+      {asignadas.length>0&&<div style={{fontSize:10.5,color:C.earth,marginTop:7}}>{asignadas.length} zona{asignadas.length===1?"":"s"}{pref.length?" · prefiere "+pref.map(SCHED.zonaLabel).join(", "):""}</div>}
+    </div>
+  );
+}
+
 function CopyChip({label,onClick}){ return <button onClick={onClick} style={{flexShrink:0,padding:"4px 11px",borderRadius:20,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:10.5,fontWeight:700,letterSpacing:".04em",cursor:"pointer",whiteSpace:"nowrap"}}>{label}</button>; }
 
 function PropsCfg({props,onSave}) {
@@ -4985,7 +5453,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
 }
 
 /* ═══ VENDOR APP */
-function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout,reviews,rvCasos,onSvRvCasos,rvIA}) {
+function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,ausencias,onSvAusencias,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout,reviews,rvCasos,onSvRvCasos,rvIA}) {
   const [view,setView] = useState("jobs");
   var tot=reps.reduce(function(s,r){return s+(isDanos(r.categoria)?0:parseFloat(r.total||0));},0);
   var cob=reps.filter(function(r){return r.paid;}).reduce(function(s,r){return s+parseFloat(r.total||0);},0);
@@ -5026,7 +5494,7 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,hospU
       />
       <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} adelantos={adelantos} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}} onGoAccount={function(){setView("account");}} vendor={vendor} allVendors={allVendors} reviews={reviews} allReps={allReps} rvCasos={rvCasos} rvIA={rvIA} onGoCalidad={vendor.tipo==="interno"?function(){setView("hist");}:null}/></div>
       <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={allVendors||[]} props={props} company={company} defaultVendor={vendor.email} myReps={reps} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
-      <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek}/></div>
+      <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} ausencias={ausencias||[]} onSvAusencias={onSvAusencias}/></div>
       <div style={{display:view==="hist"   ?"block":"none"}}><VendorHistory reps={cleaningReps} onRespond={vendorRespond} vendor={vendor} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}} reviews={reviews} allReps={allReps} allVendors={allVendors} rvCasos={rvCasos} onSvRvCasos={onSvRvCasos} rvIA={rvIA}/></div>
       {vendor.isSupervisor&&<div style={{display:view==="sup"?"block":"none"}}><SupervisionPanel me={vendor} reps={allReps||[]} vendors={allVendors||[]} props={props} onUpdate={onUpdate}/></div>}
       <div style={{display:view==="account"?"block":"none"}}><VendorAccount vendor={vendor} allVendors={allVendors} allReps={allReps} onSvV={onSvV}/></div>
@@ -5670,7 +6138,7 @@ function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogou
         var half=Math.ceil(rest.length/2);
         var dashBtn=(
           <div key="__dash" style={{flex:"0 0 auto",width:76,display:"flex",alignItems:"flex-start",justifyContent:"center"}}>
-            <button onClick={function(){setTab("dash");}} aria-label="Dashboard" style={{marginTop:-20,width:62,height:62,borderRadius:"50%",border:"4px solid #fff",background:C.peach,boxShadow:"0 6px 18px rgba(233,130,106,.35)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",outline:tab==="dash"?"2px solid "+C.black:"none",outlineOffset:2}}>
+            <button onClick={function(){setTab("dash");}} aria-label="Dashboard" style={{marginTop:-20,width:62,height:62,borderRadius:"50%",border:"4px solid #fff",background:C.peach,boxShadow:"0 6px 18px rgba(233,130,106,.35)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",outline:"none"}}>
               <Icon name="dash" size={26} stroke="#fff"/>
             </button>
           </div>
@@ -6272,501 +6740,716 @@ function FeedbackBubble({vendor, onSaveFeedback, currentStep, totalSteps}) {
 /* ══════════════════════════════════════════════════════════
    SCHEDULE SYSTEM
    ══════════════════════════════════════════════════════════ */
-function blankSched() {
-  return {id:"",fecha:todayStr(),hora:"09:00",propiedad:"",vendorId:"",tipo:"Limpieza",codigoAcceso:"",notas:""};
+
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PROGRAMACIÓN — se programa aquí, no se importa de ninguna parte.
+   De Hospitable solo entran las RESERVAS (para saber qué días hay checkout y
+   si entra otro huésped el mismo día). El reparto lo hace el motor de
+   sched-engine.js, con las reglas de zona, carga, rating y rotación.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Rating de las últimas 5 semanas por técnico — es lo que da preferencia de
+   más limpiezas. Se mide sobre check-in, no sobre mes cerrado. */
+function schedRatings(reviews, reps, casos){
+  var att=rvAttribute(reviews||[], reps||[], casos||[]);
+  var desde=isoShift(todayStr(), -35), acc={};
+  att.rows.forEach(function(row){
+    if(row.excluded) return;
+    if(String(row.rv.checkIn||"").slice(0,10) < desde) return;
+    var em=String(row.reasignadaA || (row.rep&&row.rep.reportadoPor) || "").toLowerCase().trim();
+    if(!em) return;
+    if(!acc[em]) acc[em]={sum:0,n:0};
+    acc[em].sum+=row.score; acc[em].n++;
+  });
+  var out={};
+  Object.keys(acc).forEach(function(em){ out[em]={score:acc[em].sum/acc[em].n, n:acc[em].n}; });
+  return out;
+}
+/* Zonas donde un técnico ya ha trabajado, de más a menos frecuente. Es el punto de
+   partida honesto para configurarlo: la preferencia sale de su propio historial. */
+function schedZonasHistorial(reps, vendor){
+  var emails=vendorEmailSet(vendor), cuenta={}, tot=0;
+  (reps||[]).forEach(function(r){
+    if(!r||!isCleaning(r.categoria)) return;
+    if(emails.indexOf(String(r.reportadoPor||"").toLowerCase())<0) return;
+    var z=SCHED.zonaKey(propParts(r.propiedad).zona);
+    if(!z) return;
+    cuenta[z]=(cuenta[z]||0)+1; tot++;
+  });
+  var orden=Object.keys(cuenta).sort(function(a,b){ return cuenta[b]-cuenta[a]; });
+  return {orden:orden, cuenta:cuenta, total:tot};
 }
 
-/* Admin: Schedule management */
+function schedTecnicos(vendors){ return (vendors||[]).filter(function(v){ return SCHED.esLimpieza(v); }); }
+function schedDiaNombre(f){
+  var dias=["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
+  return dias[new Date(String(f).slice(0,10)+"T12:00:00").getDay()]||"";
+}
+function schedMinsTxt(m){
+  var h=Math.floor(m/60), r=m%60;
+  return (h?h+"h":"")+(r?(h?" ":"")+r+"m":(h?"":"0m"));
+}
+/* Texto de la ruta para WhatsApp — el admin lo envía con un toque. */
+function schedWaLink(vendor, asigs, f){
+  var t=SCHED.rutaTexto(asigs, vendorDisplay(vendor), f);
+  var tel=String((vendor&&(vendor.phone||vendor.telefono))||"").replace(/[^0-9]/g,"");
+  if(tel.length===8) tel="502"+tel;
+  return "https://wa.me/"+tel+"?text="+encodeURIComponent(t);
+}
 
-/* Hospitable URL config widget — shown in ScheduleCfg */
+/* ─── Control de limpiezas profundas.
+   Una profunda no se fuerza: se monta sobre un día en que ya hay limpieza en esa
+   propiedad y sobra espacio en la ruta. Por eso puede pasar de los 30 días — aquí
+   se ve exactamente cuánto lleva cada propiedad y qué viene. */
+function ProfundasCfg({props, reps, schedules, hoy, vendors, onSvSchedules}) {
+  const [abierto, setAbierto] = useState(false);
+  const [filtro,  setFiltro]  = useState("vencidas");
 
-/* ─── CSV Importer — parses Hospitable export format */
-function CSVImporter({vendors, props, onImport, onClose}) {
-  const [raw,     setRaw]     = useState("");
-  const [preview, setPreview] = useState(null);
-  const [err,     setErr]     = useState("");
-  const [busy,    setBusy]    = useState(false);
+  var estado = SCHED.estadoProfundas({
+    hoy: hoy, props: props,
+    historial: (reps||[]).map(function(r){ return {propiedad:r.propiedad, tipo:r.categoria, fecha:r.fecha}; }),
+    programadas: schedules||[]
+  });
+  var vencidas   = estado.filter(function(x){ return x.vencida && !x.proxima; });
+  var agendadas  = estado.filter(function(x){ return !!x.proxima; });
+  var alDia      = estado.filter(function(x){ return !x.vencida && !x.proxima; });
+  var lista = filtro==="vencidas" ? vencidas : filtro==="agendadas" ? agendadas : alDia;
 
-  function parseCSV(text) {
-    var lines = text.trim().split(/\r?\n/);
-    if (lines.length < 2) return {error:"El archivo está vacío o tiene formato incorrecto."};
-
-    /* Detect separator */
-    var sep = lines[0].includes("\t") ? "\t" : ",";
-
-    function splitLine(line) {
-      /* Handle quoted fields */
-      var result=[]; var cur=""; var inQ=false;
-      for(var i=0;i<line.length;i++){
-        var c=line[i];
-        if(c==='"') {inQ=!inQ; continue;}
-        if(c===sep&&!inQ){result.push(cur.trim());cur="";}
-        else cur+=c;
-      }
-      result.push(cur.trim());
-      return result;
-    }
-
-    var headers = splitLine(lines[0]).map(function(h){return h.toLowerCase().replace(/[^a-z0-9]/g,"");});
-
-    /* Column detection */
-    function col(keys) {
-      for(var i=0;i<keys.length;i++){
-        var idx=headers.indexOf(keys[i]);
-        if(idx>=0) return idx;
-      }
-      return -1;
-    }
-
-    var idxDate  = col(["startdate","start","startdatetime","scheduleddate","date"]);
-    var idxEnd   = col(["enddate","end","enddatetime"]);
-    var idxType  = col(["type","tasktype","cleaningtype"]);
-    var idxFName = col(["teammatefirstname","firstname","assigneefirstname","technicianfirst"]);
-    var idxLName = col(["teammatelastname","lastname","assigneelastname","technicianlast"]);
-    var idxEmail = col(["teammateemail","email","assigneeemail","technicianaemail"]);
-    var idxProp  = col(["listing","listingname","property","propertyname","unit","apartment"]);
-    var idxTime  = col(["starttime","time","hour"]);
-    var idxNote  = col(["notes","note","comment","comments","description"]);
-
-    if (idxDate<0) return {error:"No se encontró columna de fecha. Verifica que el CSV tenga 'Start Date'."};
-
-    var entries = [];
-    for(var r=1;r<lines.length;r++){
-      var cols = splitLine(lines[r]);
-      if(!cols[idxDate]||cols[idxDate].trim()==="") continue;
-
-      var dateRaw = cols[idxDate]||"";
-      /* Normalize date to yyyy-MM-dd */
-      var fecha = dateRaw.replace(/\//g,"-").replace(/(\d{4})-(\d{1,2})-(\d{1,2}).*/, function(_,y,m,d){
-        return y+"-"+m.padStart(2,"0")+"-"+d.padStart(2,"0");
-      });
-      if(!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
-        /* Try MM/DD/YYYY or DD-MM-YYYY */
-        var parts = dateRaw.split(/[\/-]/);
-        if(parts.length===3){
-          if(parts[0].length===4) fecha=parts[0]+"-"+parts[1].padStart(2,"0")+"-"+parts[2].padStart(2,"0");
-          else fecha=parts[2]+"-"+parts[0].padStart(2,"0")+"-"+parts[1].padStart(2,"0");
-        }
-      }
-
-      var fname  = idxFName>=0 ? (cols[idxFName]||"").trim() : "";
-      var lname  = idxLName>=0 ? (cols[idxLName]||"").trim() : "";
-      var email  = idxEmail>=0 ? (cols[idxEmail]||"").trim() : "";
-      var prop   = idxProp>=0  ? (cols[idxProp]||"").trim()  : "";
-      var tipo   = idxType>=0  ? (cols[idxType]||"Limpieza").trim() : "Limpieza";
-      var hora   = idxTime>=0  ? (cols[idxTime]||"").trim()  : "";
-      var notas  = idxNote>=0  ? (cols[idxNote]||"").trim()  : "";
-
-      /* Normalize tipo */
-      var tipoMap = {cleaning:"Limpieza",maintenance:"Mantenimiento",inspection:"Revisión","deep cleaning":"Limpieza Profunda","limpieza profunda":"Limpieza Profunda"};
-      tipo = tipoMap[tipo.toLowerCase()] || tipo || "Limpieza";
-
-      /* Fuzzy match vendor */
-      var query = [fname,lname,email].filter(Boolean).join(" ");
-      var match = fuzzyMatchVendor(query, vendors.filter(function(v){return v.active;}));
-
-      /* Fuzzy match property */
-      var propMatch = null;
-      if(prop) {
-        var bestProp=null,bestScore=0;
-        (props||[]).forEach(function(p){
-          var s=similarity(prop, p.name);
-          if(s>bestScore){bestScore=s;bestProp=p;}
-        });
-        if(bestProp&&bestScore>0.4) propMatch={prop:bestProp,score:bestScore};
-      }
-
-      entries.push({
-        fecha:      fecha,
-        hora:       hora,
-        tipo:       tipo,
-        rawProp:    prop,
-        propMatch:  propMatch,
-        rawVendor:  query,
-        vendorMatch:match,
-        notas:      notas,
-        email:      email,
-      });
-    }
-
-    return {entries:entries};
+  function nombreTec(em){
+    var v=(vendors||[]).find(function(x){ return String(x.email||"").toLowerCase()===String(em||"").toLowerCase(); });
+    return v?vendorDisplay(v):"";
   }
-
-  function handlePaste(text) {
-    setErr(""); setPreview(null);
-    var result = parseCSV(text);
-    if(result.error) { setErr(result.error); return; }
-    if(!result.entries.length) { setErr("No se encontraron filas con datos."); return; }
-    setPreview(result.entries);
-  }
-
-  function doImport() {
-    if(!preview||!preview.length) return;
-    setBusy(true);
-    var newScheds = preview.map(function(e,i){
-      return {
-        id:          "csv"+Date.now()+i,
-        fecha:       e.fecha,
-        hora:        e.hora,
-        propiedad:   e.propMatch ? e.propMatch.prop.name : e.rawProp,
-        vendorId:    e.vendorMatch.vendor ? e.vendorMatch.vendor.id : "",
-        vendorRaw:   e.rawVendor,
-        tipo:        e.tipo,
-        codigoAcceso:"",
-        notas:       e.notas,
-      };
-    });
-    onImport(newScheds);
-    setBusy(false);
-    onClose();
-  }
-
-  var IS = {border:"1px solid "+C.gray,borderRadius:6,padding:"8px 11px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",width:"100%",boxSizing:"border-box",background:"#fff"};
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-      <div style={{background:"#fff",borderRadius:14,padding:"20px",maxWidth:640,width:"100%",maxHeight:"90vh",overflow:"auto",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+    <div style={CARD}>
+      <button onClick={function(){setAbierto(!abierto);}} style={{width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
           <div>
-            <div style={{fontSize:16,fontWeight:700,color:C.black}}>Importar desde Hospitable</div>
-            <div style={{fontSize:11.5,color:C.earth,marginTop:3}}>Pega el CSV de la vista "Detalles" de Hospitable</div>
-          </div>
-          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,color:C.gray,cursor:"pointer",lineHeight:1}}>×</button>
-        </div>
-
-        {/* Instructions */}
-        <div style={{background:"#EDF5EF",borderRadius:8,padding:"11px 14px",fontSize:12,lineHeight:1.7}}>
-          <div style={{fontWeight:700,color:C.green,marginBottom:4}}>Cómo exportar de Hospitable:</div>
-          <div style={{color:C.black}}>1. Ve a <b>Metrics → Operations → Details</b></div>
-          <div style={{color:C.black}}>2. Selecciona el rango de fechas que quieres importar</div>
-          <div style={{color:C.black}}>3. Presiona <b>Export / CSV</b> arriba a la derecha</div>
-          <div style={{color:C.black}}>4. Abre el archivo y copia todo el contenido (Ctrl+A, Ctrl+C)</div>
-          <div style={{color:C.black}}>5. Pega aquí abajo</div>
-        </div>
-
-        {/* Paste area */}
-        {!preview&&(
-          <div>
-            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase",marginBottom:6}}>Pega el contenido del CSV</div>
-            <textarea
-              rows={8}
-              placeholder={"Start Date,End Date,Type,Teammate First Name,Teammate Last Name,Teammate Email\n2026-05-20,2026-05-20,Cleaning,Lilia,Del Cid,dubonmar20@gmail.com\n..."}
-              value={raw}
-              onChange={function(e){setRaw(e.target.value);}}
-              style={{width:"100%",border:"1.5px solid "+C.gray,borderRadius:8,padding:"10px 12px",fontSize:12,fontFamily:"monospace",outline:"none",resize:"vertical",boxSizing:"border-box",minHeight:140}}
-            />
-            {err&&<div style={{color:C.red,fontSize:12,marginTop:6,fontWeight:600}}>{err}</div>}
-            <button onClick={function(){handlePaste(raw);}} disabled={!raw.trim()} style={{marginTop:10,width:"100%",padding:"12px",borderRadius:7,border:"none",background:raw.trim()?C.black:C.gray,color:"#fff",fontSize:13,fontWeight:600,cursor:raw.trim()?"pointer":"default"}}>
-              Analizar CSV →
-            </button>
-          </div>
-        )}
-
-        {/* Preview */}
-        {preview&&(
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div style={{fontSize:13.5,fontWeight:700,color:C.black}}>{preview.length} turnos detectados</div>
-              <button onClick={function(){setPreview(null);setRaw("");}} style={{fontSize:11.5,color:C.earth,background:"none",border:"1px solid "+C.gray,borderRadius:5,padding:"3px 9px",cursor:"pointer"}}>← Editar</button>
+            <div style={{fontSize:14,fontWeight:600,color:C.black}}>Limpiezas profundas</div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>
+              Una por propiedad cada ~30 días, montada sobre una limpieza ya programada y solo si sobra espacio en la ruta.
             </div>
-            <div style={{display:"flex",gap:8,fontSize:11.5}}>
-              <span style={{padding:"3px 10px",borderRadius:100,background:"#EDF5EF",color:C.green,fontWeight:700}}>✓ {preview.filter(function(e){return e.vendorMatch.score>0.7;}).length} técnicos identificados</span>
-              <span style={{padding:"3px 10px",borderRadius:100,background:"#FFF9E6",color:"#7a6000",fontWeight:700}}>⚠ {preview.filter(function(e){return e.vendorMatch.score<=0.7&&e.vendorMatch.vendor;}).length} coincidencia baja</span>
-              <span style={{padding:"3px 10px",borderRadius:100,background:"#F5EDEC",color:C.red,fontWeight:700}}>✕ {preview.filter(function(e){return !e.vendorMatch.vendor;}).length} sin match</span>
-            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:9,flexShrink:0}}>
+            {vencidas.length>0&&<span style={{fontSize:10.5,fontWeight:700,color:C.orange,background:"#F7EFE2",padding:"3px 10px",borderRadius:100}}>{vencidas.length} por hacer</span>}
+            <span style={{color:C.taupe,fontSize:13}}>{abierto?"▾":"▸"}</span>
+          </div>
+        </div>
+      </button>
 
-            {/* Preview list */}
-            <div style={{maxHeight:320,overflow:"auto",display:"flex",flexDirection:"column",gap:6}}>
-              {preview.map(function(e,i){
-                var vm=e.vendorMatch; var pm=e.propMatch;
-                var bg=vm.score>0.7?"#fff":vm.vendor?"#FFF9E6":"#FFF5F5";
-                return (
-                  <div key={i} style={{background:bg,borderRadius:7,padding:"10px 12px",border:"1px solid "+C.line,fontSize:12}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:8}}>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontWeight:600,color:C.black,marginBottom:2}}>
-                          {pm?pm.prop.name:<span style={{color:C.red}}>{e.rawProp||"Sin propiedad"}</span>}
+      {abierto&&(
+        <div style={{marginTop:13,borderTop:"1px solid "+C.line,paddingTop:13}}>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:11}}>
+            {[["vencidas","Por hacer",vencidas.length],["agendadas","Ya agendadas",agendadas.length],["aldia","Al día",alDia.length]].map(function(o){
+              var sel=filtro===o[0];
+              return <button key={o[0]} onClick={function(){setFiltro(o[0]);}} style={{padding:"7px 12px",minHeight:38,borderRadius:100,border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{o[1]} {o[2]}</button>;
+            })}
+          </div>
+
+          {lista.length===0
+            ? <div style={{fontSize:12,color:C.taupe,padding:"10px 0",lineHeight:1.6}}>
+                {filtro==="vencidas"?"Ninguna propiedad está esperando profunda.":filtro==="agendadas"?"No hay profundas agendadas en los próximos días.":"Sin propiedades en este grupo."}
+              </div>
+            : <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:340,overflowY:"auto"}}>
+                {lista.map(function(x,i){
+                  return (
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",flexWrap:"wrap"}}>
+                      <div style={{minWidth:0,flex:"1 1 170px"}}>
+                        <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{x.propiedad}</div>
+                        <div style={{fontSize:10.5,color:C.earth,marginTop:3}}>
+                          {x.ultima
+                            ? "Última: "+fmtDate(x.ultima)+" · hace "+x.diasDesde+" días"
+                            : "Sin profunda registrada en el app"}
                         </div>
-                        <div style={{color:C.earth}}>{fmtDate(e.fecha)} {e.hora&&"· "+e.hora} · {e.tipo}</div>
-                      </div>
-                      <div style={{textAlign:"right",flexShrink:0}}>
-                        {vm.vendor?(
-                          <div style={{color:vm.score>0.7?C.green:"#7a6000",fontWeight:600}}>
-                            {vm.score>0.7?"✓":"⚠"} {vendorDisplay(vm.vendor)}
-                            <div style={{fontSize:10,color:C.taupe,fontWeight:400}}>{Math.round(vm.score*100)}% match</div>
+                        {x.proxima&&(
+                          <div style={{fontSize:10.5,color:C.green,marginTop:3,fontWeight:600}}>
+                            Próxima: {fmtDate(x.proxima.fecha)}{nombreTec(x.proxima.vendorEmail)?" · "+nombreTec(x.proxima.vendorEmail):""}
                           </div>
-                        ):(
-                          <div style={{color:C.red,fontWeight:600}}>✕ {e.rawVendor||"Sin técnico"}</div>
                         )}
                       </div>
+                      <div style={{textAlign:"right",flexShrink:0}}>
+                        {x.atrasoDias>0
+                          ? <span style={{fontSize:10.5,fontWeight:700,color:C.orange}}>+{x.atrasoDias} días de espera</span>
+                          : x.vencida
+                            ? <span style={{fontSize:10.5,fontWeight:700,color:C.earth}}>toca ya</span>
+                            : <span style={{fontSize:10.5,color:C.taupe}}>{SCHED.PROFUNDA_CADA_DIAS-x.diasDesde} días para la próxima</span>}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>}
 
-            <button onClick={doImport} disabled={busy} style={{padding:"13px",borderRadius:7,border:"none",background:busy?C.gray:C.black,color:"#fff",fontSize:13,fontWeight:600,cursor:busy?"default":"pointer",letterSpacing:".04em"}}>
-              {busy?"Importando…":"✓ Importar "+preview.length+" turnos →"}
+          {filtro==="vencidas"&&vencidas.length>0&&(
+            <div style={{marginTop:11,fontSize:11,color:C.earth,lineHeight:1.65,background:"#fff",border:"1px solid "+C.line,borderRadius:9,padding:"10px 12px",textWrap:"pretty"}}>
+              Estas esperan a que la propiedad tenga una limpieza programada y quede espacio en la ruta. Si alguna urge, agrégala a mano abajo como <b style={{color:C.black}}>Limpieza profunda</b>.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, reps, reviews, rvCasos, onSvP, canNom}) {
+  const [dia,      setDia]      = useState(1);      /* 0 = hoy, 1 = mañana, … */
+  const [busy,     setBusy]     = useState("");
+  const [msg,      setMsg]      = useState(null);
+  const [prop,     setPropu]    = useState(null);   /* propuesta de reajuste pendiente */
+  const [manual,   setManual]   = useState(false);
+  const [mForm,    setMForm]    = useState({fecha:"",propiedad:"",vendorId:"",tipo:"Limpieza"});
+  const [drag,     setDrag]     = useState(null);
+  const [verMotor, setVerMotor] = useState(false);
+  const [sim,      setSim]      = useState(null);   /* simulacro: no guarda ni notifica */
+
+  var hoy   = SCHED.hoyGT();
+  var tecs  = schedTecnicos(vendors);
+  var fecha = SCHED.shift(hoy, dia);
+  var ratings = React.useMemo(function(){ return schedRatings(reviews, reps, rvCasos); }, [reviews, reps, rvCasos]);
+  var pendAus = (ausencias||[]).filter(function(a){ return a.estado==="pendiente"; });
+
+  function aviso(txt, ok){ setMsg({txt:txt, ok:ok!==false}); setTimeout(function(){ setMsg(null); }, 5000); }
+
+  /* El motor de las 6pm corre en el servidor y no puede recalcular el rating (vive en
+     las reviews del app), así que se publica aquí para que lo lea tal cual. */
+  useEffect(function(){
+    if(!Object.keys(ratings).length) return;
+    try{ saveConfigItem("schedRatings", ratings); }catch(_){}
+  },[ratings]);
+
+  /* ─── Traer reservas de Hospitable (checkouts + check-ins + habitaciones) */
+  async function sincronizar(){
+    setBusy("sync");
+    try{
+      var r = await apiCall("syncReservas", {days:21});
+      var list = (r && r.reservas) || [];
+      if(!list.length){ aviso("Hospitable no devolvió reservas para los próximos 21 días.", false); }
+      else {
+        onSvReservas(list);
+        /* Las habitaciones vienen con la propiedad: se guardan para el motor. */
+        if(onSvP && r.propiedades && r.propiedades.length){
+          var ix={}; r.propiedades.forEach(function(p){ ix[normalize(p.nombre)]=p; });
+          var upd=(props||[]).map(function(p){
+            var h=ix[normalize(p.name)];
+            return (h && h.habitaciones) ? Object.assign({},p,{cuartos:h.habitaciones}) : p;
+          });
+          onSvP(upd);
+        }
+        aviso(list.length+" reservas sincronizadas.");
+      }
+    }catch(e){ aviso("No se pudo conectar con Hospitable: "+(e&&e.message||""), false); }
+    setBusy("");
+  }
+
+  /* ─── Corrida del motor (la misma que corre a las 6pm) */
+  function generar(){
+    setBusy("gen");
+    var r = SCHED.programar({
+      hoy: hoy, dias: 3, reservas: reservas, props: props, vendors: vendors,
+      ratings: ratings, ausencias: ausencias, existentes: schedules,
+      historial: reps, pesoRating: 0.7
+    });
+    /* Se conserva lo manual, lo de días pasados y lo de hoy ya confirmado. */
+    var conservar=(schedules||[]).filter(function(s){
+      var sf=String(s.fecha).slice(0,10);
+      return sf<=hoy || s.origen==="manual";
+    });
+    var nuevas=r.asignaciones.map(function(x){ return Object.assign({}, x, {id:"sc_"+x.key.replace(/[^a-z0-9]/gi,"").slice(0,28)+"_"+Math.floor(Math.random()*1000)}); });
+    onSvSchedules(conservar.concat(nuevas));
+    setBusy("");
+    var prof=nuevas.filter(function(x){ return SCHED.esProfunda(x.tipo); }).length;
+    aviso(nuevas.length+" limpiezas programadas para los próximos 3 días"
+      +(prof?" · "+prof+" profunda"+(prof===1?"":"s"):"")
+      +(r.sinAsignar.length?" · "+r.sinAsignar.length+" sin asignar":"")
+      +((r.postergadas||[]).length?" · "+r.postergadas.length+" profunda"+(r.postergadas.length===1?"":"s")+" postergada"+(r.postergadas.length===1?"":"s")+" por falta de espacio":"")+".");
+  }
+
+  /* ─── Simulacro: corre el motor para un día y muestra el resultado sin guardar
+     nada y sin notificar a nadie. Sirve para ver qué haría antes de aplicarlo. */
+  function simular(offsetDia){
+    var r = SCHED.programar({
+      hoy: hoy, dias: 1, offset: offsetDia, reservas: reservas, props: props, vendors: vendors,
+      ratings: ratings, ausencias: ausencias, existentes: schedules,
+      historial: reps, pesoRating: 0.7
+    });
+    var f = SCHED.shift(hoy, offsetDia);
+    var porTec = {};
+    r.asignaciones.forEach(function(a){ (porTec[a.vendorEmail]=porTec[a.vendorEmail]||[]).push(a); });
+    setSim({fecha:f, res:r, porTec:porTec});
+  }
+
+  /* ─── Revisión de la mañana: reservas nuevas de hoy */
+  function revisarHoy(){
+    setBusy("am");
+    var r = SCHED.revisionMatutina({
+      hoy: hoy, reservas: reservas, props: props, vendors: vendors,
+      ratings: ratings, ausencias: ausencias, existentes: schedules, pesoRating: 0.7
+    });
+    if(!r.nuevas.length){ setBusy(""); aviso("Sin limpiezas nuevas para hoy."); return; }
+    var nuevas=r.nuevas.map(function(x){ return Object.assign({}, x, {id:"sc_"+Date.now()+Math.floor(Math.random()*999)}); });
+    onSvSchedules((schedules||[]).concat(nuevas));
+    setBusy("");
+    aviso(nuevas.length+" limpieza"+(nuevas.length===1?"":"s")+" nueva"+(nuevas.length===1?"":"s")+" agregada"+(nuevas.length===1?"":"s")+" a hoy.");
+  }
+
+  /* ─── Notificar: correo con plantilla + aviso en la app */
+  function notificar(f){
+    var delDia=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===f; });
+    if(!delDia.length){ aviso("No hay nada programado ese día.", false); return; }
+    var porTec={};
+    delDia.forEach(function(s){ var k=String(s.vendorEmail||"").toLowerCase(); if(!porTec[k])porTec[k]=[]; porTec[k].push(s); });
+    var n=0;
+    Object.keys(porTec).forEach(function(em){
+      var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===em; });
+      if(!v) return;
+      var lista=porTec[em].slice().sort(function(x,y){ return (x.orden||0)-(y.orden||0); });
+      try{
+        notifyTemplate([v.notifEmail||v.email], "programacion", {
+          tecnico: vendorDisplay(v), fecha: fmtDate(f), dia: schedDiaNombre(f),
+          hora: SCHED.HORA_INI+" a "+SCHED.HORA_FIN,
+          total: String(lista.length),
+          limpiezas: lista.map(function(s,i){
+            return (i+1)+". "+s.propiedad+" — "+(s.habitaciones||1)+" hab · "+s.tipo+
+                   (s.entradaHoy?" · TIENE ENTRADA HOY":"")+(s.codigoAcceso?" · código "+s.codigoAcceso:"");
+          }).join("\n")
+        });
+      }catch(_){}
+      n++;
+    });
+    onSvSchedules((schedules||[]).map(function(s){
+      return String(s.fecha).slice(0,10)===f ? Object.assign({},s,{estado:"confirmada",notificadoEn:hoy}) : s;
+    }));
+    aviso("Programación del "+fmtDate(f)+" enviada a "+n+" técnico"+(n===1?"":"s")+".");
+  }
+
+  /* ─── Ausencias: aprobar genera el reajuste; el admin lo confirma */
+  function verReajuste(aus){
+    var r = SCHED.reajustePorAusencia({
+      hoy: hoy, fecha: aus.fecha, vendorEmail: aus.vendorEmail, vendors: vendors,
+      ratings: ratings, ausencias: ausencias, existentes: schedules, pesoRating: 0.7
+    });
+    setPropu({aus: aus, res: r});
+  }
+  function aplicarReajuste(){
+    if(!prop) return;
+    var mov=prop.res.movimientos, aus=prop.aus;
+    var porId={}; mov.forEach(function(m){ if(m.scheduleId) porId[m.scheduleId]=m; });
+    var upd=(schedules||[]).map(function(s){
+      var m=porId[s.id];
+      if(!m) return s;
+      var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===m.aEmail; });
+      return Object.assign({},s,{vendorEmail:m.aEmail, vendorId:m.aVendorId||(v&&v.id)||"",
+        orden:m.orden||s.orden, motivo:"reajuste por ausencia · "+(m.motivo||""), estado:"confirmada", reajustada:true});
+    });
+    onSvSchedules(upd);
+    onSvAusencias((ausencias||[]).map(function(x){ return x.id===aus.id?Object.assign({},x,{estado:"aprobada",resueltaEn:hoy}):x; }));
+    /* Aviso solo a quien le cambió la programación. */
+    var tocados={};
+    mov.forEach(function(m){ tocados[m.aEmail]=1; });
+    tocados[String(aus.vendorEmail).toLowerCase()]=1;
+    Object.keys(tocados).forEach(function(em){
+      var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===em; });
+      if(!v) return;
+      var mias=upd.filter(function(s){ return String(s.fecha).slice(0,10)===aus.fecha && String(s.vendorEmail||"").toLowerCase()===em; });
+      try{
+        notifyTemplate([v.notifEmail||v.email], "programacionCambio", {
+          tecnico: vendorDisplay(v), fecha: fmtDate(aus.fecha), dia: schedDiaNombre(aus.fecha),
+          total: String(mias.length),
+          limpiezas: mias.length
+            ? mias.map(function(s,i){ return (i+1)+". "+s.propiedad+" — "+(s.habitaciones||1)+" hab · "+s.tipo+(s.entradaHoy?" · TIENE ENTRADA HOY":""); }).join("\n")
+            : "Sin limpiezas asignadas ese día."
+        });
+      }catch(_){}
+    });
+    setPropu(null);
+    aviso("Reajuste aplicado y notificado.");
+  }
+  function rechazarAusencia(aus){
+    if(!window.confirm("¿Rechazar la ausencia de "+aus.vendorNombre+" el "+fmtDate(aus.fecha)+"?")) return;
+    onSvAusencias((ausencias||[]).map(function(x){ return x.id===aus.id?Object.assign({},x,{estado:"rechazada",resueltaEn:hoy}):x; }));
+  }
+
+  /* ─── Ajuste de ruta: reordenar y mover entre técnicos */
+  function reordenar(email, from, to){
+    var mias=delDia.filter(function(s){ return String(s.vendorEmail||"").toLowerCase()===email; })
+                   .sort(function(a,b){ return (a.orden||0)-(b.orden||0); });
+    if(to<0||to>=mias.length) return;
+    var arr=mias.slice(); var it=arr.splice(from,1)[0]; arr.splice(to,0,it);
+    var ord={}; arr.forEach(function(s,i){ ord[s.id]=i+1; });
+    onSvSchedules((schedules||[]).map(function(s){ return ord[s.id]?Object.assign({},s,{orden:ord[s.id]}):s; }));
+  }
+  function mover(sched, aEmail){
+    var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===aEmail; });
+    if(!v) return;
+    var cuantas=delDia.filter(function(s){ return String(s.vendorEmail||"").toLowerCase()===aEmail; }).length;
+    onSvSchedules((schedules||[]).map(function(s){
+      return s.id===sched.id
+        ? Object.assign({},s,{vendorEmail:aEmail, vendorId:v.id, orden:cuantas+1, motivo:"movida por el administrador", ajustadaPorAdmin:true})
+        : s;
+    }));
+  }
+  function quitar(sched){
+    if(!window.confirm("¿Quitar "+sched.propiedad+" de la programación del "+fmtDate(sched.fecha)+"?")) return;
+    onSvSchedules((schedules||[]).filter(function(s){ return s.id!==sched.id; }));
+  }
+  function agregarManual(){
+    if(!mForm.fecha||!mForm.propiedad||!mForm.vendorId) return;
+    var v=tecs.find(function(x){ return x.id===mForm.vendorId; });
+    var p=propParts(mForm.propiedad);
+    var pObj=(props||[]).find(function(x){ return x.name===mForm.propiedad; })||{};
+    var cuantas=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===mForm.fecha && s.vendorId===mForm.vendorId; }).length;
+    onSvSchedules((schedules||[]).concat([{
+      id:"sc_man_"+Date.now(), key:mForm.fecha+"|"+normalize(mForm.propiedad),
+      fecha:mForm.fecha, hora:SCHED.HORA_INI, horaFin:SCHED.HORA_FIN,
+      propiedad:mForm.propiedad, zona:p.zona, edificio:p.edificio, unidad:p.unidad,
+      habitaciones:parseInt(pObj.cuartos,10)||1, tipo:mForm.tipo,
+      entradaHoy:false, codigoAcceso:pObj.codigoAcceso||"",
+      vendorId:v.id, vendorEmail:String(v.email||"").toLowerCase(),
+      orden:cuantas+1, estado:"confirmada", origen:"manual",
+      motivo:"agregada por el administrador", generadoEn:hoy
+    }]));
+    setManual(false); setMForm({fecha:"",propiedad:"",vendorId:"",tipo:"Limpieza"});
+    aviso("Limpieza agregada.");
+  }
+
+  /* ─── Datos del día mostrado */
+  var delDia=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===fecha; });
+  var porTec={};
+  delDia.forEach(function(s){ var k=String(s.vendorEmail||"").toLowerCase(); if(!porTec[k])porTec[k]=[]; porTec[k].push(s); });
+  var firme = dia<=1;
+  var notificado = delDia.length>0 && delDia.every(function(s){ return s.notificadoEn; });
+
+  /* Capacidad y saturación del día */
+  var demanda=delDia.reduce(function(s,x){ return s+SCHED.minutosLimpieza(x.habitaciones,x.tipo); },0);
+  var libres=tecs.filter(function(v){
+    var em=String(v.email||"").toLowerCase();
+    var aus=(ausencias||[]).some(function(a){ return a.estado==="aprobada" && String(a.vendorEmail||"").toLowerCase()===em && a.fecha===fecha; });
+    var desc=((v.descansos)||[]).indexOf(new Date(fecha+"T12:00:00").getDay())>=0;
+    return !aus && !desc;
+  });
+  var capacidad=libres.length*SCHED.JORNADA_MIN;
+  var uso=capacidad?Math.round(demanda/capacidad*100):0;
+  /* Lo que el calendario exige y aún no está programado ese día. */
+  var requeridas=SCHED.limpiezasRequeridas({reservas:reservas, props:props, desde:fecha, hasta:fecha});
+  var yaProg={}; delDia.forEach(function(s){ yaProg[normalize(s.propiedad)]=1; });
+  var sinAsignar=requeridas.filter(function(x){ return !yaProg[normalize(x.propiedad)]; });
+
+  var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6};
+  var IN={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44};
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+
+  return (
+    <div style={{maxWidth:760,margin:"0 auto",padding:"18px 16px 90px",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:13}}>
+
+      {/* Cabecera y corridas */}
+      <div style={CARD}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:20,color:C.black,lineHeight:1.2}}>Programación</div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>
+              El motor corre a las 6:00 pm y programa los próximos 3 días. A las 6:00 am revisa si entraron reservas nuevas. Horario de limpieza: {SCHED.HORA_INI} a {SCHED.HORA_FIN}.
+            </div>
+          </div>
+          <div style={{textAlign:"right",flexShrink:0}}>
+            <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Reservas</div>
+            <div style={{fontSize:17,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>{(reservas||[]).length}</div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:14}}>
+          <button onClick={sincronizar} disabled={!!busy} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:busy?"default":"pointer"}}>
+            {busy==="sync"?"Sincronizando…":"↻ Traer reservas"}
+          </button>
+          <button onClick={generar} disabled={!!busy||!(reservas||[]).length} style={{flex:1,minWidth:170,padding:"11px 16px",minHeight:44,borderRadius:100,border:"none",background:busy||!(reservas||[]).length?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:busy?"default":"pointer",letterSpacing:".03em"}}>
+            {busy==="gen"?"Programando…":"Programar 3 días"}
+          </button>
+          <button onClick={revisarHoy} disabled={!!busy} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:busy?"default":"pointer"}}>
+            Revisar hoy
+          </button>
+          <button onClick={function(){ simular(dia); }} disabled={!(reservas||[]).length} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px dashed "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:(reservas||[]).length?"pointer":"default"}}>
+            Simulacro del día
+          </button>
+        </div>
+        {msg&&<div style={{marginTop:11,fontSize:11.5,fontWeight:600,color:msg.ok?C.green:C.red,lineHeight:1.5}}>{msg.txt}</div>}
+        {!(reservas||[]).length&&<div style={{marginTop:11,fontSize:11.5,color:C.earth,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",lineHeight:1.6}}>Primero trae las reservas: de ahí salen los checkouts que generan cada limpieza.</div>}
+      </div>
+
+      {/* Ausencias por aprobar */}
+      {pendAus.length>0&&(
+        <div style={{background:"#FBF6EC",border:"1px solid #E8DCC4",borderRadius:14,padding:"15px 16px"}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:"#7a5c1e",letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>Ausencias por aprobar · {pendAus.length}</div>
+          <div style={{display:"flex",flexDirection:"column",gap:9}}>
+            {pendAus.map(function(aus){
+              var afect=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===aus.fecha && String(s.vendorEmail||"").toLowerCase()===String(aus.vendorEmail||"").toLowerCase(); }).length;
+              return (
+                <div key={aus.id} style={{background:"#fff",borderRadius:10,padding:"12px 13px"}}>
+                  <div style={{fontSize:13,fontWeight:600,color:C.black}}>{aus.vendorNombre||aus.vendorEmail}</div>
+                  <div style={{fontSize:11.5,color:C.earth,marginTop:3}}>{schedDiaNombre(aus.fecha)} {fmtDate(aus.fecha)} · {afect} limpieza{afect===1?"":"s"} a reasignar</div>
+                  {aus.motivo&&<div style={{fontSize:11.5,color:C.taupe,marginTop:4,lineHeight:1.6}}>“{aus.motivo}”</div>}
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+                    <button onClick={function(){verReajuste(aus);}} style={{padding:"9px 15px",minHeight:44,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Ver reajuste →</button>
+                    <button onClick={function(){rechazarAusencia(aus);}} style={{padding:"9px 14px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.red,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Rechazar</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Propuesta de reajuste */}
+      {prop&&(
+        <div style={{background:"#fff",border:"1.5px solid "+C.black,borderRadius:14,padding:"15px 16px"}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:4}}>Reajuste propuesto</div>
+          <div style={{fontSize:12.5,color:C.black,lineHeight:1.6,marginBottom:12}}>
+            {prop.aus.vendorNombre||prop.aus.vendorEmail} falta el {fmtDate(prop.aus.fecha)}. El motor repartió sus {prop.res.afectadas||0} limpieza{prop.res.afectadas===1?"":"s"} sin tocar la ruta de los demás.
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:7}}>
+            {prop.res.movimientos.map(function(m,i){
+              var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===m.aEmail; });
+              return (
+                <div key={i} style={{background:C.surfaceWarm,borderRadius:9,padding:"10px 12px"}}>
+                  <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{m.propiedad}{m.entradaHoy?<span style={{fontSize:9,fontWeight:700,color:C.red,marginLeft:7,letterSpacing:".08em"}}>ENTRADA</span>:null}</div>
+                  <div style={{fontSize:11,color:C.earth,marginTop:3}}>→ {v?vendorDisplay(v):m.aEmail}{m.motivo?" · "+m.motivo:""}</div>
+                </div>
+              );
+            })}
+            {prop.res.sinAsignar.length>0&&(
+              <div style={{background:"#F5EDEC",borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.red,lineHeight:1.6}}>
+                {prop.res.sinAsignar.length} limpieza{prop.res.sinAsignar.length===1?"":"s"} sin quien la tome: {prop.res.sinAsignar.map(function(x){return x.lim.propiedad;}).join(", ")}. Hay que bloquear calendario o traer refuerzo.
+              </div>
+            )}
+          </div>
+          <div style={{display:"flex",gap:9,marginTop:13,flexWrap:"wrap"}}>
+            <button onClick={aplicarReajuste} style={{flex:1,minWidth:160,padding:"12px",minHeight:46,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Aprobar y notificar →</button>
+            <button onClick={function(){setPropu(null);}} style={{padding:"12px 18px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {/* Simulacro — nada de esto se guardó ni se envió */}
+      {sim&&(
+        <div style={{background:"#fff",border:"1.5px dashed "+C.earth,borderRadius:14,padding:"15px 16px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Simulacro · no se guardó ni se envió</div>
+              <div style={{fontSize:14,fontWeight:600,color:C.black,marginTop:4}}>{schedDiaNombre(sim.fecha)} {fmtDate(sim.fecha)}</div>
+              <div style={{fontSize:11.5,color:C.earth,marginTop:3}}>
+                {sim.res.asignaciones.length} limpieza{sim.res.asignaciones.length===1?"":"s"} · {Object.keys(sim.porTec).length} técnico{Object.keys(sim.porTec).length===1?"":"s"}
+                {sim.res.asignaciones.filter(function(a){return SCHED.esProfunda(a.tipo);}).length?" · "+sim.res.asignaciones.filter(function(a){return SCHED.esProfunda(a.tipo);}).length+" profunda":""}
+              </div>
+            </div>
+            <button onClick={function(){setSim(null);}} style={{background:"none",border:"none",color:C.taupe,fontSize:18,cursor:"pointer",lineHeight:1,padding:4}}>×</button>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:9,marginTop:13}}>
+            {Object.keys(sim.porTec).map(function(em){
+              var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===em; });
+              var arr=sim.porTec[em].slice().sort(function(a,b){ return (a.orden||0)-(b.orden||0); });
+              var mins=arr.reduce(function(s,x){ return s+SCHED.minutosLimpieza(x.habitaciones,x.tipo)+(x.orden>1?(x.viaje||0):0); },0);
+              return (
+                <div key={em} style={{background:C.surfaceWarm,borderRadius:10,padding:"11px 12px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+                    <span style={{fontSize:12.5,fontWeight:600,color:C.black}}>{v?vendorDisplay(v):em}</span>
+                    <span style={{fontSize:10.5,color:C.earth,fontVariantNumeric:"tabular-nums"}}>{schedMinsTxt(mins)} de jornada</span>
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",gap:3,marginTop:6}}>
+                    {arr.map(function(a,i){
+                      return (
+                        <div key={i} style={{fontSize:11,color:C.earth,lineHeight:1.6}}>
+                          {i+1}. <b style={{color:C.black,fontWeight:600}}>{a.propiedad}</b> · {a.habitaciones} hab
+                          {SCHED.esProfunda(a.tipo)?" · PROFUNDA":""}
+                          {a.entradaHoy?<span style={{color:C.red,fontWeight:700}}> · entrada hoy</span>:null}
+                          {a.viaje&&i>0?" · "+a.viaje+" min de traslado":""}
+                          {a.motivo?<span style={{color:C.taupe}}> — {a.motivo}</span>:null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+            {sim.res.sinAsignar.length>0&&(
+              <div style={{background:"#F5EDEC",borderRadius:10,padding:"11px 12px",fontSize:11.5,color:C.red,lineHeight:1.6}}>
+                Sin técnico: {sim.res.sinAsignar.map(function(x){return x.lim.propiedad;}).join(" · ")}
+              </div>
+            )}
+            {(sim.res.postergadas||[]).length>0&&(
+              <div style={{fontSize:11,color:C.earth,lineHeight:1.6}}>
+                {sim.res.postergadas.length} profunda{sim.res.postergadas.length===1?"":"s"} postergada{sim.res.postergadas.length===1?"":"s"}: no había espacio en la ruta.
+              </div>
+            )}
+            {Object.keys(sim.porTec).length===0&&(
+              <div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6}}>Sin checkouts ese día — no hay nada que programar.</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Selector de día */}
+      <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:2}}>
+        {[0,1,2,3,4,5,6].map(function(n){
+          var fx=SCHED.shift(hoy,n), sel=dia===n;
+          var cnt=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===fx; }).length;
+          return (
+            <button key={n} onClick={function(){setDia(n);}} style={{flexShrink:0,padding:"9px 13px",minHeight:44,borderRadius:100,border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>
+              {n===0?"Hoy":n===1?"Mañana":schedDiaNombre(fx).slice(0,3)+" "+String(fx).slice(8,10)}
+              {cnt>0&&<span style={{marginLeft:6,opacity:.65,fontVariantNumeric:"tabular-nums"}}>{cnt}</span>}
             </button>
+          );
+        })}
+      </div>
+
+      {/* Estado del día */}
+      <div style={CARD}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:14.5,fontWeight:600,color:C.black}}>{schedDiaNombre(fecha)} {fmtDate(fecha)}</div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:3}}>{delDia.length} limpieza{delDia.length===1?"":"s"} · {libres.length} técnico{libres.length===1?"":"s"} disponible{libres.length===1?"":"s"} · carga {uso}%</div>
+          </div>
+          {delDia.length>0&&(
+            <button onClick={function(){notificar(fecha);}} style={{flexShrink:0,padding:"10px 15px",minHeight:44,borderRadius:100,border:"none",background:notificado?C.gray:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer"}}>
+              {notificado?"✓ Ya notificado":"Notificar al equipo →"}
+            </button>
+          )}
+        </div>
+        {!firme&&delDia.length>0&&(
+          <div style={{marginTop:11,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.earth,lineHeight:1.6}}>
+            Programación tentativa — se valida el día anterior a las 6:00 pm. Los técnicos la ven, pero con esta misma advertencia.
+          </div>
+        )}
+        {uso>=90&&delDia.length>0&&(
+          <div style={{marginTop:11,background:"#F5EDEC",borderRadius:9,padding:"11px 13px",fontSize:11.5,color:C.red,lineHeight:1.6,fontWeight:600}}>
+            Saturación: la carga usa {uso}% de la capacidad del equipo. Conviene bloquear calendario en Hospitable.
+          </div>
+        )}
+        {sinAsignar.length>0&&(
+          <div style={{marginTop:11,background:"#F5EDEC",borderRadius:9,padding:"11px 13px"}}>
+            <div style={{fontSize:11.5,color:C.red,fontWeight:700,lineHeight:1.6}}>{sinAsignar.length} checkout{sinAsignar.length===1?"":"s"} sin limpieza asignada</div>
+            <div style={{fontSize:11,color:C.earth,marginTop:5,lineHeight:1.6}}>{sinAsignar.map(function(x){return x.propiedad;}).join(" · ")}</div>
+            <div style={{fontSize:11,color:C.earth,marginTop:5,lineHeight:1.6}}>Bloquea calendario, sube el tope de alguien o asigna a mano.</div>
           </div>
         )}
       </div>
-    </div>
-  );
-}
 
-
-
-/* ─── Hospitable live sync button */
-function HospSyncButton({onImport}) {
-  const [busy,   setBusy]   = useState(false);
-  const [result, setResult] = useState(null);
-  const [err,    setErr]    = useState("");
-
-  async function sync() {
-    setBusy(true); setErr(""); setResult(null);
-    try {
-      var r = await apiCall("syncHospitable", {days:14});
-      if (!r.schedules||!r.schedules.length) {
-        setErr("Sin tareas encontradas en Hospitable para los próximos 14 días. " + (r.message||""));
-        return;
-      }
-      onImport(r.schedules);
-      setResult({count:r.schedules.length, source:r.source, period:r.period});
-    } catch(e) {
-      setErr("Error: "+(e&&e.message?e.message:"No se pudo conectar con Hospitable"));
-    } finally { setBusy(false); }
-  }
-
-  return (
-    <div style={{background:"#EDF5EF",borderRadius:8,padding:"12px 14px",border:"1px solid #c8dfc8"}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
-        <div>
-          <div style={{fontSize:9.5,fontWeight:700,color:C.green,letterSpacing:".16em",textTransform:"uppercase",marginBottom:3}}>Sincronizar con Hospitable</div>
-          <div style={{fontSize:11.5,color:C.earth}}>Importa automáticamente los próximos 14 días de limpiezas y mantenimientos</div>
-        </div>
-        <button onClick={function(){sync(false);}} disabled={busy} style={{flexShrink:0,padding:"9px 16px",borderRadius:7,border:"none",background:busy?C.gray:"#3d6b52",color:"#fff",fontSize:12.5,fontWeight:700,cursor:busy?"default":"pointer",whiteSpace:"nowrap"}}>
-          {busy?"Sincronizando…":"↻ Sync"}
-        </button>
-      </div>
-      {result&&(
-        <div style={{marginTop:8,fontSize:12,color:C.green,fontWeight:600}}>
-          ✓ {result.count} turno{result.count!==1?"s":""} importado{result.count!==1?"s":""} · {result.period}
-        </div>
-      )}
-      {err&&<div style={{marginTop:8,fontSize:12,color:C.red,fontWeight:600}}>{err}</div>}
-    </div>
-  );
-}
-
-
-/* ─── Fila editable de URL (top-level: si se define adentro del componente,
-   React la remonta en cada tecla y el input pierde el foco — por eso "no se podía escribir") */
-function HospUrlRow({label, val, editing, setEditing, curVal, setCurVal, onSave, placeholder}) {
-  return (
-    <div style={{borderBottom:"1px solid "+C.line,paddingBottom:10,marginBottom:10}}>
-      <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase",marginBottom:5}}>{label}</div>
-      {!editing&&(
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <div style={{flex:1,fontSize:11.5,color:val?C.black:C.taupe,fontStyle:val?"normal":"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-            {val||"Sin configurar"}
-          </div>
-          <button onClick={function(){setCurVal(val||"");setEditing(true);}} style={{flexShrink:0,fontSize:11,padding:"3px 9px",borderRadius:5,border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",fontWeight:600}}>
-            {val?"✏":"+ Agregar"}
-          </button>
-        </div>
-      )}
-      {editing&&(
-        <div style={{display:"flex",flexDirection:"column",gap:6}}>
-          <input value={curVal} onChange={function(e){setCurVal(e.target.value);}} placeholder={placeholder} style={{border:"1.5px solid "+C.earth,borderRadius:6,padding:"7px 10px",fontSize:12,fontFamily:"Montserrat,sans-serif",outline:"none",width:"100%",boxSizing:"border-box"}}/>
-          <div style={{display:"flex",gap:6}}>
-            <button onClick={function(){if(onSave)onSave(curVal.trim());setEditing(false);}} style={{flex:1,padding:"7px",borderRadius:5,border:"none",background:C.black,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>Guardar</button>
-            <button onClick={function(){setEditing(false);}} style={{padding:"7px 12px",borderRadius:5,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,cursor:"pointer"}}>✕</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function HospUrlConfig({hospUrlDay, hospUrlWeek, onSaveDay, onSaveWeek}) {
-  const [editD, setEditD] = useState(false);
-  const [editW, setEditW] = useState(false);
-  const [valD,  setValD]  = useState(hospUrlDay||"");
-  const [valW,  setValW]  = useState(hospUrlWeek||"");
-
-  return (
-    <div style={{background:C.surfaceWarm,borderRadius:8,padding:"12px 14px",border:"1px solid "+C.line}}>
-      <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",marginBottom:10}}>Enlaces de Hospitable</div>
-      <HospUrlRow label="Programa de hoy" val={hospUrlDay} editing={editD} setEditing={setEditD} curVal={valD} setCurVal={setValD} onSave={onSaveDay} placeholder="https://share.hospitable.com/metrics/..."/>
-      <HospUrlRow label="Programa semanal" val={hospUrlWeek} editing={editW} setEditing={setEditW} curVal={valW} setCurVal={setValW} onSave={onSaveWeek} placeholder="https://share.hospitable.com/metrics/..."/>
-      <div style={{fontSize:10.5,color:C.taupe}}>Los proveedores ven estos programas como respaldo cuando no tienen turnos asignados.</div>
-    </div>
-  );
-}
-
-
-function ScheduleCfg({schedules, vendors, props, hospUrlDay, hospUrlWeek, onSave, onSaveHospUrlDay, onSaveHospUrlWeek}) {
-  const [form,       setForm]       = useState(blankSched());
-  const [editId,     setEditId]     = useState(null);
-  const [showForm,   setShowForm]   = useState(false);
-  const [showImport, setShowImport] = useState(false);
-  const [filter,     setFilter]     = useState("week"); /* today|week|all */
-
-  var today = todayStr();
-  var weekEnd = (function(){var d=new Date();d.setDate(d.getDate()+7);return d.toISOString().split("T")[0];})();
-
-  var filtered = (schedules||[]).filter(function(s){
-    if(filter==="today") return s.fecha===today;
-    if(filter==="week")  return s.fecha>=today&&s.fecha<=weekEnd;
-    return true;
-  }).sort(function(a,b){return a.fecha>b.fecha?1:a.fecha<b.fecha?-1:a.hora>b.hora?1:-1;});
-
-  var intVendors = vendors.filter(function(v){
-    return v.tipo==="interno"&&v.active&&(v.categoria==="EPI Limpieza"||v.categoria==="EPI Mantenimiento"||v.categoria==="Administrativo");
-  });
-
-  function sf(k,v){setForm(function(p){return Object.assign({},p,{[k]:v});});}
-
-  function save() {
-    if(!form.fecha||!form.propiedad||!form.vendorId) return;
-    var id = editId || "s"+Date.now();
-    var entry = Object.assign({},form,{id:id,vendorRaw:form.vendorRaw||""});
-    var updated = editId
-      ? (schedules||[]).map(function(s){return s.id===editId?entry:s;})
-      : (schedules||[]).concat([entry]);
-    onSave(updated);
-    setForm(blankSched()); setEditId(null); setShowForm(false);
-  }
-
-  function del(id){ onSave((schedules||[]).filter(function(s){return s.id!==id;})); }
-
-  function edit(s){ setForm(Object.assign({},s)); setEditId(s.id); setShowForm(true); window.scrollTo(0,0); }
-
-  var IS = {border:"1px solid "+C.gray,borderRadius:6,padding:"9px 11px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",width:"100%",background:"#fff"};
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:14}}>
-      {/* Hospitable sync */}
-      <HospSyncButton onImport={function(newS){onSave((schedules||[]).filter(function(s){return !s.hospId;}).concat(newS));}}/>
-      {/* Hospitable URL config */}
-      <HospUrlConfig hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} onSaveDay={onSaveHospUrlDay} onSaveWeek={onSaveHospUrlWeek}/>
-
-      {/* Filter tabs */}
-      <div style={{display:"flex",background:C.surfaceWarm,borderRadius:7,padding:3,gap:2,border:"1px solid "+C.line}}>
-        {[["today","Hoy"],["week","Esta semana"],["all","Todo"]].map(function(it){var k=it[0],l=it[1];return(
-          <button key={k} onClick={function(){setFilter(k);}} style={{flex:1,padding:"7px",borderRadius:5,border:"none",background:filter===k?C.black:"transparent",color:filter===k?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{l}</button>
-        );})}
-      </div>
-
-      {/* Add button */}
-      <div style={{display:"flex",gap:8}}>
-        <button onClick={function(){setForm(blankSched());setEditId(null);setShowForm(!showForm);}} style={{flex:1,padding:"11px",borderRadius:7,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",textAlign:"left"}}>
-          {showForm?"✕ Cancelar":"+ Agregar turno"}
-        </button>
-        <button onClick={function(){setShowImport(true);}} style={{padding:"11px 14px",borderRadius:7,border:"1.5px solid "+C.earth,background:C.surfaceWarm,color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
-          ↓ CSV
-        </button>
-      </div>
-      {showImport&&<CSVImporter vendors={vendors} props={props} onImport={function(newS){onSave((schedules||[]).concat(newS));}} onClose={function(){setShowImport(false);}}/>}
-
-      {/* Form */}
-      {showForm&&(
-        <div style={{background:"#fff",borderRadius:10,padding:"16px",border:"1.5px solid "+C.black,display:"flex",flexDirection:"column",gap:12}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>{editId?"Editar turno":"Nuevo turno"}</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <div><label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:5}}>Fecha *</label><input type="date" value={form.fecha} onChange={function(e){sf("fecha",e.target.value);}} style={IS}/></div>
-            <div><label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:5}}>Hora</label><input type="time" value={form.hora} onChange={function(e){sf("hora",e.target.value);}} style={IS}/></div>
-          </div>
-          <div><label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:5}}>Propiedad *</label>
-            <select value={form.propiedad} onChange={function(e){sf("propiedad",e.target.value);}} style={IS}>
-              <option value="">Seleccionar…</option>
-              {(props||[]).map(function(p){return <option key={p.id} value={p.name}>{p.name}</option>;})}
-            </select>
-          </div>
-          <div>
-            <label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:5}}>Técnico *</label>
-            <div style={{position:"relative"}}>
-              <input
-                placeholder="Nombre, correo o teléfono del técnico…"
-                value={form.vendorRaw||""}
-                onChange={function(e){
-                  sf("vendorRaw",e.target.value);
-                  /* Auto fuzzy-match */
-                  var match = fuzzyMatchVendor(e.target.value, intVendors);
-                  if(match.vendor) sf("vendorId", match.vendor.id);
-                  else sf("vendorId","");
-                }}
-                style={IS}
-              />
-              {form.vendorRaw&&(function(){
-                var m = fuzzyMatchVendor(form.vendorRaw, intVendors);
-                if(!m.vendor) return <div style={{fontSize:11,color:C.red,marginTop:4}}>⚠ Sin coincidencia — verifica el nombre</div>;
-                return (
-                  <div style={{marginTop:5,padding:"7px 11px",borderRadius:6,background:m.score>0.7?"#EDF5EF":"#FFF9E6",border:"1px solid "+(m.score>0.7?"#c8dfc8":"#e6d88a"),fontSize:12}}>
-                    <span style={{fontWeight:600,color:m.score>0.7?C.green:"#7a6000"}}>
-                      {m.score>0.7?"✓":"⚠"} {vendorDisplay(m.vendor)}
-                    </span>
-                    <span style={{color:C.taupe,marginLeft:6}}>{m.vendor.categoria} · {Math.round(m.score*100)}% coincidencia</span>
-                    {m.score<0.7&&<div style={{fontSize:10.5,color:"#7a6000",marginTop:2}}>Coincidencia baja — confirma que es el técnico correcto</div>}
-                  </div>
-                );
-              })()}
-              {/* Also show dropdown as fallback */}
-              <div style={{marginTop:8,display:"flex",alignItems:"center",gap:6}}>
-                <span style={{fontSize:10.5,color:C.taupe}}>O selecciona directamente:</span>
-                <select value={form.vendorId} onChange={function(e){sf("vendorId",e.target.value);var v=intVendors.find(function(x){return x.id===e.target.value;});if(v)sf("vendorRaw",vendorDisplay(v));}} style={{fontSize:12,padding:"4px 8px",border:"1px solid "+C.gray,borderRadius:5,background:"#fff",fontFamily:"Montserrat,sans-serif",outline:"none"}}>
-                  <option value="">—</option>
-                  {intVendors.map(function(v){return <option key={v.id} value={v.id}>{vendorDisplay(v)}</option>;})}
-                </select>
-              </div>
-            </div>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <div><label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:5}}>Tipo</label>
-              <select value={form.tipo} onChange={function(e){sf("tipo",e.target.value);}} style={IS}>
-                <option>Limpieza</option><option>Limpieza Profunda</option><option>Mantenimiento</option><option>Revisión</option>
-              </select>
-            </div>
-            <div><label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:5}}>Código de acceso</label>
-              <input placeholder="Ej. 1234#" value={form.codigoAcceso} onChange={function(e){sf("codigoAcceso",e.target.value);}} style={IS}/>
-            </div>
-          </div>
-          <div><label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:5}}>Notas</label>
-            <input placeholder="Instrucciones especiales…" value={form.notas} onChange={function(e){sf("notas",e.target.value);}} style={IS}/>
-          </div>
-          <button onClick={save} disabled={!form.fecha||!form.propiedad||!form.vendorId} style={{padding:"12px",borderRadius:7,border:"none",background:form.fecha&&form.propiedad&&form.vendorId?C.black:C.gray,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>
-            {editId?"Guardar cambios →":"Agregar turno →"}
-          </button>
-        </div>
-      )}
-
-      {/* Schedule list */}
-      {filtered.length===0&&<div style={{textAlign:"center",padding:"32px",color:C.taupe,fontSize:13}}>Sin turnos {filter==="today"?"hoy":filter==="week"?"esta semana":"programados"}.</div>}
-      {filtered.map(function(s){
-        var v=vendors.find(function(x){return x.id===s.vendorId;});
-        var isToday=s.fecha===today;
+      {/* Rutas por técnico */}
+      {tecs.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:C.earth,fontSize:13,background:"#fff",borderRadius:14,border:"1px solid "+C.gray}}>Sin técnicos de limpieza activos. Agrégalos en Ajustes › Equipo.</div>}
+      {tecs.map(function(v){
+        var em=String(v.email||"").toLowerCase();
+        var mias=(porTec[em]||[]).slice().sort(function(a,b){ return (a.orden||0)-(b.orden||0); });
+        var aus=(ausencias||[]).some(function(a){ return a.estado==="aprobada" && String(a.vendorEmail||"").toLowerCase()===em && a.fecha===fecha; });
+        var desc=((v.descansos)||[]).indexOf(new Date(fecha+"T12:00:00").getDay())>=0;
+        var mins=mias.reduce(function(s,x){ return s+SCHED.minutosLimpieza(x.habitaciones,x.tipo)+(x.viaje||0); },0);
+        var r=ratings[em];
         return (
-          <div key={s.id} style={{background:"#fff",borderRadius:9,padding:"13px 15px",border:"1px solid "+(isToday?"#B2A193":C.line),display:"flex",flexDirection:"column",gap:5}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:8}}>
-              <div>
-                <div style={{fontSize:13.5,fontWeight:600,color:C.black}}>{s.propiedad}</div>
-                <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{fmtDate(s.fecha)} {s.hora&&"· "+s.hora} · {s.tipo}</div>
-                {v?<div style={{fontSize:11,color:C.taupe,marginTop:1}}>{vendorDisplay(v)}</div>:s.vendorRaw?<div style={{fontSize:11,color:C.taupe,marginTop:1}}>{s.vendorRaw}</div>:null}
+          <div key={v.id} style={Object.assign({},CARD,{opacity:(aus||desc)?.62:1})}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,flexWrap:"wrap"}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:14,fontWeight:600,color:C.black}}>{vendorDisplay(v)}</div>
+                <div style={{fontSize:10.5,color:C.earth,marginTop:3}}>
+                  {(v.zonasPref||[]).length?"Prefiere "+(v.zonasPref||[]).map(SCHED.zonaLabel).join(", ")+" · ":""}
+                  {(v.zonas||[]).length?(v.zonas||[]).map(SCHED.zonaLabel).join(", "):"sin zonas asignadas"}
+                  {r?" · rating "+r.score.toFixed(2)+" ("+r.n+")":" · sin rating aún"}
+                </div>
               </div>
-              <div style={{display:"flex",gap:6,flexShrink:0}}>
-                <button onClick={function(){edit(s);}} style={{fontSize:11,padding:"4px 9px",borderRadius:5,border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer"}}>✏</button>
-                <button onClick={function(){del(s.id);}} style={{fontSize:11,padding:"4px 9px",borderRadius:5,border:"1px solid #DBC8C4",background:"#fff",color:C.red,cursor:"pointer"}}>✕</button>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                {aus?<span style={{fontSize:9.5,fontWeight:700,color:C.red,letterSpacing:".08em",textTransform:"uppercase"}}>Ausente</span>
+                  :desc?<span style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".08em",textTransform:"uppercase"}}>Descanso</span>
+                  :<><div style={{fontSize:15,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>{mias.length}</div>
+                     <div style={{fontSize:9.5,color:C.earth}}>{mins?schedMinsTxt(mins)+" de jornada":"sin trabajo"}</div></>}
               </div>
             </div>
-            {s.codigoAcceso&&<div style={{display:"flex",alignItems:"center",gap:6,marginTop:4}}>
-              <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase"}}>Código:</span>
-              <span style={{fontSize:13,fontWeight:700,color:C.black,background:C.surfaceWarm,padding:"2px 10px",borderRadius:5,letterSpacing:".1em"}}>{s.codigoAcceso}</span>
-            </div>}
-            {s.notas&&<div style={{fontSize:12,color:C.taupe,fontStyle:"italic"}}>{s.notas}</div>}
+
+            {mias.length>0&&(
+              <div style={{display:"flex",flexDirection:"column",gap:7,marginTop:12}}>
+                {mias.map(function(s,i){
+                  return (
+                    <div key={s.id}
+                      draggable
+                      onDragStart={function(){ setDrag(s.id); }}
+                      onDragOver={function(e){ e.preventDefault(); }}
+                      onDrop={function(){ if(drag&&drag!==s.id){ var from=mias.findIndex(function(x){return x.id===drag;}); if(from>=0) reordenar(em, from, i); } setDrag(null); }}
+                      style={{background:s.entradaHoy?"#FCF4F1":C.surfaceWarm,border:"1px solid "+(s.entradaHoy?"#E5C9BF":"transparent"),borderRadius:10,padding:"11px 12px",cursor:"grab"}}>
+                      <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
+                        <span style={{fontSize:11,fontWeight:700,color:C.taupe,fontVariantNumeric:"tabular-nums",paddingTop:2}}>{i+1}</span>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:600,color:C.black}}>{s.propiedad}</div>
+                          <div style={{fontSize:10.5,color:C.earth,marginTop:3}}>
+                            {(s.habitaciones||1)} hab · {s.tipo}{s.viaje?" · "+s.viaje+" min de traslado":""}
+                          </div>
+                          {s.entradaHoy&&<div style={{fontSize:10,fontWeight:700,color:C.red,marginTop:4,letterSpacing:".06em",textTransform:"uppercase"}}>Tiene entrada hoy</div>}
+                          {verMotor&&s.motivo&&<div style={{fontSize:10,color:C.taupe,marginTop:4,lineHeight:1.5}}>Motor: {s.motivo}</div>}
+                        </div>
+                        <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
+                          <button onClick={function(){reordenar(em,i,i-1);}} disabled={i===0} style={{width:32,height:26,borderRadius:6,border:"1px solid "+C.gray,background:"#fff",color:i===0?C.gray:C.earth,fontSize:11,cursor:i===0?"default":"pointer",lineHeight:1}}>↑</button>
+                          <button onClick={function(){reordenar(em,i,i+1);}} disabled={i===mias.length-1} style={{width:32,height:26,borderRadius:6,border:"1px solid "+C.gray,background:"#fff",color:i===mias.length-1?C.gray:C.earth,fontSize:11,cursor:i===mias.length-1?"default":"pointer",lineHeight:1}}>↓</button>
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:7,marginTop:9,flexWrap:"wrap",alignItems:"center"}}>
+                        <select value="" onChange={function(e){ if(e.target.value) mover(s, e.target.value); }} style={{fontSize:10.5,padding:"5px 8px",borderRadius:6,border:"1px solid "+C.gray,background:"#fff",fontFamily:"Montserrat,sans-serif",color:C.earth,minHeight:32}}>
+                          <option value="">Mover a…</option>
+                          {tecs.filter(function(x){ return String(x.email||"").toLowerCase()!==em; }).map(function(x){
+                            return <option key={x.id} value={String(x.email||"").toLowerCase()}>{vendorDisplay(x)}</option>;
+                          })}
+                        </select>
+                        <button onClick={function(){quitar(s);}} style={{fontSize:10.5,padding:"5px 10px",minHeight:32,borderRadius:6,border:"1px solid "+C.gray,background:"#fff",color:C.red,cursor:"pointer"}}>Quitar</button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {mins>SCHED.JORNADA_MIN&&(
+                  <div style={{fontSize:10.5,color:C.orange,fontWeight:600,lineHeight:1.5}}>La ruta excede las 4 horas de jornada por {schedMinsTxt(mins-SCHED.JORNADA_MIN)}.</div>
+                )}
+                {String((v.phone||v.telefono)||"").replace(/[^0-9]/g,"").length>=8&&(
+                  <a href={schedWaLink(v, mias, fecha)} target="_blank" rel="noopener noreferrer" style={{alignSelf:"flex-start",fontSize:11,fontWeight:600,color:C.earth,textDecoration:"none",padding:"8px 13px",minHeight:36,borderRadius:100,border:"1px solid "+C.gray,background:"#fff"}}>Enviar por WhatsApp →</a>
+                )}
+              </div>
+            )}
+            {mias.length===0&&!aus&&!desc&&<div style={{fontSize:11.5,color:C.taupe,marginTop:10}}>Sin limpiezas asignadas este día.</div>}
           </div>
         );
       })}
+
+      {/* Control de limpiezas profundas */}
+      <ProfundasCfg props={props} reps={reps} schedules={schedules} hoy={hoy} vendors={tecs} onSvSchedules={onSvSchedules}/>
+
+      {/* Asignación manual */}
+      <div style={CARD}>
+        {!manual
+          ? <button onClick={function(){setManual(true);setMForm(Object.assign({},mForm,{fecha:fecha}));}} style={{width:"100%",padding:"12px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>+ Asignar una limpieza a mano</button>
+          : <div style={{display:"flex",flexDirection:"column",gap:11}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Asignación manual</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:11}}>
+                <div><span style={LBL}>Fecha</span><input type="date" value={mForm.fecha} onChange={function(e){setMForm(Object.assign({},mForm,{fecha:e.target.value}));}} style={IN}/></div>
+                <div><span style={LBL}>Tipo</span>
+                  <select value={mForm.tipo} onChange={function(e){setMForm(Object.assign({},mForm,{tipo:e.target.value}));}} style={IN}>
+                    <option value="Limpieza">Limpieza</option>
+                    <option value="Limpieza Profunda">Limpieza profunda</option>
+                  </select>
+                </div>
+                <div><span style={LBL}>Propiedad</span>
+                  <select value={mForm.propiedad} onChange={function(e){setMForm(Object.assign({},mForm,{propiedad:e.target.value}));}} style={IN}>
+                    <option value="">Elegir…</option>
+                    {(props||[]).map(function(p){ return <option key={p.id} value={p.name}>{p.name}</option>; })}
+                  </select>
+                </div>
+                <div><span style={LBL}>Técnico</span>
+                  <select value={mForm.vendorId} onChange={function(e){setMForm(Object.assign({},mForm,{vendorId:e.target.value}));}} style={IN}>
+                    <option value="">Elegir…</option>
+                    {tecs.map(function(v){ return <option key={v.id} value={v.id}>{vendorDisplay(v)}</option>; })}
+                  </select>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+                <button onClick={agregarManual} disabled={!mForm.fecha||!mForm.propiedad||!mForm.vendorId} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:100,border:"none",background:(!mForm.fecha||!mForm.propiedad||!mForm.vendorId)?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Agregar</button>
+                <button onClick={function(){setManual(false);}} style={{padding:"12px 18px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+              </div>
+            </div>}
+      </div>
+
+      <button onClick={function(){setVerMotor(!verMotor);}} style={{alignSelf:"center",background:"none",border:"none",fontSize:11,color:C.taupe,cursor:"pointer",fontFamily:"Montserrat,sans-serif",padding:"8px"}}>
+        {verMotor?"Ocultar":"Ver"} por qué el motor asignó cada limpieza
+      </button>
     </div>
   );
 }
@@ -6794,133 +7477,150 @@ function FeedbackCfg({feedback, onSave}) {
   );
 }
 
-/* Vendor: Schedule for today + week — custom table first, Hospitable as fallback */
-function VendorSchedule({vendor, schedules, hospUrlDay, hospUrlWeek}) {
-  const [view, setView] = useState("today");
-  var today    = todayStr();
-  var weekEnd  = (function(){var d=new Date();d.setDate(d.getDate()+7);return d.toISOString().split("T")[0];})();
-  /* Match by vendorId, OR by fuzzy name/email/phone on vendorRaw */
-  var myScheds = (schedules||[]).filter(function(s){
-    if(!s) return false;
-    /* Exact vendorId match */
-    if(s.vendorId&&s.vendorId===vendor.id) return true;
-    /* Fuzzy match on vendorRaw text (name from Hospitable) */
-    if(s.vendorRaw&&s.vendorRaw.trim()) {
-      var m = fuzzyMatchVendor(s.vendorRaw, [vendor]);
-      if(m.score > 0.4) return true;
-    }
-    /* Also match if vendor email appears in vendorRaw */
-    var vEmail = (vendor.email||"").toLowerCase();
-    var raw = (s.vendorRaw||"").toLowerCase();
-    if(vEmail&&raw&&raw.includes(vEmail.split("@")[0])) return true;
-    return false;
-  }).sort(function(a,b){return a.fecha>b.fecha?1:a.fecha<b.fecha?-1:a.hora>b.hora?1:-1;});
-  var todayList = myScheds.filter(function(s){return s.fecha===today;});
-  var weekList  = myScheds.filter(function(s){return s.fecha>=today&&s.fecha<=weekEnd;});
-  var shown     = view==="today" ? todayList : weekList;
+/* ─── Programación del técnico — solo la suya. */
+function VendorSchedule({vendor, schedules, ausencias, onSvAusencias}) {
+  const [view, setView] = useState("hoy");
+  const [pedir, setPedir] = useState(false);
+  const [fAus, setFAus] = useState("");
+  const [motivo, setMotivo] = useState("");
+  const [ok, setOk] = useState("");
+
+  var hoy = SCHED.hoyGT();
+  var manana = SCHED.shift(hoy,1);
+  var finSemana = SCHED.shift(hoy,6);
+  var emails = vendorEmailSet(vendor);
+  var mias = (schedules||[]).filter(function(s){
+    return s && emails.indexOf(String(s.vendorEmail||"").toLowerCase())>=0;
+  }).sort(function(a,b){
+    if(a.fecha!==b.fecha) return a.fecha<b.fecha?-1:1;
+    return (a.orden||0)-(b.orden||0);
+  });
+  var deHoy = mias.filter(function(s){ return String(s.fecha).slice(0,10)===hoy; });
+  var deSemana = mias.filter(function(s){ var f=String(s.fecha).slice(0,10); return f>=hoy&&f<=finSemana; });
+  var lista = view==="hoy" ? deHoy : deSemana;
+  var misAus = (ausencias||[]).filter(function(a){ return emails.indexOf(String(a.vendorEmail||"").toLowerCase())>=0 && a.fecha>=hoy; });
+
+  function enviarAusencia(){
+    if(!fAus) return;
+    var a={
+      id:"aus_"+Date.now(), vendorEmail:String(vendor.email||"").toLowerCase(),
+      vendorNombre:vendorDisplay(vendor), fecha:fAus, motivo:motivo.trim(),
+      estado:"pendiente", createdAt:Date.now()
+    };
+    onSvAusencias&&onSvAusencias([a].concat(ausencias||[]));
+    try{
+      notifyTemplate(resolveNotifRecipients("ausencia", ADV_VENDORS, []), "ausencia",
+        {tecnico:vendorDisplay(vendor), fecha:fmtDate(fAus), motivo:motivo.trim()||"—"});
+    }catch(_){}
+    setPedir(false); setFAus(""); setMotivo("");
+    setOk("Aviso enviado. El administrador reasignará tus limpiezas de ese día y te confirmará.");
+    setTimeout(function(){ setOk(""); }, 6000);
+  }
+
+  function Tarjeta({s, idx}){
+    var tentativa = String(s.fecha).slice(0,10) > manana && s.estado!=="confirmada";
+    return (
+      <div style={{background:"#fff",borderRadius:14,border:"1px solid "+(s.entradaHoy?"#E5C9BF":C.gray),padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+          <div style={{minWidth:0}}>
+            {view!=="hoy"&&<div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>{schedDiaNombre(s.fecha)} {fmtDate(s.fecha)}</div>}
+            <div style={{fontSize:15,fontWeight:600,color:C.black,lineHeight:1.3}}>{idx!=null?(idx+1)+". ":""}{s.propiedad}</div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:4}}>{(s.habitaciones||1)} habitación{(s.habitaciones||1)===1?"":"es"} · {s.tipo}</div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{s.hora||SCHED.HORA_INI} a {s.horaFin||SCHED.HORA_FIN}</div>
+          </div>
+          {s.codigoAcceso&&(
+            <div style={{textAlign:"right",flexShrink:0}}>
+              <div style={{fontSize:8.5,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:3}}>Código</div>
+              <div style={{fontSize:18,fontWeight:700,color:C.black,letterSpacing:".12em",background:C.surfaceWarm,padding:"5px 12px",borderRadius:8,fontVariantNumeric:"tabular-nums"}}>{s.codigoAcceso}</div>
+            </div>
+          )}
+        </div>
+        {s.entradaHoy&&(
+          <div style={{marginTop:11,background:"#F5EDEC",borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.red,fontWeight:700,lineHeight:1.5}}>
+            Tiene entrada hoy — el huésped llega el mismo día. Esta limpieza no puede quedar para después.
+          </div>
+        )}
+        {SCHED.esProfunda(s.tipo)&&(
+          <div style={{marginTop:11,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.earth,lineHeight:1.6}}>
+            Limpieza profunda — ocupa todo el turno. Otro técnico hace la tradicional del mismo apartamento en paralelo.
+          </div>
+        )}
+        {tentativa&&(
+          <div style={{marginTop:11,fontSize:11,color:C.taupe,lineHeight:1.6}}>
+            Tentativa — se confirma el día anterior a las 6:00 pm.
+          </div>
+        )}
+        {s.reajustada&&<div style={{marginTop:9,fontSize:10.5,fontWeight:600,color:C.orange}}>Cambio reciente en tu programación</div>}
+      </div>
+    );
+  }
 
   return (
-    <div style={{maxWidth:600,margin:"0 auto",padding:"0 0 100px",fontFamily:"Montserrat,sans-serif"}}>
-      {/* Today highlight */}
-      {todayList.length>0&&(
-        <div style={{background:"#3E3F3F",padding:"14px 18px",marginBottom:0}}>
-          <div style={{fontSize:9.5,color:"rgba(255,255,255,.6)",letterSpacing:".2em",textTransform:"uppercase",marginBottom:4}}>Hoy · {todayList.length} turno{todayList.length!==1?"s":""}</div>
-          {todayList.map(function(s,i){return(
-            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:i>0?8:0}}>
-              <div>
-                <div style={{fontSize:14,fontWeight:600,color:"#fff"}}>{s.propiedad}</div>
-                <div style={{fontSize:11.5,color:"rgba(255,255,255,.6)"}}>{s.hora&&s.hora+" · "}{s.tipo}</div>
-              </div>
-              {s.codigoAcceso&&(
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:9,color:"rgba(255,255,255,.5)",letterSpacing:".1em",textTransform:"uppercase"}}>Código</div>
-                  <div style={{fontSize:18,fontWeight:700,color:"#fff",letterSpacing:".15em"}}>{s.codigoAcceso}</div>
-                </div>
-              )}
-            </div>
-          );})}
-        </div>
-      )}
-      {todayList.length===0&&(
-        <div style={{background:"#F7F5F2",padding:"13px 18px",borderBottom:"1px solid "+C.line}}>
-          <div style={{fontSize:12.5,color:C.taupe}}>Sin turnos asignados hoy en el sistema.</div>
-          {(hospUrlDay||hospUrlWeek)&&<div style={{fontSize:11,color:C.earth,marginTop:3}}>Revisa el programa completo abajo →</div>}
-        </div>
-      )}
-
-      {/* Toggle */}
-      <div style={{padding:"14px 16px",background:"#fff",borderBottom:"1px solid "+C.line}}>
-        <div style={{display:"flex",background:C.surfaceWarm,borderRadius:7,padding:3,gap:2,border:"1px solid "+C.line}}>
-          {[["today","Hoy"],["week","Esta semana"]].map(function(it){var k=it[0],l=it[1];return(
-            <button key={k} onClick={function(){setView(k);}} style={{flex:1,padding:"8px",borderRadius:5,border:"none",background:view===k?C.black:"transparent",color:view===k?"#fff":C.earth,fontSize:12,fontWeight:600,cursor:"pointer"}}>{l}</button>
-          );})}
+    <div style={{maxWidth:600,margin:"0 auto",padding:"18px 16px 100px",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:12}}>
+      <div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:21,color:C.black,lineHeight:1.2}}>Tu programación</div>
+        <div style={{fontSize:11.5,color:C.earth,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>
+          Las limpiezas van de {SCHED.HORA_INI} a {SCHED.HORA_FIN}. La del día siguiente te llega confirmada cada tarde a las 6:00 pm.
         </div>
       </div>
 
-      {/* List */}
-      <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
-        {shown.length===0&&(
-          <div style={{display:"flex",flexDirection:"column",gap:12}}>
-            <div style={{textAlign:"center",padding:"16px",color:C.taupe,fontSize:13}}>
-              {(schedules||[]).length===0
-                ? "Sin turnos cargados en el sistema aún."
-                : "Sin turnos asignados "+(view==="today"?"para hoy":"esta semana")+"."}
-            </div>
-            {(function(){
-              /* Show iframe only when the system has no schedules loaded yet */
-              var hasSystemScheds = (schedules||[]).length > 0;
-              var url = view==="today" ? hospUrlDay : hospUrlWeek;
-              var lbl = view==="today" ? "Programa de hoy (Hospitable)" : "Programa semanal (Hospitable)";
-              if (hasSystemScheds && shown.length===0) return (
-                <div style={{padding:"12px 14px",borderRadius:8,background:C.surfaceWarm,fontSize:12.5,color:C.taupe,textAlign:"center",border:"1px dashed "+C.gray}}>
-                  No tienes turnos asignados {view==="today"?"hoy":"esta semana"}. Si crees que es un error, contacta al administrador.
-                </div>
-              );
-              if (!url) return (
-                <div style={{padding:"14px",borderRadius:8,background:C.surfaceWarm,fontSize:12,color:C.taupe,textAlign:"center",border:"1px dashed "+C.gray}}>
-                  El administrador puede configurar los enlaces de Hospitable en Configuración → Programación
-                </div>
-              );
+      {deHoy.some(function(s){return s.entradaHoy;})&&(
+        <div style={{background:"#3E3F3F",borderRadius:14,padding:"14px 16px"}}>
+          <div style={{fontSize:9.5,color:"rgba(255,255,255,.6)",letterSpacing:".18em",textTransform:"uppercase",marginBottom:5}}>Atención</div>
+          <div style={{fontSize:13,color:"#fff",lineHeight:1.6}}>
+            {deHoy.filter(function(s){return s.entradaHoy;}).length===1?"Una de tus limpiezas de hoy tiene":"Varias de tus limpiezas de hoy tienen"} entrada de huésped el mismo día. Empieza por {deHoy.filter(function(s){return s.entradaHoy;})[0].propiedad}.
+          </div>
+        </div>
+      )}
+
+      <div style={{display:"flex",background:C.surfaceWarm,borderRadius:100,padding:3,gap:3,border:"1px solid "+C.line}}>
+        {[["hoy","Hoy"],["semana","Esta semana"]].map(function(it){
+          var sel=view===it[0];
+          return <button key={it[0]} onClick={function(){setView(it[0]);}} style={{flex:1,padding:"10px",minHeight:42,borderRadius:100,border:"none",background:sel?C.black:"transparent",color:sel?"#fff":C.earth,fontSize:12,fontWeight:600,cursor:"pointer"}}>{it[1]}</button>;
+        })}
+      </div>
+
+      {lista.length===0
+        ? <div style={{textAlign:"center",padding:"38px 20px",color:C.earth,fontSize:13,background:"#fff",borderRadius:14,border:"1px solid "+C.gray,lineHeight:1.7}}>
+            {view==="hoy"?"No tienes limpiezas hoy.":"No tienes limpiezas esta semana."}
+            <div style={{fontSize:11.5,color:C.taupe,marginTop:6}}>Si crees que es un error, avísale al administrador.</div>
+          </div>
+        : lista.map(function(s,i){ return <Tarjeta key={s.id||i} s={s} idx={view==="hoy"?i:null}/>; })}
+
+      {/* Avisar que no podrá trabajar */}
+      <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px"}}>
+        {ok&&<div style={{fontSize:11.5,color:C.green,fontWeight:600,lineHeight:1.6,marginBottom:10}}>{ok}</div>}
+        {misAus.length>0&&(
+          <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:12}}>
+            {misAus.map(function(a){
               return (
-                <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>{lbl}</div>
-                  <div style={{borderRadius:10,overflow:"hidden",border:"1px solid "+C.line,background:"#fff",boxShadow:"0 2px 8px rgba(0,0,0,.06)"}}>
-                    <iframe
-                      src={url}
-                      title={lbl}
-                      style={{width:"100%",height:560,border:"none",display:"block"}}
-                      sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-                    />
-                  </div>
-                  <a href={url} target="_blank" rel="noopener noreferrer" style={{fontSize:12,color:C.earth,textAlign:"center",textDecoration:"none",fontWeight:600,padding:"10px",borderRadius:7,border:"1px solid "+C.gray,background:"#fff",display:"block",textAlign:"center"}}>
-                    ↗ Abrir en pantalla completa
-                  </a>
+                <div key={a.id} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:11.5,flexWrap:"wrap"}}>
+                  <span style={{color:C.black}}>{fmtDate(a.fecha)}</span>
+                  <span style={{fontWeight:600,color:a.estado==="aprobada"?C.green:a.estado==="rechazada"?C.red:C.orange}}>
+                    {a.estado==="aprobada"?"Aprobada":a.estado==="rechazada"?"No aprobada":"En revisión"}
+                  </span>
                 </div>
               );
-            })()}
+            })}
           </div>
         )}
-        {shown.map(function(s,i){
-          var isToday=s.fecha===today;
-          return (
-            <div key={i} style={{background:"#fff",borderRadius:10,padding:"14px 16px",border:"1.5px solid "+(isToday?C.black:C.line)}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",marginBottom:6}}>
-                <div>
-                  {!isToday&&<div style={{fontSize:10.5,fontWeight:700,color:C.earth,letterSpacing:".08em",textTransform:"uppercase",marginBottom:3}}>{fmtDate(s.fecha)}</div>}
-                  <div style={{fontSize:14.5,fontWeight:600,color:C.black}}>{s.propiedad}</div>
-                  <div style={{fontSize:12,color:C.earth,marginTop:2}}>{s.hora&&s.hora+" · "}{s.tipo}</div>
-                  {s.notas&&<div style={{fontSize:11.5,color:C.taupe,marginTop:3,fontStyle:"italic"}}>{s.notas}</div>}
-                </div>
-                {s.codigoAcceso&&(
-                  <div style={{textAlign:"right",flexShrink:0,marginLeft:12}}>
-                    <div style={{fontSize:9,color:C.taupe,letterSpacing:".12em",textTransform:"uppercase",marginBottom:2}}>Código acceso</div>
-                    <div style={{fontSize:20,fontWeight:700,color:C.black,letterSpacing:".15em",background:C.surfaceWarm,padding:"4px 12px",borderRadius:6}}>{s.codigoAcceso}</div>
-                  </div>
-                )}
+        {!pedir
+          ? <button onClick={function(){setPedir(true);}} style={{width:"100%",padding:"12px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>No podré trabajar un día</button>
+          : <div style={{display:"flex",flexDirection:"column",gap:11}}>
+              <div style={{fontSize:11.5,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>Avísanos con tiempo. Tus limpiezas de ese día se reparten entre el equipo y el administrador te confirma.</div>
+              <div>
+                <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6}}>Fecha</span>
+                <input type="date" min={hoy} value={fAus} onChange={function(e){setFAus(e.target.value);}} style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"11px 12px",fontSize:13,fontFamily:"Montserrat,sans-serif",minHeight:46,outline:"none"}}/>
               </div>
-            </div>
-          );
-        })}
+              <div>
+                <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6}}>Motivo</span>
+                <input value={motivo} onChange={function(e){setMotivo(e.target.value);}} placeholder="Cita médica, viaje, asunto familiar…" style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"11px 12px",fontSize:13,fontFamily:"Montserrat,sans-serif",minHeight:46,outline:"none"}}/>
+              </div>
+              <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+                <button onClick={enviarAusencia} disabled={!fAus} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:100,border:"none",background:!fAus?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Enviar aviso</button>
+                <button onClick={function(){setPedir(false);}} style={{padding:"12px 18px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+              </div>
+            </div>}
       </div>
     </div>
   );
@@ -6971,7 +7671,7 @@ function QuickEditTotal({rep, vendors, onSave}) {
 
 
 /* ─── Admin QA Panel — full quality review across all cleanings + daños + resumen */
-function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos, rvIA, onSvRvIA, onQA, onSelect, onUpdate, isAdmin, me}) {
+function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos, rvIA, onSvRvIA, onQA, onQAForm, onSelect, onUpdate, isAdmin, me}) {
   const [sec,      setSec]      = useState("limpiezas"); /* limpiezas | danios | resumen */
   const [filter,   setFilter]   = useState("all"); /* all | pendiente | aprobada | correccion */
   const [selVend,  setSelVend]  = useState("Todos");
@@ -7101,9 +7801,21 @@ function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos
             </div>
             {/* QA action buttons */}
             {(qs==="pendiente"||qs==="corregido")&&(
-              <div style={{display:"flex",gap:8,marginTop:4}}>
-                <button onClick={function(){onQA&&onQA(r.id,"aprobada","");}} style={{flex:1,padding:"9px",borderRadius:7,border:"none",background:"#3d6b52",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>✓ Aprobar</button>
-                <button onClick={function(){var c=prompt("Comentario para el técnico:");if(c!==null)onQA&&onQA(r.id,"correccion",c);}} style={{flex:1,padding:"9px",borderRadius:7,border:"none",background:"#8a3030",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>⚠ Corrección</button>
+              onQAForm
+                ? <button onClick={function(){onQAForm(r);}} style={{padding:"11px",borderRadius:7,border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",marginTop:4,letterSpacing:".03em"}}>Supervisar limpieza →</button>
+                : <div style={{display:"flex",gap:8,marginTop:4}}>
+                    <button onClick={function(){onQA&&onQA(r.id,"aprobada","");}} style={{flex:1,padding:"9px",borderRadius:7,border:"none",background:"#3d6b52",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>✓ Aprobar</button>
+                    <button onClick={function(){var c=prompt("Comentario para el técnico:");if(c!==null)onQA&&onQA(r.id,"correccion",c);}} style={{flex:1,padding:"9px",borderRadius:7,border:"none",background:"#8a3030",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>⚠ Corrección</button>
+                  </div>
+            )}
+            {r.supForm&&r.supForm.items&&(
+              <div style={{background:C.surfaceWarm,borderRadius:8,padding:"9px 11px",display:"flex",flexWrap:"wrap",gap:7,alignItems:"center"}}>
+                <span style={{fontSize:9.5,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:r.supForm.criticas?C.red:(r.supForm.score>=100?C.green:C.earth)}}>Supervisión {r.supForm.score}%{r.supForm.criticas?" · "+r.supForm.criticas+" crítica"+(r.supForm.criticas===1?"":"s"):""}</span>
+                {(r.supForm.items||[]).filter(function(q){return !q.ok;}).map(function(q){
+                  return <span key={q.id} title={q.nota||q.titulo} style={{fontSize:10,fontWeight:600,padding:"2px 8px",borderRadius:100,background:q.critico?C.red:"#F5EDEC",color:q.critico?"#fff":C.red}}>{q.titulo}{q.nota?" — "+q.nota:""}</span>;
+                })}
+                {(r.supForm.items||[]).every(function(q){return q.ok;})&&<span style={{fontSize:10,fontWeight:600,padding:"2px 8px",borderRadius:100,background:"#EDF5EF",color:C.green}}>Sin fallas</span>}
+                {r.supForm.por&&<span style={{fontSize:9.5,color:C.taupe}}>· {r.supForm.por}</span>}
               </div>
             )}
             {qs==="aprobada"&&(
@@ -7129,6 +7841,7 @@ function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos
    Solo lectura del detalle: ve reporte y fotos, no edita ni gestiona pagos. */
 function SupervisionPanel({me, reps, vendors, props, onUpdate}) {
   const [detail, setDetail] = useState(null);
+  const [form,   setForm]   = useState(null);
   function qaSup(id,status,comment,tipo){
     var r=(reps||[]).find(function(x){return x.id===id;}); if(!r) return;
     var upd=Object.assign({},r,{qaStatus:status,qaComentario:comment||"",qaFecha:todayStr(),qaPor:vendorDisplay(me),qaTipo:status==="correccion"?(tipo||"inmediata"):r.qaTipo});
@@ -7136,21 +7849,277 @@ function SupervisionPanel({me, reps, vendors, props, onUpdate}) {
     setDetail(function(d){return d&&d.id===id?upd:d;});
     try{ notifyQAResult(upd,status,comment,vendors); }catch(_){}
   }
+  /* Guarda el formulario en el reporte y aplica la decisión que salió de él. */
+  function guardarForm(res){
+    var r=form; if(!r) return;
+    var upd=Object.assign({},r,{
+      qaStatus:res.status, qaComentario:res.comentario||"", qaFecha:todayStr(), qaPor:vendorDisplay(me),
+      qaTipo:res.status==="correccion"?(res.tipo||"inmediata"):r.qaTipo,
+      supForm:Object.assign({},res.supForm,{por:vendorDisplay(me)})
+    });
+    onUpdate&&onUpdate(upd);
+    setForm(null);
+    setDetail(function(d){return d&&d.id===upd.id?upd:d;});
+    try{ notifyQAResult(upd,res.status,res.comentario,vendors); }catch(_){}
+  }
   /* Sus propias limpiezas las revisa el administrador — se excluyen aquí */
   var visibles=(reps||[]).filter(function(r){return r.reportadoPor!==me.email||isDanos(r.categoria);});
   return (
     <div>
       <div style={{maxWidth:700,margin:"0 auto",padding:"16px 16px 0"}}>
         <div style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:10,padding:"11px 14px",fontSize:12,color:C.earth,lineHeight:1.6}}>
-          ★ <strong>Función de supervisión</strong> — revisas las limpiezas del equipo y clasificas los daños. Tus propias limpiezas las revisa el administrador.
+          ★ <strong>Función de supervisión</strong> — en cada limpieza del equipo evalúas nueve tipos de falla, no habitaciones: pelos, olor, zonas omitidas, sarro, detalle. Las cuatro primeras son críticas — si una falla, la limpieza no se aprueba. Cuando marcas una falla escribes dónde la encontraste y la corrección le llega sola al técnico. Tus propias limpiezas las revisa el administrador.
         </div>
       </div>
-      <AdminQAPanel reps={visibles} vendors={vendors} onQA={qaSup} onSelect={setDetail} onUpdate={onUpdate} isAdmin={false} me={me}/>
-      {detail&&<DetailModal rep={detail} vendors={vendors} props={props} readOnly={true} onClose={function(){setDetail(null);}} onQA={isCleaning(detail.categoria)?qaSup:undefined}/>}
+      <AdminQAPanel reps={visibles} vendors={vendors} onQA={qaSup} onQAForm={setForm} onSelect={setDetail} onUpdate={onUpdate} isAdmin={false} me={me}/>
+      {form&&<SupervisionForm rep={form} vendors={vendors} reps={reps} onCancel={function(){setForm(null);}} onSubmit={guardarForm}/>}
+      {detail&&<DetailModal rep={detail} vendors={vendors} props={props} readOnly={true} onClose={function(){setDetail(null);}}/>}
     </div>
   );
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FORMULARIO DE SUPERVISIÓN
+   Aprobar con un clic no producía criterio. Ahora el supervisor recorre seis
+   puntos —los que de verdad determinan si un huésped se queja— y responde
+   Bien / Falla en cada uno. Una falla obliga a escribir qué falló, y de ahí
+   sale sola la corrección que le llega al técnico.
+   ═══════════════════════════════════════════════════════════════════════════ */
+/* Cada criterio es un TIPO DE FALLA, no un espacio. `peso` = cuánto castiga en el
+   puntaje. `critico` = si falla, la limpieza no se aprueba aunque el resto esté bien:
+   son las fallas que un huésped sí menciona en su reseña. `donde` orienta al
+   supervisor sobre dónde se esconde normalmente esa falla. */
+var SUP_ITEMS = [
+  {id:"pelos", critico:true, peso:3, t:"Pelos",
+   d:"La queja número uno y la más fácil de encontrar si se busca.",
+   donde:"Drenaje y piso de la ducha · sábanas y almohadas · esquinas del piso · lavamanos"},
+  {id:"omitido", critico:true, peso:3, t:"Zonas que nadie tocó",
+   d:"No es suciedad: es limpieza que no ocurrió. Se detecta pasando el dedo.",
+   donde:"Debajo de la cama · detrás del inodoro · dentro del microondas · sobre la refri · piso del clóset"},
+  {id:"olor", critico:true, peso:3, t:"Olor del espacio",
+   d:"Lo primero que percibe el huésped, antes de ver nada. Húmedo, a drenaje, a huésped anterior — o perfumado en exceso.",
+   donde:"Al abrir la puerta · baño cerrado · basureros · trapeador guardado húmedo"},
+  {id:"cama", critico:true, peso:3, t:"Ropa de cama y toallas",
+   d:"Una mancha aquí anula todo lo demás: es donde el huésped duerme.",
+   donde:"Manchas · pelos · tendido flojo · toallas con olor a guardado o mal dobladas"},
+  {id:"residuo", critico:false, peso:2, t:"Marcas y residuo en superficies",
+   d:"Está limpio pero se ve sucio. Producto mal retirado o trapo sucio.",
+   donde:"Espejos · vidrios · encimeras pegajosas · acero con huellas · manchas de agua"},
+  {id:"sarro", critico:false, peso:2, t:"Sarro y acumulación",
+   d:"No se genera en un día: delata varias limpiezas superficiales seguidas.",
+   donde:"Grifería y regadera · silicón de la ducha · borde del inodoro · desagües"},
+  {id:"cocinaInt", critico:false, peso:2, t:"Interiores de cocina",
+   d:"El huésped abre y ahí queda el rastro del anterior.",
+   donde:"Refrigeradora por dentro · microondas · horno · gabinetes · escurridor"},
+  {id:"basura", critico:false, peso:2, t:"Basura y desechos",
+   d:"Basurero vacío no basta: la bolsa se cambia.",
+   donde:"Todos los basureros · bolsa nueva puesta · nada olvidado en el balcón o lavandería"},
+  {id:"detalle", critico:false, peso:1, t:"Atención al detalle",
+   d:"Lo que separa 'limpio' de una propiedad boutique. Aquí se gana la quinta estrella.",
+   donde:"Toallas dobladas igual · cojines acomodados · controles en su lugar · dotación completa y presentada · cortinas parejas"}
+];
+var SUP_PESO_TOTAL = SUP_ITEMS.reduce(function(s,q){ return s+q.peso; },0);
+/* Puntaje ponderado: las fallas que generan reseñas negativas pesan el triple
+   que un cojín torcido. */
+function supScore(items){
+  var perd=SUP_ITEMS.reduce(function(s,q){ return s + (items[q.id]==="falla" ? q.peso : 0); },0);
+  return Math.max(0, Math.round((SUP_PESO_TOTAL-perd)/SUP_PESO_TOTAL*100));
+}
+function supCriticasFallidas(items){ return SUP_ITEMS.filter(function(q){ return q.critico && items[q.id]==="falla"; }); }
+/* Recurrencia por criterio: una falla aislada es un mal día, la misma falla repetida
+   es un hábito. Es lo único que convierte la supervisión en un cambio de conducta. */
+function supHistorial(reps, email, n){
+  return (reps||[])
+    .filter(function(r){ return r.supForm && r.supForm.items && r.reportadoPor===email; })
+    .sort(function(a,b){ return String(b.fecha||"").localeCompare(String(a.fecha||"")); })
+    .slice(0, n||6);
+}
+function supRecurrencia(reps, email, itemId, n){
+  var h=supHistorial(reps, email, n);
+  var fall=h.filter(function(r){
+    return (r.supForm.items||[]).some(function(q){ return q.id===itemId && !q.ok; });
+  }).length;
+  return {fallas:fall, total:h.length};
+}
+/* Los criterios que más veces han fallado — lo que hay que corregir primero. */
+function supPatrones(reps, email, n){
+  var h=supHistorial(reps, email, n||8);
+  if(h.length<2) return [];
+  return SUP_ITEMS.map(function(q){
+    var fall=h.filter(function(r){ return (r.supForm.items||[]).some(function(x){ return x.id===q.id && !x.ok; }); }).length;
+    return {item:q, fallas:fall, total:h.length};
+  }).filter(function(x){ return x.fallas>=2; }).sort(function(a,b){ return b.fallas-a.fallas || b.item.peso-a.item.peso; });
+}
+function SupervisionForm({rep, vendors, reps, onCancel, onSubmit}) {
+  const [items,setItems] = useState({});
+  const [notas,setNotas] = useState({});
+  const [urg,  setUrg]   = useState("inmediata");
+  const [extra,setExtra] = useState("");
+  const [busy, setBusy]  = useState(false);
+  const [verHist,setVerHist] = useState(false);
+
+  var tecEmail = rep.reportadoPor;
+  var patrones = supPatrones(reps, tecEmail, 8);
+  var resp     = SUP_ITEMS.filter(function(q){ return items[q.id]; });
+  var fallas   = SUP_ITEMS.filter(function(q){ return items[q.id]==="falla"; });
+  var criticas = supCriticasFallidas(items);
+  var faltan   = SUP_ITEMS.length-resp.length;
+  var sinNota  = fallas.filter(function(q){ return String(notas[q.id]||"").trim().length<3; });
+  var listo    = faltan===0 && sinNota.length===0;
+  var score    = supScore(items);
+  /* Una falla crítica reprueba la limpieza aunque el puntaje sea alto: es la que
+     el huésped iba a mencionar en su reseña. */
+  var aprueba  = fallas.length===0;
+
+  function marcar(id,val){ setItems(function(p){ var u=Object.assign({},p); u[id]=val; return u; }); }
+  function enviar(){
+    if(!listo||busy) return;
+    setBusy(true);
+    var detalle=SUP_ITEMS.map(function(q){
+      return {id:q.id, titulo:q.t, critico:!!q.critico, peso:q.peso,
+              ok:items[q.id]==="ok", nota:String(notas[q.id]||"").trim()};
+    });
+    var comentario=fallas.map(function(q){
+      return (q.critico?"⚠ ":"")+q.t+": "+String(notas[q.id]||"").trim();
+    }).join("\n");
+    if(String(extra||"").trim()) comentario=(comentario?comentario+"\n":"")+String(extra).trim();
+    onSubmit({
+      status: aprueba?"aprobada":"correccion",
+      tipo: aprueba?"":(criticas.length?"inmediata":urg),
+      comentario: aprueba?String(extra||"").trim():comentario,
+      supForm:{items:detalle, score:score, criticas:criticas.length, fecha:todayStr()}
+    });
+  }
+
+  var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6};
+  function Bloque({titulo, sub, lista}){
+    if(!lista.length) return null;
+    return (
+      <div style={{display:"flex",flexDirection:"column",gap:9}}>
+        <div style={{paddingTop:4}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase"}}>{titulo}</div>
+          <div style={{fontSize:11,color:C.taupe,marginTop:3,lineHeight:1.5,textWrap:"pretty"}}>{sub}</div>
+        </div>
+        {lista.map(function(q){
+          var val=items[q.id], falla=val==="falla";
+          var rec=supRecurrencia(reps, tecEmail, q.id, 6);
+          return (
+            <div key={q.id} style={{border:"1px solid "+(falla?"#E0C9C4":C.line),background:falla?"#FCF6F4":"#fff",borderRadius:12,padding:"13px 14px"}}>
+              <div style={{display:"flex",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+                <div style={{flex:"1 1 205px",minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                    <span style={{fontSize:13.5,fontWeight:600,color:C.black}}>{q.t}</span>
+                    {q.critico&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 7px",borderRadius:100,background:"#F5EDEC",color:C.red}}>Crítico</span>}
+                    {rec.fallas>=2&&<span title={"Falló en "+rec.fallas+" de las últimas "+rec.total+" supervisiones"} style={{fontSize:8.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",padding:"2px 7px",borderRadius:100,background:"#F7EFE2",color:"#8a6320"}}>Reincide {rec.fallas}/{rec.total}</span>}
+                  </div>
+                  <div style={{fontSize:11.5,color:C.earth,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>{q.d}</div>
+                  <div style={{fontSize:10.5,color:C.taupe,marginTop:5,lineHeight:1.55,textWrap:"pretty"}}>{q.donde}</div>
+                </div>
+                <div style={{display:"flex",gap:6,flexShrink:0}}>
+                  <button onClick={function(){marcar(q.id,"ok");}} style={{minWidth:62,minHeight:44,padding:"0 13px",borderRadius:100,border:"1.5px solid "+(val==="ok"?C.green:C.gray),background:val==="ok"?C.green:"#fff",color:val==="ok"?"#fff":C.earth,fontSize:12,fontWeight:700,cursor:"pointer"}}>Bien</button>
+                  <button onClick={function(){marcar(q.id,"falla");}} style={{minWidth:62,minHeight:44,padding:"0 13px",borderRadius:100,border:"1.5px solid "+(falla?C.red:C.gray),background:falla?C.red:"#fff",color:falla?"#fff":C.earth,fontSize:12,fontWeight:700,cursor:"pointer"}}>Falla</button>
+                </div>
+              </div>
+              {falla&&(
+                <div style={{marginTop:11}}>
+                  <span style={LBL}>¿Dónde exactamente?</span>
+                  <input autoFocus value={notas[q.id]||""} onChange={function(e){var v=e.target.value;setNotas(function(p){var u=Object.assign({},p);u[q.id]=v;return u;});}}
+                    placeholder="Ej. drenaje de la ducha del cuarto principal"
+                    style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"11px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44}}/>
+                  <div style={{fontSize:10.5,color:C.taupe,marginTop:5,lineHeight:1.5}}>Sin el lugar exacto la corrección no sirve — el técnico no sabe dónde volver.</div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <Overlay>
+      <div style={{background:"#fff",borderRadius:18,width:"min(580px,94vw)",maxHeight:"92vh",overflowY:"auto",fontFamily:"Montserrat,sans-serif",boxShadow:"0 28px 80px rgba(62,63,63,.18)"}}>
+        <div style={{padding:"20px 22px 14px",borderBottom:"1px solid "+C.line,position:"sticky",top:0,background:"#fff",zIndex:2,borderRadius:"18px 18px 0 0"}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Supervisión de limpieza</div>
+          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:20,color:C.black,marginTop:4,lineHeight:1.2}}>{rep.propiedad||"—"}</div>
+          <div style={{fontSize:11.5,color:C.earth,marginTop:3}}>{fmtDate(rep.fecha)} · {vendorNameByEmail(vendors,tecEmail)||tecEmail||"—"}</div>
+          <div style={{display:"flex",alignItems:"center",gap:9,marginTop:11}}>
+            <div style={{flex:1,height:4,background:C.surfaceWarm,borderRadius:100,overflow:"hidden"}}>
+              <div style={{height:"100%",width:(resp.length/SUP_ITEMS.length*100)+"%",background:criticas.length?C.red:(fallas.length?C.orange:C.green),borderRadius:100,transition:"width .18s"}}/>
+            </div>
+            <span style={{fontSize:10.5,fontWeight:700,color:C.earth,fontVariantNumeric:"tabular-nums"}}>{resp.length}/{SUP_ITEMS.length}</span>
+          </div>
+          {patrones.length>0&&(
+            <div style={{marginTop:11,background:"#FBF6EC",border:"1px solid #E8DCC4",borderRadius:10,padding:"10px 12px"}}>
+              <button onClick={function(){setVerHist(!verHist);}} style={{background:"none",border:"none",padding:0,textAlign:"left",width:"100%",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+                <div style={{fontSize:11.5,color:"#7a5c1e",lineHeight:1.6,fontWeight:600}}>
+                  Reincidencias de {(vendorNameByEmail(vendors,tecEmail)||"").split(" ")[0]||"este técnico"} — pon atención aquí {verHist?"▾":"▸"}
+                </div>
+              </button>
+              {verHist&&(
+                <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:7}}>
+                  {patrones.slice(0,4).map(function(p){
+                    return <div key={p.item.id} style={{fontSize:11,color:"#7a5c1e",display:"flex",justifyContent:"space-between",gap:8}}>
+                      <span>{p.item.t}</span><span style={{fontWeight:700,fontVariantNumeric:"tabular-nums"}}>{p.fallas} de {p.total}</span>
+                    </div>;
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div style={{padding:"14px 22px 4px",display:"flex",flexDirection:"column",gap:16}}>
+          <Bloque titulo="Fallas que llegan a la reseña" sub="Si una de estas falla, la limpieza no se aprueba. Son las que el huésped sí escribe." lista={SUP_ITEMS.filter(function(q){return q.critico;})}/>
+          <Bloque titulo="Fallas visibles" sub="No siempre se mencionan, pero bajan la percepción de calidad." lista={SUP_ITEMS.filter(function(q){return !q.critico&&q.peso>1;})}/>
+          <Bloque titulo="Acabado boutique" sub="Lo que hace que la propiedad se sienta cuidada, no solo aseada." lista={SUP_ITEMS.filter(function(q){return q.peso===1;})}/>
+
+          <div>
+            <span style={LBL}>Observación general · opcional</span>
+            <textarea value={extra} onChange={function(e){setExtra(e.target.value);}} rows={2} placeholder="Algo que valga la pena decirle al técnico, bueno o malo."
+              style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:10,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",lineHeight:1.6,outline:"none",resize:"vertical"}}/>
+          </div>
+
+          {fallas.length>0&&criticas.length===0&&(
+            <div>
+              <span style={LBL}>¿Cuándo se corrige?</span>
+              <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                {[["inmediata","Ahora — hay entrada próxima"],["futura","En la siguiente limpieza"]].map(function(o){
+                  var s=urg===o[0];
+                  return <button key={o[0]} onClick={function(){setUrg(o[0]);}} style={{padding:"9px 14px",minHeight:44,borderRadius:100,border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{o[1]}</button>;
+                })}
+              </div>
+            </div>
+          )}
+          {criticas.length>0&&(
+            <div style={{background:"#F5EDEC",borderRadius:10,padding:"11px 13px",fontSize:11.5,color:C.red,lineHeight:1.6}}>
+              Hay {criticas.length} falla{criticas.length===1?"":"s"} crítica{criticas.length===1?"":"s"} — la corrección se marca <b>inmediata</b> y el técnico recibe el aviso ahora.
+            </div>
+          )}
+        </div>
+
+        <div style={{padding:"14px 22px 20px",position:"sticky",bottom:0,background:"#fff",borderTop:"1px solid "+C.line,marginTop:12,display:"flex",flexDirection:"column",gap:9,borderRadius:"0 0 18px 18px"}}>
+          <div style={{fontSize:11.5,color:C.earth,lineHeight:1.6}}>
+            {faltan>0
+              ? <>Faltan <b style={{color:C.black}}>{faltan}</b> criterio{faltan===1?"":"s"} por responder.</>
+              : (sinNota.length>0
+                  ? <>Escribe dónde encontraste la falla en <b style={{color:C.red}}>{sinNota.length}</b> criterio{sinNota.length===1?"":"s"}.</>
+                  : (aprueba
+                      ? <>Sin fallas — la limpieza se <b style={{color:C.green}}>aprueba</b> al 100% y el técnico recibe el aviso.</>
+                      : <>Puntaje <b style={{color:criticas.length?C.red:C.orange}}>{score}%</b> — se enviará una <b style={{color:C.red}}>corrección</b> con {fallas.length} falla{fallas.length===1?"":"s"}{criticas.length?" ("+criticas.length+" crítica"+(criticas.length===1?"":"s")+")":""}.</>))}
+          </div>
+          <div style={{display:"flex",gap:9}}>
+            <button onClick={onCancel} style={{padding:"13px 18px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+            <button onClick={enviar} disabled={!listo||busy} style={{flex:1,padding:"13px",borderRadius:100,border:"none",background:!listo||busy?C.gray:(aprueba?C.green:C.red),color:"#fff",fontSize:13,fontWeight:700,cursor:!listo||busy?"default":"pointer",letterSpacing:".03em"}}>
+              {busy?"Enviando…":(aprueba?"Aprobar limpieza →":"Enviar corrección →")}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
 
 /* ═══ TABLERO DE DAÑOS — clasificación por urgencia, estado y comentarios.
    Compartido: supervisión y administrador. */
@@ -7637,12 +8606,20 @@ function adv_migrate(list, vendors){
     list=(list||[]).concat([{
       id:"adv_gabriel_planilla", vendorEmail:gab.email, vendorName:vendorDisplay(gab),
       dpiNumber:gab.dpi||"", dpiPhoto:null, firma:null, monto:7691.5,
-      modo:"quincenal", cobroQuincenal:141.5, cobroSemanal:0, cuotas:Math.ceil(7691.5/141.5),
+      modo:"quincenal", cobroQuincenal:375, cobroSemanal:0, cuotas:Math.ceil(7691.5/375),
       fechaInicio:"2026-07-30", fechaDeposito:"2026-07-30", status:"activo",
       createdAt:Date.now(), pausas:[], ajustes:[], contractText:"", origen:"saldo migrado"
     }]);
     changed=true;
   }
+  /* Corrección: la cuota quincenal acordada es Q375, no Q141.50. */
+  list=(list||[]).map(function(a){
+    if(a.id==="adv_gabriel_planilla" && Number(a.cobroQuincenal)===141.5){
+      changed=true;
+      return Object.assign({},a,{cobroQuincenal:375, cuotas:Math.ceil((parseFloat(a.monto)||0)/375)});
+    }
+    return a;
+  });
   var out=(list||[]).map(function(a){
     var b=Object.assign({},a);
     if(!Array.isArray(b.pausas)){ b.pausas=[]; changed=true; }
@@ -8243,7 +9220,7 @@ function printComprobante(pago, company, focusEmail){
      bono 14 / aguinaldo = (salario sin bonif. decreto × días) ÷ 365
    ═════════════════════════════════════════════════════════════════ */
 var IGSS_RATE=0.0483;
-var NOM_NUMF={tarifaLimpieza:1,salarioBase:1,bonifDecreto:1,otrasBonif:1,isrMensual:1,otrosDesc:1,advSaldo:1,advCuota:1};
+var NOM_NUMF={tarifaLimpieza:1,maxDia:1,salarioBase:1,bonifDecreto:1,otrasBonif:1,isrMensual:1,otrosDesc:1};
 var NOM_MES=["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
 function nomN(x){ var v=parseFloat(x); return isNaN(v)?0:v; }
 function nom2(n){ return Math.round((n||0)*100)/100; }
@@ -8423,6 +9400,10 @@ function nomGenerarPendientes(o){
 /* Semilla de datos reales conocidos (no se persiste sola: solo rellena lo que falte). */
 function nom_seed(list){
   return (list||[]).map(function(v){
+    /* Saldo y cuota viven en el módulo de Adelantos — se descartan del usuario. */
+    if(v && (v.advSaldo!=null || v.advCuota!=null)){
+      v=Object.assign({},v); delete v.advSaldo; delete v.advCuota;
+    }
     var nm=normNm(vendorDisplay(v)+" "+(v.name||""));
     if(nm.indexOf("gabriel asturias")>=0 && v.tipo==="interno"){
       var u=Object.assign({},v);
@@ -10636,6 +11617,42 @@ function RatingCasesPanel({casos, onSvCasos, reps, vendors, me}) {
   const [nota,   setNota]   = useState("");
   const [dest,   setDest]   = useState("");
   const [verRes, setVerRes] = useState(false);
+  const [verRep, setVerRep] = useState(null);
+
+  /* La limpieza que originó la review: misma propiedad, la más reciente dentro de la
+     ventana previa al check-in — el mismo criterio con que se atribuyó la calificación. */
+  function limpiezaDe(c){
+    if(!c) return null;
+    if(c.repId){ var ex=(reps||[]).find(function(r){return String(r.id)===String(c.repId);}); if(ex) return ex; }
+    var ci=String(c.checkIn||"").slice(0,10);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(ci)) return null;
+    var k=rvPropKey(c.propiedad), min=isoShift(ci,-RV_WINDOW_DAYS);
+    var cand=(reps||[]).filter(function(r){
+      return isTradClean(r.categoria) && r.fecha && rvPropKey(r.propiedad)===k && r.fecha<=ci && r.fecha>=min;
+    });
+    if(!cand.length) return null;
+    cand.sort(function(a,b){ if(a.fecha!==b.fecha) return a.fecha<b.fecha?1:-1; return (b.createdAt||b.id||0)-(a.createdAt||a.id||0); });
+    return cand[0];
+  }
+  /* Deshace una decisión ya guardada: el caso vuelve a la cola de pendientes y la
+     review recupera su estado original en los promedios. */
+  function revertir(c){
+    if(!window.confirm("¿Revertir esta decisión?\n\n"+(c.tecnico||"")+" · "+(c.propiedad||"")+"\n\nEl caso vuelve a quedar pendiente y la calificación recupera su efecto original en el promedio.")) return;
+    onSvCasos&&onSvCasos((casos||[]).map(function(x){
+      if(x.id!==c.id) return x;
+      var u=Object.assign({},x,{
+        estado:"pendiente", decision:"", reasignadaA:"", resueltaPor:"", fechaResol:"",
+        revertidoPor:(me&&(me.nombre||me.email))||"Administrador", revertidoEn:todayStr(),
+        decisionPrevia:(x.estado||"")+(x.decision?" — "+x.decision:"")
+      });
+      return u;
+    }));
+  }
+  function VerLimpiezaBtn({c, chico}){
+    var r=limpiezaDe(c);
+    if(!r) return <span style={{fontSize:10.5,color:C.taupe,fontStyle:"italic"}}>Sin limpieza ligada en el app</span>;
+    return <button onClick={function(){setVerRep(r);}} style={{padding:chico?"5px 11px":"8px 14px",borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:chico?10.5:11.5,fontWeight:600,cursor:"pointer"}}>Ver la limpieza · {fmtDate(r.fecha)} →</button>;
+  }
 
   var pend = rcPend(casos).sort(function(a,b){return (a.fecha||"")<(b.fecha||"")?1:-1;});
   var res  = (casos||[]).filter(function(c){return (c.estado||"pendiente")!=="pendiente";})
@@ -10678,6 +11695,7 @@ function RatingCasesPanel({casos, onSvCasos, reps, vendors, me}) {
                 <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>{c.tecnico||"—"}</div>
                 <div style={{fontSize:10.5,color:C.earth,marginTop:3}}>{c.propiedad||"—"} · check-in {fmtDate(c.checkIn)} · solicitada {fmtDate(c.fecha)}</div>
                 <div style={{fontSize:10.5,color:C.taupe,marginTop:3}}>{c.tipo==="aclaracion"?"Pide dejar una aclaración":"Pide que no cuente para su promedio"}</div>
+                {c.decisionPrevia&&<div style={{fontSize:10,color:C.orange,marginTop:3,fontWeight:600}}>Decisión revertida{c.revertidoPor?" por "+c.revertidoPor:""} — antes: {c.decisionPrevia}</div>}
               </div>
               <div style={{textAlign:"right",flexShrink:0}}>
                 <div style={{fontSize:15,fontWeight:700,color:rvColor(c.nota)}}>{c.nota==null?"—":Number(c.nota).toFixed(1)}</div>
@@ -10687,6 +11705,10 @@ function RatingCasesPanel({casos, onSvCasos, reps, vendors, me}) {
             <div style={{fontSize:11.5,color:C.black,lineHeight:1.65,marginTop:8,background:"#fff",borderRadius:7,padding:"9px 11px"}}>“{c.motivo}”</div>
             {abierto ? (
               <div style={{marginTop:10,borderTop:"1px solid "+C.line,paddingTop:10,display:"flex",flexDirection:"column",gap:9}}>
+                <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap"}}>
+                  <span style={{fontSize:10.5,color:C.taupe}}>Antes de decidir, revisa el reporte y las fotos:</span>
+                  <VerLimpiezaBtn c={c} chico/>
+                </div>
                 <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
                   {[["excluida","No cuenta para el promedio"],["reasignada","Reasignar a otro técnico"],["rechazada","Mantener la calificación"]].map(function(o){
                     var act=accion===o[0];
@@ -10707,11 +11729,16 @@ function RatingCasesPanel({casos, onSvCasos, reps, vendors, me}) {
                 </div>
               </div>
             ) : (
-              <button onClick={function(){setOpen(c.id);setNota("");setAccion(c.tipo==="aclaracion"?"rechazada":"excluida");}} style={{marginTop:9,padding:"8px 14px",borderRadius:8,border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:700,cursor:"pointer"}}>Revisar</button>
+              <div style={{marginTop:9,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                <button onClick={function(){setOpen(c.id);setNota("");setAccion(c.tipo==="aclaracion"?"rechazada":"excluida");}} style={{padding:"8px 14px",borderRadius:8,border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:700,cursor:"pointer"}}>Revisar</button>
+                <VerLimpiezaBtn c={c}/>
+              </div>
             )}
           </div>
         );
       })}
+
+      {verRep&&<DetailModal rep={verRep} vendors={vendors} props={[]} readOnly={true} onClose={function(){setVerRep(null);}}/>}
 
       {res.length>0&&(
         <>
@@ -10727,6 +11754,10 @@ function RatingCasesPanel({casos, onSvCasos, reps, vendors, me}) {
                     </div>
                     <div style={{fontSize:10.5,color:C.taupe,marginTop:3}}>check-in {fmtDate(c.checkIn)} · resuelta {fmtDate(c.fechaResol)}{c.resueltaPor?" por "+c.resueltaPor:""}</div>
                     {c.decision&&<div style={{fontSize:11,color:C.earth,lineHeight:1.6,marginTop:4}}>{c.decision}</div>}
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginTop:7}}>
+                      <VerLimpiezaBtn c={c} chico/>
+                      <button onClick={function(){revertir(c);}} style={{padding:"5px 11px",borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.red,fontSize:10.5,fontWeight:600,cursor:"pointer"}}>↩ Revertir decisión</button>
+                    </div>
                   </div>
                 );
               })}
@@ -10766,9 +11797,25 @@ function RatingDashCard({reviews, reps, vendors, rvCasos, soloGrupo, rvIA, propF
   var mes   = String(todayStr()).slice(0,7);
   var delMes= valid.filter(function(x){return String(x.rv.checkIn||"").slice(0,7)===mes;});
   var avgMes= delMes.length ? delMes.reduce(function(s,x){return s+x.score;},0)/delMes.length : null;
-  /* Bajo estándar medido en REVIEWS, no en técnicos. */
-  var nBajo = valid.filter(function(x){return x.score < RV_STD;}).length;
-  var pctBajo = Math.round(nBajo/valid.length*100);
+  /* Bajo estándar medido en REVIEWS, no en técnicos.
+     Con un técnico seleccionado cuenta solo las suyas. Con "Todos" cuenta TODAS las
+     reviews con nota de limpieza — también las excluidas de un técnico por decisión
+     del admin y las que no se pudieron atribuir a nadie. Esa es la calidad real que
+     percibió el huésped, independientemente de a quién se le acredite. */
+  var baseBajo = valid;
+  if(!uno){
+    var vistos={}, todasRv=[];
+    att.rows.forEach(function(r){ var k=String(r.rv&&r.rv.id); if(!vistos[k]){vistos[k]=1; todasRv.push(r);} });
+    (att.orphan||[]).forEach(function(o){
+      if(o.score==null) return;
+      var k=String(o.rv&&o.rv.id); if(vistos[k]) return;
+      vistos[k]=1; todasRv.push({rv:o.rv, score:o.score, sinAtribuir:true});
+    });
+    baseBajo = todasRv;
+  }
+  var nBajo = baseBajo.filter(function(x){return x.score < RV_STD;}).length;
+  var pctBajo = baseBajo.length ? Math.round(nBajo/baseBajo.length*100) : 0;
+  var nSinAtrib = baseBajo.filter(function(x){return x.sinAtribuir;}).length;
 
   function ResumenGlobal(){
     var reg=(rvIA||{}).__global;
@@ -10803,7 +11850,7 @@ function RatingDashCard({reviews, reps, vendors, rvCasos, soloGrupo, rvIA, propF
         {[["Promedio"+(uno?"":" general"),gAvg.toFixed(2),rvColor(gAvg),valid.length+" review"+(valid.length===1?"":"s")],
           ["Este mes",avgMes==null?"—":avgMes.toFixed(2),rvColor(avgMes),delMes.length?delMes.length+" review"+(delMes.length===1?"":"s"):"sin reviews aún"],
           ["Estándar de marca",RV_STD.toFixed(2),gAvg>=RV_STD?C.green:C.orange,gAvg>=RV_STD?"cumplido":"por alcanzar"],
-          ["Bajo estándar",pctBajo+"%",nBajo?C.orange:C.green,nBajo+"/"+valid.length+" reviews"]].map(function(it,i){
+          ["Bajo estándar",pctBajo+"%",nBajo?C.orange:C.green,nBajo+"/"+baseBajo.length+" reviews"+(nSinAtrib?" · incluye "+nSinAtrib+" sin atribuir":"")]].map(function(it,i){
           return (
             <div key={i} style={{flex:"1 1 120px",background:C.surfaceWarm,borderRadius:9,padding:"11px 13px"}}>
               <div style={{fontSize:9,fontWeight:700,color:C.taupe,letterSpacing:".1em",textTransform:"uppercase",marginBottom:5}}>{it[0]}</div>
