@@ -7839,6 +7839,10 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           tecnico: vendorDisplay(v), fecha: fmtDate(f), dia: schedDiaNombre(f),
           hora: SCHED.HORA_INI+" a "+SCHED.HORA_FIN,
           total: String(lista.length),
+          paradas: lista.map(function(s){
+            return {propiedad:s.propiedad, habitaciones:s.habitaciones||1, tipo:s.tipo,
+                    entrada:!!s.entradaHoy, codigo:codigoSemana(codigos,s.propiedad,s.fecha,s.codigoAcceso)};
+          }),
           limpiezas: lista.map(function(s,i){
             var cod=codigoSemana(codigos, s.propiedad, s.fecha, s.codigoAcceso);
             return (i+1)+". "+s.propiedad+" — "+(s.habitaciones||1)+" hab · "+s.tipo+
