@@ -7417,6 +7417,10 @@ function PausasCfg({props, onSvP, hoy}){
   );
 }
 
+/* La ruta del viernes 31 de julio tal como la repartió el administrador. Queda
+   aquí para poder adoptarla con un botón; después se borra sin consecuencias. */
+var RUTA_31JUL = "2026-07-31\t11:00:00\tZ1 - Centro Vivo - 1104\tJackeline\n2026-07-31\t11:00:00\tZ1 - Centro Vivo - 1102\tCaren\n2026-07-31\t11:00:00\tZ7 - Monaco - B7\t\n2026-07-31\t11:00:00\tZ7 - Monaco - C4\t\n2026-07-31\t11:00:00\tZ7 - Monaco - C5\t\n2026-07-31\t11:00:00\tZ7 - Monaco - C7\t\n2026-07-31\t11:00:00\tZ10 - Fiamene - 405\tMirla\n2026-07-31\t11:00:00\tZ12 - Andares - 1003\tFlor\n2026-07-31\t11:00:00\tZ10 - Ignacio - 1402\tSucely\n2026-07-31\t11:00:00\tZ10 - Airali - 1508\tMirla\n2026-07-31\t11:00:00\tZ4 - EdificioA4 - 304\tJoselyn\n2026-07-31\t11:00:00\tZ2 - Baldone - 1103\tCaren\n2026-07-31\t11:00:00\tZ10 - Ignacio - 301\tHellen\n2026-07-31\t11:00:00\tZ10 - Ignacio - 1102\tHellen\n2026-07-31\t11:00:00\tZ10 - Ignacio - 1205\tSucely\n2026-07-31\t11:00:00\tZ1 - Centro vivo - 1106\tJackeline\n2026-07-31\t11:00:00\tZ4 - Modra - 1108\tFlor\n2026-07-31\t14:00:00\tZ13 - Namericas - 8F\t";
+
 /* ═══════════════════════════════════════════════════════════════════════════
    IMPORTAR LA RUTA DE UN DÍA
    Para adoptar como oficial una ruta armada afuera (el export de Hospitable o
@@ -7426,7 +7430,7 @@ function PausasCfg({props, onSvP, hoy}){
    Lo importado queda con origen "manual": el motor de las 6pm no lo toca.
    ═══════════════════════════════════════════════════════════════════════════ */
 function ImportarRuta({props, vendors, schedules, onSvSchedules, hoy, onAviso}){
-  const [abierto,setAbierto]=useState(false);
+  const [abierto,setAbierto]=useState(hoy==="2026-07-31");
   const [txt,setTxt]=useState("");
   const [prev,setPrev]=useState(null);
 
@@ -7524,6 +7528,9 @@ function ImportarRuta({props, vendors, schedules, onSvSchedules, hoy, onAviso}){
 
       {abierto&&(
         <div style={{marginTop:13,display:"flex",flexDirection:"column",gap:11}}>
+          {hoy==="2026-07-31"&&!txt&&(
+            <button onClick={function(){ setTxt(RUTA_31JUL); setPrev(null); }} style={{alignSelf:"flex-start",padding:"9px 15px",minHeight:42,borderRadius:100,border:"1.5px solid "+C.black,background:"#fff",color:C.black,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cargar la ruta del viernes 31 →</button>
+          )}
           <textarea value={txt} onChange={function(e){setTxt(e.target.value); setPrev(null);}} rows={8}
             placeholder={"2026-07-31\t11:00:00\tZ1 - Centro Vivo - 1104\tJackeline\n2026-07-31\t11:00:00\tZ10 - Airali - 1508\tMirla"}
             style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:10,padding:"12px",fontSize:12,fontFamily:"ui-monospace,Menlo,monospace",lineHeight:1.7,outline:"none",background:"#fff",color:C.black,resize:"vertical"}}/>
