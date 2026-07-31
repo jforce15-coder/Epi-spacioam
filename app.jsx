@@ -1986,7 +1986,7 @@ function AdminApp({reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegS
       <div style={{display:tab==="sched"?"block":"none"}}>
         <ProgramacionAdmin schedules={schedules||[]} onSvSchedules={onSvSchedules} vendors={vendors||[]} props={props||[]}
           reservas={reservas||[]} onSvReservas={onSvReservas} ausencias={ausencias||[]} onSvAusencias={onSvAusencias}
-          reps={reps} reviews={reviews} rvCasos={rvCasos} onSvP={onSvP} canNom={canNotif} codigos={codigos||{}} schedErr={schedErr}/>
+          reps={reps} reviews={reviews} rvCasos={rvCasos} onSvP={onSvP} onSvV={onSvV} canNom={canNotif} codigos={codigos||{}} schedErr={schedErr}/>
       </div>
       <div style={{display:tab==="qa"?"block":"none"}}>
         <AdminQAPanel reps={reps} vendors={vendors} reviews={reviews} onSvReviews={onSvReviews} rvCasos={rvCasos} onSvRvCasos={onSvRvCasos} rvIA={rvIA} onSvRvIA={onSvRvIA} onQA={qaUpdate} onSelect={setDetail} onUpdate={onUpsert} isAdmin={true} me={adminVendor}/>
@@ -7591,7 +7591,73 @@ function ImportarRuta({props, vendors, schedules, onSvSchedules, hoy, onAviso}){
   );
 }
 
-function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, reps, reviews, rvCasos, onSvP, canNom, codigos, schedErr}) {
+/* ═══════════════════════════════════════════════════════════════════════════
+   ANTICIPACIÓN DEL AVISO
+   Casi todo el equipo recibe su ruta confirmada el día anterior a las 6:00 pm.
+   Quien trabaja fuera de la ciudad (Antigua, Monterrico, Likin) necesita saberlo
+   con tres días para organizar el viaje: se le adelanta la ruta y de todos modos
+   recibe la confirmación el día anterior, porque puede cambiar.
+   Se guarda en la ficha del usuario: avisoDias = 1 | 3.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function AnticipacionCfg({vendors, onSvV}){
+  const [abierto,setAbierto]=useState(false);
+  var tecs=schedTecnicos(vendors);
+  var tres=tecs.filter(function(v){ return parseInt(v.avisoDias,10)===3; });
+
+  function set(v, dias){
+    if(!onSvV) return;
+    onSvV((vendors||[]).map(function(x){
+      return x.id===v.id ? Object.assign({},x,{avisoDias:dias}) : x;
+    }));
+  }
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+  var CHIP=function(sel){ return {padding:"6px 12px",minHeight:34,borderRadius:100,border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:10.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif",whiteSpace:"nowrap"}; };
+
+  return (
+    <div style={CARD}>
+      <button onClick={function(){setAbierto(!abierto);}} style={{width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:600,color:C.black}}>Anticipación del aviso</div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>
+              Quién recibe su ruta con tres días de anticipación y quién el día anterior.
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:9,flexShrink:0}}>
+            {tres.length>0&&<span style={{fontSize:10.5,fontWeight:700,color:C.earth,background:C.surfaceWarm,padding:"3px 10px",borderRadius:100}}>{tres.length} con 3 días</span>}
+            <span style={{color:C.taupe,fontSize:13}}>{abierto?"▾":"▸"}</span>
+          </div>
+        </div>
+      </button>
+
+      {abierto&&(
+        <div style={{marginTop:13}}>
+          <div style={{fontSize:11,color:C.taupe,lineHeight:1.6,textWrap:"pretty",marginBottom:11}}>
+            El de tres días es un adelanto para organizar el viaje: la confirmación final igual le llega el día anterior a las 6:00 pm, y si aparece una reserva de última hora se le avisa el mismo día en la revisión de la mañana.
+          </div>
+          {tecs.map(function(v,i){
+            var d=parseInt(v.avisoDias,10)===3?3:1;
+            return (
+              <div key={v.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderTop:i?"1px solid "+C.line:"1px solid "+C.line,flexWrap:"wrap"}}>
+                <div style={{flex:1,minWidth:120}}>
+                  <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{vendorDisplay(v)}</div>
+                  <div style={{fontSize:10,color:C.taupe,marginTop:2}}>{(v.zonas||[]).map(SCHED.zonaLabel).join(", ")||"sin zonas"}</div>
+                </div>
+                <div style={{display:"flex",gap:6,flexShrink:0}}>
+                  <button onClick={function(){set(v,1);}} style={CHIP(d===1)}>Día anterior</button>
+                  <button onClick={function(){set(v,3);}} style={CHIP(d===3)}>3 días antes</button>
+                </div>
+              </div>
+            );
+          })}
+          {tecs.length===0&&<div style={{fontSize:12,color:C.taupe}}>Sin técnicos de limpieza activos.</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, schedErr}) {
   /* Abre en HOY: la ruta que el equipo está corriendo ahora mismo es la que el
      administrador necesita ver al entrar, no la de mañana. */
   const [dia,      setDia]      = useState(0);      /* 0 = hoy, 1 = mañana, … */
@@ -7699,13 +7765,14 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
       var sf=String(s.fecha).slice(0,10);
       return sf<=hoy || s.origen==="manual" || (s.notificadoEn && !reabrir[sf]);
     });
+    /* Se congela FILA por fila: la ruta de quien ya recibió su correo no cambia,
+       pero el resto del día sí se puede replanificar. */
     var cerrados={};
     (schedules||[]).forEach(function(s){
       var sf=String(s.fecha).slice(0,10);
-      if(s.notificadoEn && !reabrir[sf] && sf>hoy) cerrados[sf]=1;
+      if(s.notificadoEn && !reabrir[sf] && sf>hoy) cerrados[sf]=(cerrados[sf]||0)+1;
     });
     var nuevas=r.asignaciones
-      .filter(function(x){ return !cerrados[String(x.fecha).slice(0,10)]; })
       .map(function(x){ return Object.assign({}, x, {id:"sc_"+x.key.replace(/[^a-z0-9]/gi,"").slice(0,28)+"_"+Math.floor(Math.random()*1000)}); });
     onSvSchedules(conservar.concat(nuevas));
     setBusy("");
@@ -7715,7 +7782,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
       +(prof?" · "+prof+" profunda"+(prof===1?"":"s"):"")
       +(r.sinAsignar.length?" · "+r.sinAsignar.length+" sin asignar":"")
       +((r.postergadas||[]).length?" · "+r.postergadas.length+" profunda"+(r.postergadas.length===1?"":"s")+" postergada"+(r.postergadas.length===1?"":"s")+" por falta de espacio":"")
-      +(cerradosTxt.length?" · "+cerradosTxt.map(fmtDate).join(" y ")+" no se tocó: ya salió por correo":"")+".";
+      +(cerradosTxt.length?" · se respetaron las rutas ya enviadas del "+cerradosTxt.map(fmtDate).join(" y "):"")+".";
     aviso(resumen);
     bitacora("programacion","Programación manual desde el app — "+resumen);
   }
@@ -8432,6 +8499,9 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
       {/* Adoptar una ruta armada afuera */}
       <ImportarRuta props={props} vendors={vendors} schedules={schedules} onSvSchedules={onSvSchedules} hoy={hoy} onAviso={function(m){ aviso(m); }}/>
 
+      {/* Quién recibe su ruta con anticipación */}
+      <AnticipacionCfg vendors={vendors} onSvV={onSvV}/>
+
       {/* Propiedades fuera del reparto automático */}
       <PausasCfg props={props} onSvP={onSvP} hoy={hoy}/>
 
@@ -8506,6 +8576,13 @@ function FeedbackCfg({feedback, onSave}) {
 }
 
 /* ─── Programación del técnico — solo la suya. */
+/* La hoja devolvía "11:00" convertido en una fecha de 1899. Se muestra solo si
+   de verdad es una hora; si no, el horario estándar de la jornada. */
+function horaOk(v, fallback){
+  var s=String(v||"").trim();
+  return /^\d{1,2}:\d{2}$/.test(s) ? s : fallback;
+}
+
 function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) {
   const [view, setView] = useState("hoy");
   const [diasAbiertos, setDiasAbiertos] = useState({});
@@ -8558,14 +8635,13 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) 
   }
 
   function Tarjeta({s, idx}){
-    var tentativa = String(s.fecha).slice(0,10) > manana && s.estado!=="confirmada";
     return (
       <div style={{background:"#fff",borderRadius:14,border:"1px solid "+(s.entradaHoy?"#E5C9BF":C.gray),padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
           <div style={{minWidth:0}}>
             <div style={{fontSize:15,fontWeight:600,color:C.black,lineHeight:1.3}}>{idx!=null?(idx+1)+". ":""}{s.propiedad}</div>
             <div style={{fontSize:11.5,color:C.earth,marginTop:4}}>{(s.habitaciones||1)} habitación{(s.habitaciones||1)===1?"":"es"} · {s.tipo}</div>
-            <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{s.hora||SCHED.HORA_INI} a {s.horaFin||SCHED.HORA_FIN}</div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{horaOk(s.hora,SCHED.HORA_INI)} a {horaOk(s.horaFin,SCHED.HORA_FIN)}</div>
           </div>
           {codigoSemana(codigos, s.propiedad, s.fecha, s.codigoAcceso)&&(
             <div style={{textAlign:"right",flexShrink:0}}>
@@ -8576,7 +8652,9 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) 
         </div>
         {s.entradaHoy&&(
           <div style={{marginTop:11,background:"#F5EDEC",borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.red,fontWeight:700,lineHeight:1.5}}>
-            Tiene entrada hoy — el huésped llega el mismo día. Esta limpieza no puede quedar para después.
+            {String(s.fecha).slice(0,10)===hoy
+              ? "Entra huésped hoy mismo — esta limpieza va primero, no puede quedar para después."
+              : "Entra huésped ese mismo día — esta limpieza va primero, no puede quedar para después."}
           </div>
         )}
         {SCHED.esProfunda(s.tipo)&&(
@@ -8584,10 +8662,14 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) 
             Limpieza profunda — ocupa todo el turno. Otro técnico hace la tradicional del mismo apartamento en paralelo.
           </div>
         )}
-        {tentativa&&(
-          <div style={{marginTop:11,fontSize:11,color:C.taupe,lineHeight:1.6}}>
-            Tentativa — se confirma el día anterior a las 6:00 pm.
-          </div>
+        {String(s.fecha).slice(0,10)>hoy&&(
+          s.notificadoEn
+            ? <div style={{marginTop:11,fontSize:11,color:C.taupe,lineHeight:1.6,textWrap:"pretty"}}>
+                Te la adelantamos para que te organices. La confirmación final llega el día anterior a las 6:00 pm; si entra una reserva nueva podría cambiar.
+              </div>
+            : <div style={{marginTop:11,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",fontSize:11,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>
+                <span style={{fontWeight:700}}>Sin confirmar todavía.</span> Te llega confirmada por correo el {SCHED.shift(String(s.fecha).slice(0,10),-1)===hoy?"día de hoy":fmtDate(SCHED.shift(String(s.fecha).slice(0,10),-1))} a las 6:00 pm.
+              </div>
         )}
         {s.reajustada&&<div style={{marginTop:9,fontSize:10.5,fontWeight:600,color:C.orange}}>Cambio reciente en tu programación</div>}
       </div>
@@ -8599,7 +8681,7 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) 
       <div>
         <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:21,color:C.black,lineHeight:1.2}}>Tu programación</div>
         <div style={{fontSize:11.5,color:C.earth,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>
-          Las limpiezas van de {SCHED.HORA_INI} a {SCHED.HORA_FIN}. La del día siguiente te llega confirmada cada tarde a las 6:00 pm.
+          Las limpiezas van de {SCHED.HORA_INI} a {SCHED.HORA_FIN}. La del día siguiente te llega confirmada cada tarde a las 6:00 pm{parseInt(vendor.avisoDias,10)===3?", y tu ruta te la adelantamos con tres días para que puedas organizar el viaje":""}.
         </div>
       </div>
 
@@ -8651,6 +8733,9 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) 
                   {d.lista.map(function(s){ var p=SCHED.partes(s.propiedad); return [p.edificio,p.unidad].filter(Boolean).join(" ")||s.propiedad; }).join(" → ")}
                 </div>
               </div>
+              {d.fecha>hoy&&!d.lista.some(function(s){return s.notificadoEn;})&&(
+                <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.taupe,background:C.surfaceWarm,padding:"3px 8px",borderRadius:100,flexShrink:0}}>Sin confirmar</span>
+              )}
               {d.lista.some(function(s){return s.entradaHoy;})&&(
                 <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#B4553C",background:"#FCF4F1",padding:"3px 8px",borderRadius:100,flexShrink:0}}>Entrada</span>
               )}

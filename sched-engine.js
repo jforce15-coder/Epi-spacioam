@@ -470,6 +470,18 @@
       if (!bloqueado) disponibles.push(est[em]);
     }
 
+    /* Lo que ya está fijado ese día (asignado a mano o ya enviado por correo) ocupa
+       cupo real: si no se contara, el motor volvería a llenar a esa persona. */
+    var fijos = o.fijos || [];
+    for (var fj = 0; fj < fijos.length; fj++) {
+      var sf = fijos[fj];
+      var efj = est[String(sf.vendorEmail || "").toLowerCase()];
+      if (!efj) continue;
+      efj.usados++;
+      efj.minutos += minutosLimpieza(sf.habitaciones, sf.tipo);
+      efj.paradas.push({ zona: sf.zona, edificio: sf.edificio, propiedad: sf.propiedad });
+    }
+
     var avgSemana = 0;
     if (disponibles.length) {
       for (var j = 0; j < disponibles.length; j++) avgSemana += disponibles[j].semana;
@@ -745,14 +757,20 @@
       var delDia = base.filter(function (x) { return x.fecha === f; });
       /* Lo que el administrador puso a mano manda: se respeta y ocupa cupo. */
       var manualesDia = manuales.filter(function (s) { return String(s.fecha).slice(0, 10) === f; });
+      /* Lo ya notificado no se reparte de nuevo: esa ruta el técnico ya la tiene. */
+      var notificadasDia = (o.existentes || []).filter(function (s) {
+        return s && s.notificadoEn && s.origen !== "manual" && String(s.fecha).slice(0, 10) === f;
+      });
+      var fijosDia = manualesDia.concat(notificadasDia);
       var yaCubiertas = {};
-      for (var m = 0; m < manualesDia.length; m++) yaCubiertas[norm(manualesDia[m].propiedad) + "|" + manualesDia[m].tipo] = 1;
+      for (var m = 0; m < fijosDia.length; m++) yaCubiertas[norm(fijosDia[m].propiedad) + "|" + fijosDia[m].tipo] = 1;
       delDia = delDia.filter(function (x) { return !yaCubiertas[norm(x.propiedad) + "|" + x.tipo]; });
 
       var r = planearDia({
         fecha: f, hoy: hoy, limpiezas: delDia, vendors: o.vendors,
         ratings: o.ratings, ausencias: o.ausencias, historial: o.historial,
-        existentes: acumulado.concat(manualesDia), pesoRating: o.pesoRating
+        fijos: fijosDia,
+        existentes: acumulado.concat(fijosDia), pesoRating: o.pesoRating
       });
       /* Solo el día siguiente se confirma y se notifica; los demás son tentativos. */
       var firme = (d <= 1);
