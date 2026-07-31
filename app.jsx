@@ -7445,12 +7445,30 @@ function ImportarRuta({props, vendors, schedules, onSvSchedules, hoy, onAviso}){
     return (props||[]).find(function(p){ return normalize(p.name)===n; })
         || (props||[]).find(function(p){ return normalize(p.name).indexOf(n)>=0 && n.length>6; }) || null;
   }
+  /* El nombre viene escrito a mano en la otra herramienta: "Hellen" contra "Helen",
+     "Jackeline" contra "Jaqueline". Se compara colapsando letras repetidas y, si
+     aún no cuadra, por prefijo — pero solo si un único técnico coincide. */
+  function claveNombre(s){
+    return normNm(s).replace(/[^a-z ]/g,"").replace(/(.)\1+/g,"$1");
+  }
   function buscarTec(cel){
     var n=normNm(cel);
     if(!n||n.length<3) return null;
-    return tecs.find(function(v){ return normNm(vendorDisplay(v))===n; })
-        || tecs.find(function(v){ return normNm(v.primerNombre||"")===n; })
-        || tecs.find(function(v){ return normNm(vendorDisplay(v)).split(" ")[0]===n; }) || null;
+    var k=claveNombre(cel);
+    var hit=tecs.find(function(v){ return normNm(vendorDisplay(v))===n; })
+         || tecs.find(function(v){ return normNm(v.primerNombre||"")===n; })
+         || tecs.find(function(v){ return normNm(vendorDisplay(v)).split(" ")[0]===n; })
+         || tecs.find(function(v){ return claveNombre(v.primerNombre||"")===k; })
+         || tecs.find(function(v){ return claveNombre(vendorDisplay(v)).split(" ")[0]===k; });
+    if(hit) return hit;
+    if(k.length>=4){
+      var pref=tecs.filter(function(v){
+        var pn=claveNombre(v.primerNombre||vendorDisplay(v)).split(" ")[0];
+        return pn.indexOf(k)===0 || k.indexOf(pn)===0;
+      });
+      if(pref.length===1) return pref[0];
+    }
+    return null;
   }
 
   function analizar(){
@@ -7587,6 +7605,11 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   const [sim,      setSim]      = useState(null);   /* simulacro: no guarda ni notifica */
   const [reabrir,  setReabrir]  = useState({});     /* días ya notificados que se van a rehacer */
   const [tocados,  setTocados]  = useState({});     /* días notificados que el admin ya cambió */
+  const [abiertos, setAbiertos] = useState({});     /* técnicos con la ruta desplegada */
+  const [filtroTec,setFiltroTec]= useState("todos");
+  const [buscaTec, setBuscaTec] = useState("");
+  const [accion,   setAccion]   = useState(null);   /* limpieza con sus acciones abiertas */
+  const [asigSel,  setAsigSel]  = useState({});     /* técnico elegido para cada checkout pendiente */
 
   /* Si el administrador toca un día que ya salió por correo, el equipo tiene una
      versión vieja. Se marca para ofrecer el reenvío — nunca se manda solo. */
@@ -7896,6 +7919,104 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   }).map(function(r){ return r.propiedad; });
   pausadasHoy=pausadasHoy.filter(function(x,i){ return pausadasHoy.indexOf(x)===i; });
 
+  /* ─── Una línea por técnico: carga, estado y resumen de ruta. */
+  function propCorta(n){
+    var p=SCHED.partes(n||"");
+    return [p.edificio,p.unidad].filter(Boolean).join(" ")||String(n||"");
+  }
+  var todasFilas=tecs.map(function(v){
+    var em=String(v.email||"").toLowerCase();
+    var mias=(porTec[em]||[]).slice().sort(function(a,b){ return (a.orden||0)-(b.orden||0); });
+    return {
+      v:v, em:em, mias:mias,
+      mins:mias.reduce(function(s,x){ return s+SCHED.minutosLimpieza(x.habitaciones,x.tipo)+(x.viaje||0); },0),
+      aus:(ausencias||[]).some(function(a){ return a.estado==="aprobada" && String(a.vendorEmail||"").toLowerCase()===em && a.fecha===fecha; }),
+      desc:((v.descansos)||[]).indexOf(new Date(fecha+"T12:00:00").getDay())>=0
+    };
+  });
+  var resumenTec={
+    con: todasFilas.filter(function(f){ return f.mias.length; }).length,
+    sin: todasFilas.filter(function(f){ return !f.mias.length && !f.aus && !f.desc; }).length,
+    sobre: todasFilas.filter(function(f){ return f.mins>SCHED.JORNADA_MIN; }).length
+  };
+  var filaTecs=todasFilas.filter(function(f){
+    if(filtroTec==="con"   && !f.mias.length) return false;
+    if(filtroTec==="sin"   && (f.mias.length||f.aus||f.desc)) return false;
+    if(filtroTec==="sobre" && f.mins<=SCHED.JORNADA_MIN) return false;
+    if(buscaTec.trim() && vendorDisplay(f.v).toLowerCase().indexOf(buscaTec.trim().toLowerCase())<0) return false;
+    return true;
+  }).sort(function(a,b){
+    /* Primero quien tiene ruta, luego quien puede recibirla, al final ausencias. */
+    var pa=(a.aus||a.desc)?2:(a.mias.length?0:1);
+    var pb=(b.aus||b.desc)?2:(b.mias.length?0:1);
+    if(pa!==pb) return pa-pb;
+    if(b.mias.length!==a.mias.length) return b.mias.length-a.mias.length;
+    return vendorDisplay(a.v)<vendorDisplay(b.v)?-1:1;
+  });
+
+  /* ─── Asignar un checkout pendiente sin salir del aviso.
+     El sugerido es quien tiene la zona, va más liviano hoy y la prefiere. */
+  function candidatosPara(x, extra){
+    var z=SCHED.zonaKey(x.zona);
+    return todasFilas.filter(function(f){ return !f.aus && !f.desc; }).map(function(f){
+      var zs=(f.v.zonas||[]).map(SCHED.zonaKey);
+      return {f:f, tieneZona:z?zs.indexOf(z)>=0:true,
+              prefiere:(f.v.zonasPref||[]).map(SCHED.zonaKey).indexOf(z)>=0,
+              carga:f.mias.length+((extra||{})[f.em]||0),
+              rating:(ratings[f.em]&&ratings[f.em].score)||0};
+    }).sort(function(a,b){
+      if(a.tieneZona!==b.tieneZona) return a.tieneZona?-1:1;
+      if(a.carga!==b.carga) return a.carga-b.carga;
+      if(a.prefiere!==b.prefiere) return a.prefiere?-1:1;
+      return b.rating-a.rating;
+    });
+  }
+  function nuevaAsignacion(x, email, orden){
+    var v=tecs.find(function(t2){ return String(t2.email||"").toLowerCase()===email; });
+    if(!v) return null;
+    return {
+      id:"sc_man_"+Date.now()+"_"+Math.floor(Math.random()*9999),
+      key:x.key||(x.fecha+"|"+normalize(x.propiedad)),
+      fecha:x.fecha, propiedad:x.propiedad,
+      zona:x.zona, edificio:x.edificio, unidad:x.unidad,
+      habitaciones:x.habitaciones||1, tipo:x.tipo||"Limpieza",
+      entradaHoy:!!x.entradaHoy, codigoAcceso:x.codigoAcceso||"",
+      vendorId:v.id, vendorEmail:email,
+      hora:SCHED.HORA_INI, horaFin:SCHED.HORA_FIN,
+      orden:orden, minutos:SCHED.minutosLimpieza(x.habitaciones||1,x.tipo||"Limpieza"), viaje:0,
+      estado:"confirmada", origen:"manual",
+      motivo:"asignada por el administrador desde el aviso", generadoEn:hoy
+    };
+  }
+  function asignarPendiente(x, email){
+    var s=nuevaAsignacion(x, email, (porTec[email]||[]).length+1);
+    if(!s) return;
+    onSvSchedules((schedules||[]).concat([s]));
+    setAsigSel(function(p){ var u=Object.assign({},p); delete u[x.key]; return u; });
+    marcarCambio(x.fecha);
+    var v=tecs.find(function(t2){ return String(t2.email||"").toLowerCase()===email; });
+    aviso(x.propiedad+" → "+(v?vendorDisplay(v):email)+".");
+  }
+  function asignarTodosPendientes(){
+    var extra={}, nuevas=[];
+    sinAsignar.forEach(function(x){
+      var elegido=asigSel[x.key];
+      if(!elegido){
+        var c=candidatosPara(x, extra)[0];
+        if(!c) return;
+        elegido=c.f.em;
+      }
+      extra[elegido]=(extra[elegido]||0)+1;
+      var s=nuevaAsignacion(x, elegido, (porTec[elegido]||[]).length+extra[elegido]);
+      if(s) nuevas.push(s);
+    });
+    if(!nuevas.length){ aviso("Ningún técnico disponible para repartirlos.", false); return; }
+    onSvSchedules((schedules||[]).concat(nuevas));
+    setAsigSel({});
+    marcarCambio(fecha);
+    aviso(nuevas.length+" limpieza"+(nuevas.length===1?"":"s")+" repartida"+(nuevas.length===1?"":"s")+" entre los que van más livianos hoy.");
+  }
+
   var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6};
   var IN={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44};
   var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
@@ -8123,95 +8244,190 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
             {pausadasHoy.length} checkout{pausadasHoy.length===1?"":"s"} fuera del reparto por pausa: {pausadasHoy.join(" · ")}.
           </div>
         )}
+        {/* Checkouts sin ruta: se asignan aquí mismo, sin buscar a nadie más abajo.
+            Viene sugerido quien tiene la zona y va más liviano hoy. */}
         {sinAsignar.length>0&&(
-          <div style={{marginTop:11,background:"#F5EDEC",borderRadius:9,padding:"11px 13px"}}>
-            <div style={{fontSize:11.5,color:C.red,fontWeight:700,lineHeight:1.6}}>{sinAsignar.length} checkout{sinAsignar.length===1?"":"s"} sin limpieza asignada</div>
-            <div style={{fontSize:11,color:C.earth,marginTop:5,lineHeight:1.6}}>{sinAsignar.map(function(x){return x.propiedad;}).join(" · ")}</div>
-            <div style={{fontSize:11,color:C.earth,marginTop:5,lineHeight:1.6}}>Bloquea calendario, sube el tope de alguien o asigna a mano.</div>
+          <div style={{marginTop:11,background:"#F5EDEC",border:"1px solid #E7D3CE",borderRadius:11,padding:"12px 13px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"baseline"}}>
+              <div style={{fontSize:11.5,color:C.red,fontWeight:700,lineHeight:1.6}}>{sinAsignar.length} checkout{sinAsignar.length===1?"":"s"} sin limpieza asignada</div>
+              {sinAsignar.length>1&&(
+                <button onClick={asignarTodosPendientes} style={{padding:"8px 14px",minHeight:38,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Repartir {sinAsignar.length} →</button>
+              )}
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:9}}>
+              {sinAsignar.map(function(x){
+                var cands=candidatosPara(x,{});
+                var sug=cands[0];
+                var sel=asigSel[x.key]||(sug?sug.f.em:"");
+                var conZona=cands.filter(function(c){ return c.tieneZona; });
+                return (
+                  <div key={x.key} style={{background:"#fff",borderRadius:9,padding:"10px 11px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:9,alignItems:"baseline",flexWrap:"wrap"}}>
+                      <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{x.propiedad}</div>
+                      <div style={{fontSize:10.5,color:C.earth}}>{x.habitaciones||1} hab · {x.tipo}</div>
+                    </div>
+                    {x.entradaHoy&&<div style={{fontSize:9.5,fontWeight:700,color:C.red,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>Tiene entrada hoy</div>}
+                    {!conZona.length&&(
+                      <div style={{fontSize:10.5,color:C.orange,marginTop:5,lineHeight:1.5,textWrap:"pretty"}}>Nadie tiene {SCHED.zonaLabel(x.zona)} asignada. Elige a alguien de todos modos o agrégale la zona en Ajustes › Equipo.</div>
+                    )}
+                    <div style={{display:"flex",gap:7,marginTop:8,flexWrap:"wrap"}}>
+                      <select value={sel} onChange={function(e){ var val=e.target.value; setAsigSel(function(p){ var u=Object.assign({},p); u[x.key]=val; return u; }); }}
+                        style={{flex:1,minWidth:150,fontSize:11.5,padding:"9px 10px",borderRadius:9,border:"1.5px solid "+C.gray,background:"#fff",fontFamily:"Montserrat,sans-serif",color:C.black,minHeight:42}}>
+                        <option value="">Elegir técnico…</option>
+                        {cands.map(function(c){
+                          return <option key={c.f.v.id} value={c.f.em}>{vendorDisplay(c.f.v)} · {c.carga} hoy{c.tieneZona?(c.prefiere?" · prefiere la zona":""):" · sin la zona"}</option>;
+                        })}
+                      </select>
+                      <button onClick={function(){ if(sel) asignarPendiente(x, sel); }} disabled={!sel}
+                        style={{padding:"9px 16px",minHeight:42,borderRadius:100,border:"none",background:sel?C.black:C.gray,color:"#fff",fontSize:11.5,fontWeight:600,cursor:sel?"pointer":"default",fontFamily:"Montserrat,sans-serif"}}>Asignar</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
 
-      {/* Rutas por técnico */}
+      {/* ─── Rutas del día · lista compacta
+           Con 15 técnicos y creciendo, una tarjeta abierta por persona vuelve
+           imposible revisar el día. Aquí cada técnico es una línea con su carga
+           y el resumen de su ruta; se abre solo la que se va a tocar. */}
       {tecs.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:C.earth,fontSize:13,background:"#fff",borderRadius:14,border:"1px solid "+C.gray}}>Sin técnicos de limpieza activos. Agrégalos en Ajustes › Equipo.</div>}
-      {tecs.map(function(v){
-        var em=String(v.email||"").toLowerCase();
-        var mias=(porTec[em]||[]).slice().sort(function(a,b){ return (a.orden||0)-(b.orden||0); });
-        var aus=(ausencias||[]).some(function(a){ return a.estado==="aprobada" && String(a.vendorEmail||"").toLowerCase()===em && a.fecha===fecha; });
-        var desc=((v.descansos)||[]).indexOf(new Date(fecha+"T12:00:00").getDay())>=0;
-        var mins=mias.reduce(function(s,x){ return s+SCHED.minutosLimpieza(x.habitaciones,x.tipo)+(x.viaje||0); },0);
-        var r=ratings[em];
-        return (
-          <div key={v.id} style={Object.assign({},CARD,{opacity:(aus||desc)?.62:1})}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,flexWrap:"wrap"}}>
-              <div style={{minWidth:0}}>
-                <div style={{fontSize:14,fontWeight:600,color:C.black}}>{vendorDisplay(v)}</div>
-                <div style={{fontSize:10.5,color:C.earth,marginTop:3}}>
-                  {(v.zonasPref||[]).length?"Prefiere "+(v.zonasPref||[]).map(SCHED.zonaLabel).join(", ")+" · ":""}
-                  {(v.zonas||[]).length?(v.zonas||[]).map(SCHED.zonaLabel).join(", "):"sin zonas asignadas"}
-                  {r?" · rating "+r.score.toFixed(2)+" ("+r.n+")":" · sin rating aún"}
-                </div>
-              </div>
-              <div style={{textAlign:"right",flexShrink:0}}>
-                {aus?<span style={{fontSize:9.5,fontWeight:700,color:C.red,letterSpacing:".08em",textTransform:"uppercase"}}>Ausente</span>
-                  :desc?<span style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".08em",textTransform:"uppercase"}}>Descanso</span>
-                  :<><div style={{fontSize:15,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>{mias.length}</div>
-                     <div style={{fontSize:9.5,color:C.earth}}>{mins?schedMinsTxt(mins)+" de jornada":"sin trabajo"}</div></>}
-              </div>
+      {tecs.length>0&&(
+        <div style={CARD}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:12,flexWrap:"wrap",alignItems:"baseline"}}>
+            <div style={{fontSize:14,fontWeight:600,color:C.black}}>Rutas del día</div>
+            <div style={{fontSize:11,color:C.earth}}>
+              {resumenTec.con} con ruta · {resumenTec.sin} sin trabajo
+              {resumenTec.sobre?" · "+resumenTec.sobre+" sobre jornada":""}
             </div>
+          </div>
 
-            {mias.length>0&&(
-              <div style={{display:"flex",flexDirection:"column",gap:7,marginTop:12}}>
-                {mias.map(function(s,i){
-                  return (
-                    <div key={s.id}
-                      draggable
-                      onDragStart={function(){ setDrag(s.id); }}
-                      onDragOver={function(e){ e.preventDefault(); }}
-                      onDrop={function(){ if(drag&&drag!==s.id){ var from=mias.findIndex(function(x){return x.id===drag;}); if(from>=0) reordenar(em, from, i); } setDrag(null); }}
-                      style={{background:s.entradaHoy?"#FCF4F1":C.surfaceWarm,border:"1px solid "+(s.entradaHoy?"#E5C9BF":"transparent"),borderRadius:10,padding:"11px 12px",cursor:"grab"}}>
-                      <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
-                        <span style={{fontSize:11,fontWeight:700,color:C.taupe,fontVariantNumeric:"tabular-nums",paddingTop:2}}>{i+1}</span>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:13,fontWeight:600,color:C.black}}>{s.propiedad}</div>
-                          <div style={{fontSize:10.5,color:C.earth,marginTop:3}}>
-                            {(s.habitaciones||1)} hab · {s.tipo}{s.viaje?" · "+s.viaje+" min de traslado":""}
-                            {codigoSemana(codigos,s.propiedad,s.fecha,s.codigoAcceso)
-                              ? <span style={{color:C.black,fontWeight:700,letterSpacing:".06em"}}> · código {codigoSemana(codigos,s.propiedad,s.fecha,s.codigoAcceso)}</span>
-                              : <span style={{color:C.orange}}> · sin código esta semana</span>}
-                          </div>
-                          {s.entradaHoy&&<div style={{fontSize:10,fontWeight:700,color:C.red,marginTop:4,letterSpacing:".06em",textTransform:"uppercase"}}>Tiene entrada hoy</div>}
-                          {verMotor&&s.motivo&&<div style={{fontSize:10,color:C.taupe,marginTop:4,lineHeight:1.5}}>Motor: {s.motivo}</div>}
-                        </div>
-                        <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0}}>
-                          <button onClick={function(){reordenar(em,i,i-1);}} disabled={i===0} style={{width:32,height:26,borderRadius:6,border:"1px solid "+C.gray,background:"#fff",color:i===0?C.gray:C.earth,fontSize:11,cursor:i===0?"default":"pointer",lineHeight:1}}>↑</button>
-                          <button onClick={function(){reordenar(em,i,i+1);}} disabled={i===mias.length-1} style={{width:32,height:26,borderRadius:6,border:"1px solid "+C.gray,background:"#fff",color:i===mias.length-1?C.gray:C.earth,fontSize:11,cursor:i===mias.length-1?"default":"pointer",lineHeight:1}}>↓</button>
-                        </div>
+          <div style={{display:"flex",gap:6,marginTop:11,flexWrap:"wrap"}}>
+            {[["todos","Todos",tecs.length],["con","Con ruta",resumenTec.con],["sin","Sin trabajo",resumenTec.sin],["sobre","Sobre jornada",resumenTec.sobre]].map(function(it){
+              if(it[0]==="sobre"&&!resumenTec.sobre) return null;
+              var sel=filtroTec===it[0];
+              return (
+                <button key={it[0]} onClick={function(){setFiltroTec(it[0]);}} style={{padding:"7px 13px",minHeight:38,borderRadius:100,border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+                  {it[1]}<span style={{marginLeft:6,opacity:.6,fontVariantNumeric:"tabular-nums"}}>{it[2]}</span>
+                </button>
+              );
+            })}
+            <div style={{flex:1}}/>
+            <button onClick={function(){
+              var todos={}; if(Object.keys(abiertos).length===0) filaTecs.forEach(function(f){ todos[f.em]=1; });
+              setAbiertos(todos);
+            }} style={{padding:"7px 13px",minHeight:38,borderRadius:100,border:"none",background:"none",color:C.taupe,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+              {Object.keys(abiertos).length?"Cerrar todas":"Abrir todas"}
+            </button>
+          </div>
+
+          {tecs.length>7&&(
+            <input value={buscaTec} onChange={function(e){setBuscaTec(e.target.value);}} placeholder="Buscar técnico…"
+              style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:100,padding:"9px 15px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",minHeight:42,marginTop:10,background:"#fff"}}/>
+          )}
+
+          <div style={{marginTop:6}}>
+            {filaTecs.length===0&&<div style={{padding:"22px 0",textAlign:"center",fontSize:12,color:C.taupe}}>Nadie coincide con este filtro.</div>}
+            {filaTecs.map(function(f,fi){
+              var v=f.v, em=f.em, mias=f.mias, mins=f.mins, abierta=!!abiertos[em];
+              var pct=Math.min(100,Math.round(mins/SCHED.JORNADA_MIN*100));
+              var conEntrada=mias.some(function(s){ return s.entradaHoy; });
+              return (
+                <div key={v.id} style={{borderTop:fi?"1px solid "+C.line:"1px solid "+C.line}}>
+                  <button onClick={function(){ setAbiertos(function(p){ var u=Object.assign({},p); if(u[em]) delete u[em]; else u[em]=1; return u; }); }}
+                    style={{width:"100%",display:"flex",alignItems:"center",gap:11,padding:"12px 0",background:"none",border:"none",textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                        <span style={{fontSize:13,fontWeight:600,color:(f.aus||f.desc)?C.taupe:C.black}}>{vendorDisplay(v)}</span>
+                        {f.aus&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.red,background:"#F5EDEC",padding:"2px 8px",borderRadius:100}}>Ausente</span>}
+                        {!f.aus&&f.desc&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.taupe,background:C.surfaceWarm,padding:"2px 8px",borderRadius:100}}>Descanso</span>}
+                        {conEntrada&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#B4553C",background:"#FCF4F1",padding:"2px 8px",borderRadius:100}}>Entrada hoy</span>}
+                        {mins>SCHED.JORNADA_MIN&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.orange,background:"#F7EFE2",padding:"2px 8px",borderRadius:100}}>Sobre jornada</span>}
                       </div>
-                      <div style={{display:"flex",gap:7,marginTop:9,flexWrap:"wrap",alignItems:"center"}}>
-                        <select value="" onChange={function(e){ if(e.target.value) mover(s, e.target.value); }} style={{fontSize:10.5,padding:"5px 8px",borderRadius:6,border:"1px solid "+C.gray,background:"#fff",fontFamily:"Montserrat,sans-serif",color:C.earth,minHeight:32}}>
-                          <option value="">Mover a…</option>
-                          {tecs.filter(function(x){ return String(x.email||"").toLowerCase()!==em; }).map(function(x){
-                            return <option key={x.id} value={String(x.email||"").toLowerCase()}>{vendorDisplay(x)}</option>;
-                          })}
-                        </select>
-                        <button onClick={function(){quitar(s);}} style={{fontSize:10.5,padding:"5px 10px",minHeight:32,borderRadius:6,border:"1px solid "+C.gray,background:"#fff",color:C.red,cursor:"pointer"}}>Quitar</button>
+                      <div style={{fontSize:10.5,color:C.taupe,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                        {mias.length
+                          ? mias.map(function(s){ return propCorta(s.propiedad); }).join(" → ")
+                          : (f.aus?"Ausencia aprobada":f.desc?"Día de descanso":"Sin limpiezas · "+((v.zonas||[]).map(SCHED.zonaLabel).join(", ")||"sin zonas"))}
                       </div>
                     </div>
-                  );
-                })}
-                {mins>SCHED.JORNADA_MIN&&(
-                  <div style={{fontSize:10.5,color:C.orange,fontWeight:600,lineHeight:1.5}}>La ruta excede las 4 horas de jornada por {schedMinsTxt(mins-SCHED.JORNADA_MIN)}.</div>
-                )}
-                {String((v.phone||v.telefono)||"").replace(/[^0-9]/g,"").length>=8&&(
-                  <a href={schedWaLink(v, mias.map(function(s){ return Object.assign({},s,{codigoAcceso:codigoSemana(codigos,s.propiedad,s.fecha,s.codigoAcceso)}); }), fecha)} target="_blank" rel="noopener noreferrer" style={{alignSelf:"flex-start",fontSize:11,fontWeight:600,color:C.earth,textDecoration:"none",padding:"8px 13px",minHeight:36,borderRadius:100,border:"1px solid "+C.gray,background:"#fff"}}>Enviar por WhatsApp →</a>
-                )}
-              </div>
-            )}
-            {mias.length===0&&!aus&&!desc&&<div style={{fontSize:11.5,color:C.taupe,marginTop:10}}>Sin limpiezas asignadas este día.</div>}
+                    <div style={{width:40,flexShrink:0}}>
+                      <div style={{height:5,borderRadius:100,background:C.line,overflow:"hidden"}}>
+                        <div style={{width:pct+"%",height:"100%",background:mins>SCHED.JORNADA_MIN?C.orange:C.black}}/>
+                      </div>
+                      <div style={{fontSize:9,color:C.taupe,marginTop:4,textAlign:"center",fontVariantNumeric:"tabular-nums"}}>{mins?schedMinsTxt(mins):"—"}</div>
+                    </div>
+                    <div style={{fontSize:16,fontWeight:600,color:mias.length?C.black:C.gray,fontVariantNumeric:"tabular-nums",minWidth:18,textAlign:"right",flexShrink:0}}>{mias.length}</div>
+                    <span style={{color:C.taupe,fontSize:12,flexShrink:0}}>{abierta?"▾":"▸"}</span>
+                  </button>
+
+                  {abierta&&(
+                    <div style={{paddingBottom:13,display:"flex",flexDirection:"column",gap:7}}>
+                      <div style={{fontSize:10,color:C.taupe,lineHeight:1.5}}>
+                        {(v.zonasPref||[]).length?"Prefiere "+(v.zonasPref||[]).map(SCHED.zonaLabel).join(", ")+" · ":""}
+                        {(v.zonas||[]).length?(v.zonas||[]).map(SCHED.zonaLabel).join(", "):"sin zonas asignadas"}
+                        {ratings[em]?" · rating "+ratings[em].score.toFixed(2)+" ("+ratings[em].n+")":" · sin rating aún"}
+                      </div>
+                      {mias.length===0&&(
+                        <div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6}}>Sin limpiezas asignadas este día.</div>
+                      )}
+                      {mias.map(function(s,i){
+                        var cod=codigoSemana(codigos,s.propiedad,s.fecha,s.codigoAcceso);
+                        var abrirAcc=accion===s.id;
+                        return (
+                          <div key={s.id}
+                            draggable
+                            onDragStart={function(){ setDrag(s.id); }}
+                            onDragOver={function(e){ e.preventDefault(); }}
+                            onDrop={function(){ if(drag&&drag!==s.id){ var from=mias.findIndex(function(x){return x.id===drag;}); if(from>=0) reordenar(em, from, i); } setDrag(null); }}
+                            style={{background:s.entradaHoy?"#FCF4F1":C.surfaceWarm,border:"1px solid "+(s.entradaHoy?"#E5C9BF":"transparent"),borderRadius:10,padding:"10px 11px"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:10}}>
+                              <span style={{fontSize:11,fontWeight:700,color:C.taupe,fontVariantNumeric:"tabular-nums",width:12,flexShrink:0}}>{i+1}</span>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{s.propiedad}</div>
+                                <div style={{fontSize:10.5,color:C.earth,marginTop:2}}>
+                                  {(s.habitaciones||1)} hab · {s.tipo}{s.viaje?" · "+s.viaje+" min":""}
+                                  {cod
+                                    ? <span style={{color:C.black,fontWeight:700,letterSpacing:".06em"}}> · código {cod}</span>
+                                    : <span style={{color:C.orange}}> · sin código</span>}
+                                </div>
+                                {s.entradaHoy&&<div style={{fontSize:9.5,fontWeight:700,color:C.red,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>Tiene entrada hoy</div>}
+                                {verMotor&&s.motivo&&<div style={{fontSize:10,color:C.taupe,marginTop:3,lineHeight:1.5}}>Motor: {s.motivo}</div>}
+                              </div>
+                              <div style={{display:"flex",gap:4,flexShrink:0}}>
+                                <button onClick={function(){reordenar(em,i,i-1);}} disabled={i===0} title="Subir" style={{width:30,height:30,borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:i===0?C.gray:C.earth,fontSize:11,cursor:i===0?"default":"pointer",lineHeight:1}}>↑</button>
+                                <button onClick={function(){reordenar(em,i,i+1);}} disabled={i===mias.length-1} title="Bajar" style={{width:30,height:30,borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:i===mias.length-1?C.gray:C.earth,fontSize:11,cursor:i===mias.length-1?"default":"pointer",lineHeight:1}}>↓</button>
+                                <button onClick={function(){ setAccion(abrirAcc?null:s.id); }} title="Más" style={{width:30,height:30,borderRadius:8,border:"1px solid "+(abrirAcc?C.black:C.gray),background:"#fff",color:C.earth,fontSize:13,cursor:"pointer",lineHeight:1}}>⋯</button>
+                              </div>
+                            </div>
+                            {abrirAcc&&(
+                              <div style={{display:"flex",gap:7,marginTop:9,flexWrap:"wrap",alignItems:"center"}}>
+                                <select value="" onChange={function(e){ if(e.target.value){ mover(s, e.target.value); setAccion(null); } }} style={{flex:1,minWidth:140,fontSize:11,padding:"7px 9px",borderRadius:8,border:"1px solid "+C.gray,background:"#fff",fontFamily:"Montserrat,sans-serif",color:C.earth,minHeight:36}}>
+                                  <option value="">Mover a…</option>
+                                  {tecs.filter(function(x){ return String(x.email||"").toLowerCase()!==em; }).map(function(x){
+                                    var cnt=(porTec[String(x.email||"").toLowerCase()]||[]).length;
+                                    return <option key={x.id} value={String(x.email||"").toLowerCase()}>{vendorDisplay(x)} · {cnt} hoy</option>;
+                                  })}
+                                </select>
+                                <button onClick={function(){quitar(s);}} style={{fontSize:11,padding:"7px 12px",minHeight:36,borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.red,cursor:"pointer",fontWeight:600,fontFamily:"Montserrat,sans-serif"}}>Quitar del día</button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {mias.length>0&&String((v.phone||v.telefono)||"").replace(/[^0-9]/g,"").length>=8&&(
+                        <a href={schedWaLink(v, mias.map(function(s){ return Object.assign({},s,{codigoAcceso:codigoSemana(codigos,s.propiedad,s.fecha,s.codigoAcceso)}); }), fecha)} target="_blank" rel="noopener noreferrer" style={{alignSelf:"flex-start",fontSize:11,fontWeight:600,color:C.earth,textDecoration:"none",padding:"8px 13px",minHeight:36,borderRadius:100,border:"1px solid "+C.gray,background:"#fff"}}>Enviar por WhatsApp →</a>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
+        </div>
+      )}
+
 
       {/* Adoptar una ruta armada afuera */}
       <ImportarRuta props={props} vendors={vendors} schedules={schedules} onSvSchedules={onSvSchedules} hoy={hoy} onAviso={function(m){ aviso(m); }}/>
@@ -8292,6 +8508,7 @@ function FeedbackCfg({feedback, onSave}) {
 /* ─── Programación del técnico — solo la suya. */
 function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) {
   const [view, setView] = useState("hoy");
+  const [diasAbiertos, setDiasAbiertos] = useState({});
   const [pedir, setPedir] = useState(false);
   const [fAus, setFAus] = useState("");
   const [motivo, setMotivo] = useState("");
@@ -8312,6 +8529,15 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) 
   var deHoy = mias.filter(function(s){ return String(s.fecha).slice(0,10)===hoy; });
   var deSemana = mias.filter(function(s){ var f=String(s.fecha).slice(0,10); return f>=hoy&&f<=finSemana; });
   var lista = view==="hoy" ? deHoy : deSemana;
+  /* La semana agrupada por día: siete tarjetas cerradas caben en una pantalla. */
+  var diasSemana=[];
+  deSemana.forEach(function(s){
+    var f=String(s.fecha).slice(0,10);
+    var g=diasSemana.find(function(x){ return x.fecha===f; });
+    if(!g){ g={fecha:f, lista:[]}; diasSemana.push(g); }
+    g.lista.push(s);
+  });
+  diasSemana.sort(function(a,b){ return a.fecha<b.fecha?-1:1; });
   var misAus = (ausencias||[]).filter(function(a){ return emails.indexOf(String(a.vendorEmail||"").toLowerCase())>=0 && a.fecha>=hoy; });
 
   function enviarAusencia(){
@@ -8337,7 +8563,6 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) 
       <div style={{background:"#fff",borderRadius:14,border:"1px solid "+(s.entradaHoy?"#E5C9BF":C.gray),padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
           <div style={{minWidth:0}}>
-            {view!=="hoy"&&<div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>{schedDiaNombre(s.fecha)} {fmtDate(s.fecha)}</div>}
             <div style={{fontSize:15,fontWeight:600,color:C.black,lineHeight:1.3}}>{idx!=null?(idx+1)+". ":""}{s.propiedad}</div>
             <div style={{fontSize:11.5,color:C.earth,marginTop:4}}>{(s.habitaciones||1)} habitación{(s.habitaciones||1)===1?"":"es"} · {s.tipo}</div>
             <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{s.hora||SCHED.HORA_INI} a {s.horaFin||SCHED.HORA_FIN}</div>
@@ -8394,12 +8619,52 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) 
         })}
       </div>
 
-      {lista.length===0
-        ? <div style={{textAlign:"center",padding:"38px 20px",color:C.earth,fontSize:13,background:"#fff",borderRadius:14,border:"1px solid "+C.gray,lineHeight:1.7}}>
-            {view==="hoy"?"No tienes limpiezas hoy.":"No tienes limpiezas esta semana."}
-            <div style={{fontSize:11.5,color:C.taupe,marginTop:6}}>Si crees que es un error, avísale al administrador.</div>
+      {lista.length===0&&(
+        <div style={{textAlign:"center",padding:"38px 20px",color:C.earth,fontSize:13,background:"#fff",borderRadius:14,border:"1px solid "+C.gray,lineHeight:1.7}}>
+          {view==="hoy"?"No tienes limpiezas hoy.":"No tienes limpiezas esta semana."}
+          <div style={{fontSize:11.5,color:C.taupe,marginTop:6}}>Si crees que es un error, avísale al administrador.</div>
+        </div>
+      )}
+
+      {/* Hoy: cuántas son y cuánto es, antes de la primera tarjeta. */}
+      {view==="hoy"&&deHoy.length>0&&(
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,padding:"0 4px"}}>
+          <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{deHoy.length} limpieza{deHoy.length===1?"":"s"} hoy</div>
+          <div style={{fontSize:11,color:C.taupe}}>{SCHED.HORA_INI} a {SCHED.HORA_FIN}</div>
+        </div>
+      )}
+      {view==="hoy"&&deHoy.map(function(s,i){ return <Tarjeta key={s.id||i} s={s} idx={i}/>; })}
+
+      {/* Esta semana: un día por línea, cerrado. Se abre el que se quiere ver. */}
+      {view==="semana"&&diasSemana.map(function(d){
+        var abierto=diasAbiertos[d.fecha]!==undefined?diasAbiertos[d.fecha]:(d.fecha===hoy);
+        return (
+          <div key={d.fecha} style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,overflow:"hidden"}}>
+            <button onClick={function(){ setDiasAbiertos(function(p){ var u=Object.assign({},p); u[d.fecha]=!abierto; return u; }); }}
+              style={{width:"100%",display:"flex",alignItems:"center",gap:11,padding:"14px 16px",minHeight:56,background:"none",border:"none",textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:600,color:C.black}}>
+                  {d.fecha===hoy?"Hoy":d.fecha===manana?"Mañana":schedDiaNombre(d.fecha)}
+                  <span style={{color:C.taupe,fontWeight:400}}> · {fmtDate(d.fecha)}</span>
+                </div>
+                <div style={{fontSize:11,color:C.taupe,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                  {d.lista.map(function(s){ var p=SCHED.partes(s.propiedad); return [p.edificio,p.unidad].filter(Boolean).join(" ")||s.propiedad; }).join(" → ")}
+                </div>
+              </div>
+              {d.lista.some(function(s){return s.entradaHoy;})&&(
+                <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#B4553C",background:"#FCF4F1",padding:"3px 8px",borderRadius:100,flexShrink:0}}>Entrada</span>
+              )}
+              <span style={{fontSize:16,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums",flexShrink:0}}>{d.lista.length}</span>
+              <span style={{color:C.taupe,fontSize:12,flexShrink:0}}>{abierto?"▾":"▸"}</span>
+            </button>
+            {abierto&&(
+              <div style={{padding:"0 12px 12px",display:"flex",flexDirection:"column",gap:9}}>
+                {d.lista.map(function(s,i){ return <Tarjeta key={s.id||i} s={s} idx={i}/>; })}
+              </div>
+            )}
           </div>
-        : lista.map(function(s,i){ return <Tarjeta key={s.id||i} s={s} idx={view==="hoy"?i:null}/>; })}
+        );
+      })}
 
       {/* Avisar que no podrá trabajar */}
       <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px"}}>
