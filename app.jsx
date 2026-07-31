@@ -834,6 +834,7 @@ function ls_loadAll(){
     regSol: ls_get("c:regsol")||null,
     reservas: ls_get("c:resv")||null,
     ausencias: ls_get("c:aus")||null,
+    codigos: ls_get("c:cod")||null,
   };
   return {reports:reps.sort(function(a,b){return (b.createdAt||b.id)-(a.createdAt||a.id);}), ...cfg};
 }
@@ -904,6 +905,7 @@ async function loadAllData() {
       company:   d.company   || {name:"Spacio AM S.A.",nit:"118287796"},
       extcats:   d.extcats   || [],
       schedules: d.schedules || [],
+      codigos:   d.codigos   || {},
       feedback:  d.feedback  || [],
       adelantos: adv_load(),
       pagos:     pg_load(),
@@ -943,6 +945,14 @@ async function loadAllData() {
     pin:     cfg.adminpin|| "spacio2024",
     company: cfg.company || {name:"Spacio AM S.A.",nit:"118287796"},
     extcats: cfg.extcats || [],
+    /* Faltaba: la programación del servidor nunca llegaba al app. Por eso la ruta
+       que el motor mandó por correo a las 6pm no aparecía a la mañana siguiente, y
+       cada dispositivo mostraba solo lo que él mismo había generado en memoria. */
+    schedules: Array.isArray(cfg.schedules) ? cfg.schedules : [],
+    codigos: (cfg.codigos && typeof cfg.codigos==="object") ? cfg.codigos : {},
+    feedback: Array.isArray(cfg.feedback) ? cfg.feedback : [],
+    hospurlday:  cfg.hospurlday  || "",
+    hospurlweek: cfg.hospurlweek || "",
     adelantos: Array.isArray(cfg.adelantos) ? cfg.adelantos : null,
     pagos: pg_merge(cfg),
     notifprefs: (cfg.notifprefs && typeof cfg.notifprefs==="object") ? cfg.notifprefs : {},
@@ -1238,6 +1248,12 @@ function App() {
   const [hospUrlDay,  setHospUrlDay]  = useState("https://share.hospitable.com/metrics/1d1aabad-db5f-4f7a-847d-0de50c9dedc4");
   const [hospUrlWeek, setHospUrlWeek] = useState("https://share.hospitable.com/metrics/c914e6fc-94b9-4c1b-89c6-7722cf2315d6");
   const [schedules, setSchedules] = useState([]);
+  const [codigos,  setCodigos]  = useState({});
+  /* Ver como: el administrador principal abre la app con los ojos de otro usuario. */
+  const [verComo,  setVerComo]  = useState(null);
+  /* Si el guardado de la programación no llegó a Sheets hay que decirlo fuerte:
+     una ruta que solo existe en este navegador no le llega a nadie. */
+  const [schedErr, setSchedErr] = useState("");
   const [feedback,  setFeedback]  = useState([]);
   const [ready,    setReady]    = useState(false);
   const [syncing,  setSyncing]  = useState(false);
@@ -1319,6 +1335,7 @@ function App() {
       setCompany(d.company||{name:"Spacio AM S.A.",nit:"118287796"});
       if(d.extcats)   setExtCats(d.extcats);
       if(d.schedules) setSchedules(d.schedules);
+      if(d.codigos)   setCodigos(d.codigos);
       if(d.hospurlday)  setHospUrlDay(d.hospurlday||"");
       if(d.hospurlweek) setHospUrlWeek(d.hospurlweek||"");
       if(d.feedback)  setFeedback(d.feedback);
@@ -1463,7 +1480,26 @@ function App() {
   async function svPin(v) { setPin(v);     saveConfigItem("pin",v); }
   async function svCo(v)  { setCompany(v); saveConfigItem("company",v); }
   async function svExtCats(v)   { setExtCats(v);   saveConfigItem("extcats",v); }
-  async function svSchedules(v) { setSchedules(v); saveConfigItem("schedules",v); }
+  async function svSchedules(v) {
+    setSchedules(v);
+    if(IS_CLAUDE_SANDBOX){ ls_set("c:sched",v); return true; }
+    try{
+      var r = await apiCall("saveConfig",{key:"schedules",value:v});
+      /* El backend devuelve cuántas filas quedaron guardadas: si no cuadra, no se
+         guardó y el administrador tiene que saberlo antes de notificar a nadie. */
+      var n = r && (r.n!=null ? r.n : null);
+      if(n!=null && Math.abs(n-(v||[]).length)>2){
+        setSchedErr("Se guardaron "+n+" de "+(v||[]).length+" limpiezas en Google Sheets. Recarga y vuelve a intentar antes de notificar al equipo.");
+        return false;
+      }
+      setSchedErr("");
+      return true;
+    }catch(e){
+      setSchedErr("No se pudo guardar la programación en Google Sheets ("+((e&&e.message)||"sin conexión")+"). Lo que ves está solo en este dispositivo: no lo notifiques todavía.");
+      return false;
+    }
+  }
+  async function svCodigos(v) { setCodigos(v); saveConfigItem("codigos",v); }
   async function svHospUrlDay(v)  { setHospUrlDay(v);  saveConfigItem("hospurlday",v); }
   /* Preset Hospitable URLs already configured */
   async function svHospUrlWeek(v) { setHospUrlWeek(v); saveConfigItem("hospurlweek",v); }
@@ -1482,6 +1518,7 @@ function App() {
       if(d.notifprefs){ setNotifPrefs(d.notifprefs); NOTIF_PREFS=d.notifprefs; }
       if(d.extcats)   setExtCats(d.extcats);
       if(d.schedules) setSchedules(d.schedules);
+      if(d.codigos)   setCodigos(d.codigos);
       if(d.hospurlday)  setHospUrlDay(d.hospurlday||"");
       if(d.hospurlweek) setHospUrlWeek(d.hospurlweek||"");
       if(d.feedback)  setFeedback(d.feedback);
@@ -1503,10 +1540,31 @@ function App() {
   if(_rutaReg) return <ErrorBoundary><RegistroPublico tipo={String(_rutaReg[1]).toLowerCase()} company={company}/></ErrorBoundary>;
 
   var inner;
+  /* Ver como — el administrador principal abre la app tal cual la ve otro usuario.
+     No cambia de sesión ni de permisos de guardado: solo cambia lo que se dibuja. */
+  var vcV = verComo ? (vendors||[]).find(function(x){return x.id===verComo;}) : null;
+  if(vcV && sess && sess.role==="admin" && !isAdminPrincipalVendor(sess.vendor||{}, vendors) && sess.vendor) vcV=null;
   if (!ready) {
     inner = <Loader/>;
   } else if (!sess) {
     inner = <Login vendors={vendors} adminPin={pin} onLogin={login} sheetsOk={sheetsOk}/>;
+  } else if (vcV && sess.role==="admin") {
+    var vcEmails = vendorEmailSet(vcV);
+    var vcSched = (schedules||[]).filter(function(s){
+      if(!s) return false;
+      if(s.vendorId && String(s.vendorId)===String(vcV.id)) return true;
+      return vcEmails.indexOf(String(s.vendorEmail||"").toLowerCase())>=0;
+    });
+    inner = (<>
+      <VerComoBanner vendor={vcV} onExit={function(){setVerComo(null);}}/>
+      {/* El encabezado pegajoso de adentro se detiene DEBAJO de la barra, no atrás. */}
+      <style>{".vercomo-wrap header{top:40px !important}"}</style>
+      <div className="vercomo-wrap" style={{paddingTop:40}}>
+        {vcV.isAdmin
+          ? <AdminApp reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={vcV} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={function(){setVerComo(null);}} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>
+          : <VendorApp vendor={vcV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,vcV);})} props={props} company={company} schedules={vcSched} codigos={codigos} ausencias={ausencias} onSvAusencias={svAusencias} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={function(){setVerComo(null);}} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>}
+      </div>
+    </>);
   } else if (sess.role==="vendor"&&sess.vendor) {
     /* Resolver el vendor FRESCO desde config (la sesión guarda un snapshot; así los permisos
        de supervisión asignados después del login aplican sin re-loguear) */
@@ -1514,13 +1572,16 @@ function App() {
     /* Un técnico no debe recibir la programación de sus compañeros ni en memoria. */
     var misEmails = vendorEmailSet(freshV);
     var misSchedules = (schedules||[]).filter(function(s){
-      return s && misEmails.indexOf(String(s.vendorEmail||"").toLowerCase())>=0;
+      if(!s) return false;
+      /* Por id primero: un cambio de correo no puede dejar a nadie sin su ruta. */
+      if(s.vendorId && String(s.vendorId)===String(freshV.id)) return true;
+      return misEmails.indexOf(String(s.vendorEmail||"").toLowerCase())>=0;
     });
     var needsOnb = isEpiLimpieza(freshV) && !freshV.notifSetupDone && !onbDone;
     try{ if(localStorage.getItem("epi_onboard_done_"+freshV.id)) needsOnb=false; }catch(_){}
-    inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={misSchedules} ausencias={ausencias} onSvAusencias={svAusencias} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
+    inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={misSchedules} codigos={codigos} ausencias={ausencias} onSvAusencias={svAusencias} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
   } else {
-    inner = <AdminApp reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
+    inner = <AdminApp reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
   }
   return <ErrorBoundary>{inner}</ErrorBoundary>;
 }
@@ -1788,7 +1849,7 @@ function NotifCfg({prefs, vendors, onSave, readOnly}){
 }
 
 /* ═══ ADMIN */
-function AdminApp({reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegSol,nomAjustes,onSvNomAjustes,reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
+function AdminApp({reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegSol,nomAjustes,onSvNomAjustes,reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,vendors,props,adminPin,company,extCats,schedules,codigos,onSvCodigos,schedErr,onVerComo,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
   const [tab,    setTab]    = useState("dash");
   const [detail, setDetail] = useState(null);
   const [cDel,   setCDel]   = useState(null);
@@ -1925,7 +1986,7 @@ function AdminApp({reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegS
       <div style={{display:tab==="sched"?"block":"none"}}>
         <ProgramacionAdmin schedules={schedules||[]} onSvSchedules={onSvSchedules} vendors={vendors||[]} props={props||[]}
           reservas={reservas||[]} onSvReservas={onSvReservas} ausencias={ausencias||[]} onSvAusencias={onSvAusencias}
-          reps={reps} reviews={reviews} rvCasos={rvCasos} onSvP={onSvP} canNom={canNotif}/>
+          reps={reps} reviews={reviews} rvCasos={rvCasos} onSvP={onSvP} canNom={canNotif} codigos={codigos||{}} schedErr={schedErr}/>
       </div>
       <div style={{display:tab==="qa"?"block":"none"}}>
         <AdminQAPanel reps={reps} vendors={vendors} reviews={reviews} onSvReviews={onSvReviews} rvCasos={rvCasos} onSvRvCasos={onSvRvCasos} rvIA={rvIA} onSvRvIA={onSvRvIA} onQA={qaUpdate} onSelect={setDetail} onUpdate={onUpsert} isAdmin={true} me={adminVendor}/>
@@ -1939,7 +2000,7 @@ function AdminApp({reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegS
               ? <AdvanceRequest vendor={adminVendor} reps={(reps||[]).filter(function(r){return repMatchesVendor(r,adminVendor);})} adelantos={(adelantos||[]).filter(function(a){return vendorEmailSet(adminVendor).map(function(e){return String(e).toLowerCase();}).indexOf(String(a.vendorEmail||"").toLowerCase())>=0;})} onSvAdelantos={onSvAdelantos}/>
               : null)}
       </div>
-      <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  regSol={regSol} onSvRegSol={onSvRegSol} reps={reps} vendors={vendors} props={props} adminPin={adminPin} company={company} extCats={extCats||[]} notifPrefs={notifPrefs} canNotif={canNotif} onSvNotifPrefs={onSvNotifPrefs} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
+      <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  regSol={regSol} onSvRegSol={onSvRegSol} reps={reps} vendors={vendors} props={props} codigos={codigos||{}} onSvCodigos={onSvCodigos} onVerComo={onVerComo} feedback={feedback} onSvFeedback={onSvFeedback} schedules={schedules} adminPin={adminPin} company={company} extCats={extCats||[]} notifPrefs={notifPrefs} canNotif={canNotif} onSvNotifPrefs={onSvNotifPrefs} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
 
       {detail&&<DetailModal rep={detail} vendors={vendors} props={props} hasLinkedDmg={reps.some(function(x){return isDanos(x.categoria)&&String(x._linkedToReport||"")===String(detail.id);})} onExtract={extractDanios} onClose={function(){setDetail(null);}} onMarkPaid={function(p){markPaid(detail.id,p);setDetail(function(x){return Object.assign({},x,{paid:p});});}} onSave={function(r){onUpsert(r);setDetail(r);}} onQA={qaUpdate} onDelete={function(){setCDel(detail.id);}}/>}
       {cDel&&<Overlay><ConfirmDel onCancel={function(){setCDel(null);}} onConfirm={function(){onDelete(cDel);setCDel(null);setDetail(null);}}/></Overlay>}
@@ -4131,7 +4192,7 @@ function OrphanEmailLinker({reps, vendors, onSvV}) {
 }
 
 /* ─── Config */
-function CfgView({regSol,onSvRegSol,canNotif:_cn,reps,vendors,props,adminPin,company,extCats,schedules,hospUrlDay,hospUrlWeek,feedback,notifPrefs,canNotif,onSvNotifPrefs,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback}) {
+function CfgView({regSol,onSvRegSol,canNotif:_cn,reps,vendors,props,adminPin,company,extCats,schedules,codigos,onSvCodigos,onVerComo,hospUrlDay,hospUrlWeek,feedback,notifPrefs,canNotif,onSvNotifPrefs,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback}) {
   const [tab,setTab] = useState("vendors");
   /* Los ajustes sensibles son del administrador principal. Un administrador
      secundario entra solo para enviar los enlaces de registro. */
@@ -4151,12 +4212,13 @@ function CfgView({regSol,onSvRegSol,canNotif:_cn,reps,vendors,props,adminPin,com
     <div style={{maxWidth:640,margin:"0 auto",padding:"28px 18px 60px",fontFamily:"Montserrat,sans-serif"}}>
       <div style={{marginBottom:20}}><div style={{fontSize:9.5,fontWeight:600,color:C.earth,letterSpacing:".28em",textTransform:"uppercase",marginBottom:8}}>Configuración</div><div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:28,fontWeight:400,color:C.black}}>Ajustes del sistema</div></div>
       <div style={{display:"flex",background:"#fff",borderRadius:10,padding:4,gap:3,marginBottom:18,border:"1px solid "+C.gray,flexWrap:"wrap"}}>
-        {[["vendors","Equipo"],["props","Propiedades"]].concat(canNotif?[["notif","Notificaciones"]]:[]).concat([["feedback","Sugerencias"],["company","Empresa"],["security","Seguridad"]]).map(function(it){ var k=it[0],l=it[1]; return <button key={k} onClick={function(){setTab(k);}} style={{flex:1,minWidth:90,padding:"9px 6px",borderRadius:8,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,fontSize:12,letterSpacing:".06em",transition:"all .2s"}}>{l}</button>; })}
+        {[["vendors","Equipo"],["props","Propiedades"],["codigos","Códigos"]].concat(canNotif?[["notif","Notificaciones"]]:[]).concat([["feedback","Sugerencias"],["company","Empresa"],["security","Seguridad"]]).map(function(it){ var k=it[0],l=it[1]; return <button key={k} onClick={function(){setTab(k);}} style={{flex:1,minWidth:90,padding:"9px 6px",borderRadius:8,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,fontSize:12,letterSpacing:".06em",transition:"all .2s"}}>{l}</button>; })}
       </div>
-      <div style={{display:tab==="vendors"  ?"block":"none"}}><RegistroCfg regSol={regSol||[]} onSvRegSol={onSvRegSol} vendors={vendors} onSaveVendors={onSvV} puedeAprobar={true}/><VendorsCfg  vendors={vendors} extCats={extCats||[]} onSave={onSvV} onSaveExtCats={onSvExtCats} props={props||[]} reps={reps||[]}/><OrphanEmailLinker reps={reps} vendors={vendors} onSvV={onSvV}/></div>
+      <div style={{display:tab==="vendors"  ?"block":"none"}}>{onVerComo&&<VerComoCfg vendors={vendors} onVerComo={onVerComo}/>}<RegistroCfg regSol={regSol||[]} onSvRegSol={onSvRegSol} vendors={vendors} onSaveVendors={onSvV} puedeAprobar={true}/><VendorsCfg  vendors={vendors} extCats={extCats||[]} onSave={onSvV} onSaveExtCats={onSvExtCats} props={props||[]} reps={reps||[]}/><OrphanEmailLinker reps={reps} vendors={vendors} onSvV={onSvV}/></div>
       {canNotif&&<div style={{display:tab==="notif"?"block":"none"}}><NotifCfg prefs={notifPrefs} vendors={vendors} onSave={onSvNotifPrefs} readOnly={false}/></div>}
       <div style={{display:tab==="feedback"?"block":"none"}}><FeedbackCfg feedback={feedback||[]} onSave={onSvFeedback}/></div>
       <div style={{display:tab==="props"   ?"block":"none"}}><PropsCfg    props={props}     onSave={onSvP}/></div>
+      <div style={{display:tab==="codigos" ?"block":"none"}}><CodigosCfg props={props||[]} codigos={codigos||{}} onSave={onSvCodigos}/></div>
       <div style={{display:tab==="company" ?"block":"none"}}><CompanyCfg  company={company} onSave={onSvCo}/></div>
       <div style={{display:tab==="security"?"block":"none"}}><SecurityCfg adminPin={adminPin} onSave={onSvPin}/></div>
     </div>
@@ -5581,7 +5643,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
 }
 
 /* ═══ VENDOR APP */
-function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,ausencias,onSvAusencias,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout,reviews,rvCasos,onSvRvCasos,rvIA}) {
+function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codigos,ausencias,onSvAusencias,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout,reviews,rvCasos,onSvRvCasos,rvIA}) {
   const [view,setView] = useState("jobs");
   var tot=reps.reduce(function(s,r){return s+(isDanos(r.categoria)?0:parseFloat(r.total||0));},0);
   var cob=reps.filter(function(r){return r.paid;}).reduce(function(s,r){return s+parseFloat(r.total||0);},0);
@@ -5622,7 +5684,7 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,ausen
       />
       <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} adelantos={adelantos} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}} onGoAccount={function(){setView("account");}} vendor={vendor} allVendors={allVendors} reviews={reviews} allReps={allReps} rvCasos={rvCasos} rvIA={rvIA} onGoCalidad={vendor.tipo==="interno"?function(){setView("hist");}:null}/></div>
       <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={allVendors||[]} props={props} company={company} defaultVendor={vendor.email} myReps={reps} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
-      <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} ausencias={ausencias||[]} onSvAusencias={onSvAusencias}/></div>
+      <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} codigos={codigos||{}} ausencias={ausencias||[]} onSvAusencias={onSvAusencias}/></div>
       <div style={{display:view==="hist"   ?"block":"none"}}><VendorHistory reps={cleaningReps} onRespond={vendorRespond} vendor={vendor} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}} reviews={reviews} allReps={allReps} allVendors={allVendors} rvCasos={rvCasos} onSvRvCasos={onSvRvCasos} rvIA={rvIA}/></div>
       {vendor.isSupervisor&&<div style={{display:view==="sup"?"block":"none"}}><SupervisionPanel me={vendor} reps={allReps||[]} vendors={allVendors||[]} props={props} onUpdate={onUpdate}/></div>}
       <div style={{display:view==="account"?"block":"none"}}><VendorAccount vendor={vendor} allVendors={allVendors} allReps={allReps} onSvV={onSvV}/></div>
@@ -7021,8 +7083,493 @@ function ProfundasCfg({props, reps, schedules, hoy, vendors, onSvSchedules}) {
   );
 }
 
-function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, reps, reviews, rvCasos, onSvP, canNom}) {
-  const [dia,      setDia]      = useState(1);      /* 0 = hoy, 1 = mañana, … */
+/* ═══════════════════════════════════════════════════════════════════════════
+   CÓDIGOS DE ACCESO POR SEMANA
+   El administrador carga el código de cada propiedad para cada semana de
+   trabajo. Al técnico le aparece, en su programación, el código de la semana
+   que corresponde a la fecha de esa limpieza — sin tener que preguntar.
+   Estructura guardada: { "2026-07-27": { "<propiedad normalizada>": "4471" } }
+   La llave de la semana es siempre el LUNES.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function semanaKey(f){
+  try{ return SCHED.lunesDe(String(f).slice(0,10)); }catch(e){ return String(f||"").slice(0,10); }
+}
+function semanaRango(lunes){
+  var dom=SCHED.shift(lunes,6);
+  return fmtDate(lunes)+" al "+fmtDate(dom);
+}
+function codigoSemana(codigos, propiedad, fecha, fallback){
+  var sem=(codigos||{})[semanaKey(fecha)];
+  var c=sem?String(sem[normalize(propiedad)]||"").trim():"";
+  return c||String(fallback||"").trim();
+}
+
+function CodigosCfg({props, codigos, onSave}){
+  const [lunes, setLunes] = useState(semanaKey(SCHED.hoyGT()));
+  const [q, setQ] = useState("");
+  var sem = (codigos||{})[lunes] || {};
+  var lista = (props||[]).slice().sort(function(a,b){ return String(a.name||"")<String(b.name||"")?-1:1; })
+    .filter(function(p){ return !q || String(p.name||"").toLowerCase().indexOf(q.toLowerCase())>=0; });
+  var conCodigo = (props||[]).filter(function(p){ return String(sem[normalize(p.name)]||"").trim(); }).length;
+  var esActual = lunes===semanaKey(SCHED.hoyGT());
+
+  function setCodigo(nombre, valor){
+    var next=Object.assign({}, codigos||{});
+    var w=Object.assign({}, next[lunes]||{});
+    var k=normalize(nombre);
+    if(String(valor||"").trim()) w[k]=String(valor).trim(); else delete w[k];
+    if(Object.keys(w).length) next[lunes]=w; else delete next[lunes];
+    onSave&&onSave(next);
+  }
+  function copiarAnterior(){
+    var prev=(codigos||{})[SCHED.shift(lunes,-7)];
+    if(!prev||!Object.keys(prev).length){ return; }
+    var next=Object.assign({}, codigos||{});
+    next[lunes]=Object.assign({}, prev, next[lunes]||{});
+    onSave&&onSave(next);
+  }
+  function limpiar(){
+    if(!window.confirm("¿Borrar todos los códigos de la semana del "+fmtDate(lunes)+"?")) return;
+    var next=Object.assign({}, codigos||{}); delete next[lunes]; onSave&&onSave(next);
+  }
+
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+  var NAV={padding:"9px 14px",minHeight:42,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"};
+  var hayPrev=!!((codigos||{})[SCHED.shift(lunes,-7)]);
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <div style={CARD}>
+        <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Semana de trabajo</div>
+        <div style={{display:"flex",alignItems:"center",gap:9,marginTop:9,flexWrap:"wrap"}}>
+          <button onClick={function(){setLunes(SCHED.shift(lunes,-7));}} style={NAV}>← Anterior</button>
+          <div style={{flex:1,minWidth:170,textAlign:"center"}}>
+            <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:19,color:C.black,lineHeight:1.2}}>{semanaRango(lunes)}</div>
+            <div style={{fontSize:10.5,color:C.taupe,marginTop:3}}>{esActual?"Semana en curso":"Lunes a domingo"}</div>
+          </div>
+          <button onClick={function(){setLunes(SCHED.shift(lunes,7));}} style={NAV}>Siguiente →</button>
+        </div>
+        <div style={{marginTop:11,fontSize:11.5,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>
+          Cada técnico verá el código de la propiedad según la fecha de su limpieza. Un código escrito hoy aparece de inmediato en la programación de esa semana.
+        </div>
+        <div style={{display:"flex",gap:9,marginTop:12,flexWrap:"wrap",alignItems:"center"}}>
+          <span style={{fontSize:11.5,fontWeight:600,color:conCodigo===(props||[]).length?C.green:C.orange}}>
+            {conCodigo} de {(props||[]).length} propiedades con código
+          </span>
+          <div style={{flex:1}}/>
+          {hayPrev&&<button onClick={copiarAnterior} style={NAV}>Copiar los de la semana anterior</button>}
+          {conCodigo>0&&<button onClick={limpiar} style={Object.assign({},NAV,{color:C.red})}>Borrar semana</button>}
+        </div>
+      </div>
+
+      <input value={q} onChange={function(e){setQ(e.target.value);}} placeholder="Buscar propiedad…"
+        style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:100,padding:"11px 16px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",minHeight:46,background:"#fff"}}/>
+
+      <div style={Object.assign({},CARD,{padding:"6px 16px"})}>
+        {lista.length===0&&<div style={{padding:"26px 0",textAlign:"center",fontSize:12.5,color:C.taupe}}>Sin propiedades que coincidan.</div>}
+        {lista.map(function(p,i){
+          var val=sem[normalize(p.name)]||"";
+          return (
+            <div key={p.id||p.name} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 0",borderTop:i?"1px solid "+C.line:"none"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12.5,fontWeight:600,color:C.black,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
+                {p.cuartos&&<div style={{fontSize:10.5,color:C.taupe,marginTop:2}}>{p.cuartos} hab</div>}
+              </div>
+              <input value={val} onChange={function(e){setCodigo(p.name,e.target.value);}} placeholder="—" inputMode="numeric"
+                style={{width:118,boxSizing:"border-box",border:"1.5px solid "+(val?C.black:C.gray),borderRadius:9,padding:"9px 11px",fontSize:15,fontWeight:700,letterSpacing:".1em",textAlign:"center",fontFamily:"Montserrat,sans-serif",outline:"none",background:val?C.surfaceWarm:"#fff",color:C.black,minHeight:44,fontVariantNumeric:"tabular-nums"}}/>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ═══ VER COMO — el administrador principal revisa la app con los ojos de otro ═══ */
+function VerComoBanner({vendor, onExit}){
+  return (
+    <div style={{position:"fixed",top:0,left:0,right:0,height:40,boxSizing:"border-box",zIndex:9000,background:C.black,color:"#fff",padding:"0 16px",display:"flex",alignItems:"center",gap:12,fontFamily:"Montserrat,sans-serif",boxShadow:"0 4px 16px rgba(62,63,63,.18)",overflow:"hidden"}}>
+      <span style={{fontSize:9,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",opacity:.6,flexShrink:0}}>Viendo como</span>
+      <span style={{fontSize:12.5,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{vendorDisplay(vendor)}</span>
+      <div style={{flex:1,minWidth:8}}/>
+      <button onClick={onExit} style={{flexShrink:0,padding:"6px 14px",minHeight:28,borderRadius:100,border:"1px solid rgba(255,255,255,.35)",background:"transparent",color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif",whiteSpace:"nowrap"}}>Volver a mi vista →</button>
+    </div>
+  );
+}
+
+function VerComoCfg({vendors, onVerComo}){
+  const [q,setQ]=useState("");
+  var lista=(vendors||[]).filter(function(v){ return v.active!==false; })
+    .filter(function(v){ return !q || vendorDisplay(v).toLowerCase().indexOf(q.toLowerCase())>=0; })
+    .sort(function(a,b){ return vendorDisplay(a)<vendorDisplay(b)?-1:1; });
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)",marginBottom:16};
+  return (
+    <div style={CARD}>
+      <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Ver la app como otro usuario</div>
+      <div style={{fontSize:11.5,color:C.earth,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>
+        Abre la aplicación exactamente como la ve esa persona — su programación, sus pagos, sus permisos. Nada de lo que hagas cambia de dueño: sigues siendo tú, solo cambia lo que ves. Sales con un clic.
+      </div>
+      <input value={q} onChange={function(e){setQ(e.target.value);}} placeholder="Buscar persona…"
+        style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:100,padding:"10px 15px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",minHeight:44,marginTop:11,background:"#fff"}}/>
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:11}}>
+        {lista.map(function(v){
+          return (
+            <button key={v.id} onClick={function(){ onVerComo(v.id); try{window.scrollTo(0,0);}catch(_){} }}
+              style={{padding:"8px 14px",minHeight:40,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif",display:"flex",alignItems:"center",gap:7}}>
+              {vendorDisplay(v)}
+              {v.isAdmin&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.taupe}}>Admin</span>}
+            </button>
+          );
+        })}
+        {lista.length===0&&<div style={{fontSize:12,color:C.taupe,padding:"6px 0"}}>Nadie coincide con esa búsqueda.</div>}
+      </div>
+    </div>
+  );
+}
+
+/* ═══ BITÁCORA — qué corrió, qué se guardó y a quién se le escribió ═══ */
+function BitacoraPanel(){
+  const [abierto,setAbierto]=useState(false);
+  const [ev,setEv]=useState(null);
+  const [busy,setBusy]=useState(false);
+  const [err,setErr]=useState("");
+
+  async function cargar(){
+    setBusy(true); setErr("");
+    try{
+      var r=await apiCall("getBitacora",{limit:150});
+      setEv((r&&r.eventos)||[]);
+    }catch(e){ setErr("No se pudo leer la bitácora: "+((e&&e.message)||"sin conexión")); }
+    setBusy(false);
+  }
+  useEffect(function(){ if(abierto&&ev===null) cargar(); },[abierto]);
+
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+  var COLOR={correo:C.green, programacion:C.black, manual:C.orange, error:C.red};
+
+  return (
+    <div style={CARD}>
+      <button onClick={function(){setAbierto(!abierto);}} style={{width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:600,color:C.black}}>Bitácora</div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>
+              Cada corrida del motor, cada ruta guardada y cada correo enviado, con hora y destinatario.
+            </div>
+          </div>
+          <span style={{color:C.taupe,fontSize:13,flexShrink:0}}>{abierto?"▾":"▸"}</span>
+        </div>
+      </button>
+      {abierto&&(
+        <div style={{marginTop:13}}>
+          <div style={{display:"flex",gap:9,marginBottom:11,alignItems:"center",flexWrap:"wrap"}}>
+            <button onClick={cargar} disabled={busy} style={{padding:"8px 14px",minHeight:38,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{busy?"Leyendo…":"Actualizar"}</button>
+            {ev&&<span style={{fontSize:11,color:C.taupe}}>{ev.length} eventos</span>}
+          </div>
+          {err&&<div style={{fontSize:11.5,color:C.red,lineHeight:1.6,marginBottom:9}}>{err}</div>}
+          {ev&&ev.length===0&&<div style={{fontSize:12,color:C.taupe,padding:"14px 0"}}>Todavía no hay eventos registrados. Los siguientes correos y corridas quedarán aquí.</div>}
+          {ev&&ev.length>0&&(
+            <div style={{display:"flex",flexDirection:"column",maxHeight:420,overflowY:"auto"}}>
+              {ev.map(function(x,i){
+                return (
+                  <div key={i} style={{padding:"10px 0",borderTop:i?"1px solid "+C.line:"none"}}>
+                    <div style={{display:"flex",gap:9,alignItems:"baseline",flexWrap:"wrap"}}>
+                      <span style={{fontSize:10,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:COLOR[x.tipo]||C.taupe}}>{x.tipo||"evento"}</span>
+                      <span style={{fontSize:10.5,color:C.taupe,fontVariantNumeric:"tabular-nums"}}>{x.cuando}</span>
+                      {x.usuario&&<span style={{fontSize:10.5,color:C.earth}}>· {x.usuario}</span>}
+                    </div>
+                    <div style={{fontSize:12,color:C.black,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>{x.detalle}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PROPIEDADES EN PAUSA
+   Una propiedad en pausa sale del reparto automático: no genera limpieza de
+   checkout ni profunda. Es para estancias largas (Mónaco), remodelaciones y
+   apartamentos fuera de servicio. Por fechas o indefinida.
+   Se guarda en la ficha de la propiedad: pausa:{activa,desde,hasta,motivo}.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function PausasCfg({props, onSvP, hoy}){
+  const [abierto,setAbierto]=useState(false);
+  const [nueva,setNueva]=useState(null);   /* {propiedad, modo, desde, hasta, motivo} */
+
+  var pausadas=(props||[]).filter(function(p){ return p.pausa&&p.pausa.activa; });
+  var vigentes=pausadas.filter(function(p){ return SCHED.enPausa(p,hoy); });
+
+  function guardar(nombre, pausa){
+    onSvP&&onSvP((props||[]).map(function(p){
+      if(p.name!==nombre) return p;
+      var u=Object.assign({},p);
+      if(pausa) u.pausa=pausa; else delete u.pausa;
+      return u;
+    }));
+  }
+  function crear(){
+    if(!nueva||!nueva.propiedad) return;
+    var porFechas=nueva.modo==="fechas";
+    guardar(nueva.propiedad,{
+      activa:true,
+      desde:porFechas?(nueva.desde||""):"",
+      hasta:porFechas?(nueva.hasta||""):"",
+      motivo:(nueva.motivo||"").trim(),
+      creadaEn:hoy
+    });
+    setNueva(null);
+  }
+  function textoPausa(p){
+    var d=p.pausa.desde, h=p.pausa.hasta;
+    if(!d&&!h) return "Indefinida";
+    if(d&&h) return fmtDate(d)+" al "+fmtDate(h);
+    if(d) return "Desde el "+fmtDate(d);
+    return "Hasta el "+fmtDate(h);
+  }
+
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+  var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6};
+  var IN={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44,color:C.black};
+  var disponibles=(props||[]).filter(function(p){ return !(p.pausa&&p.pausa.activa); })
+    .slice().sort(function(a,b){ return String(a.name||"")<String(b.name||"")?-1:1; });
+
+  return (
+    <div style={CARD}>
+      <button onClick={function(){setAbierto(!abierto);}} style={{width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:600,color:C.black}}>Propiedades en pausa</div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>
+              Fuera del reparto automático — estancias largas, remodelación, apartamentos fuera de servicio.
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:9,flexShrink:0}}>
+            {vigentes.length>0&&<span style={{fontSize:10.5,fontWeight:700,color:C.earth,background:C.surfaceWarm,padding:"3px 10px",borderRadius:100}}>{vigentes.length} en pausa</span>}
+            <span style={{color:C.taupe,fontSize:13}}>{abierto?"▾":"▸"}</span>
+          </div>
+        </div>
+      </button>
+
+      {abierto&&(
+        <div style={{marginTop:13,display:"flex",flexDirection:"column",gap:9}}>
+          {pausadas.length===0&&<div style={{fontSize:12,color:C.taupe,lineHeight:1.6}}>Ninguna propiedad está en pausa. Todas entran al reparto automático.</div>}
+          {pausadas.map(function(p){
+            var activa=SCHED.enPausa(p,hoy);
+            return (
+              <div key={p.id||p.name} style={{background:C.surfaceWarm,borderRadius:10,padding:"12px 13px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",flexWrap:"wrap"}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{p.name}</div>
+                    <div style={{fontSize:11,color:C.earth,marginTop:3}}>
+                      {textoPausa(p)}
+                      {!activa&&<span style={{color:C.taupe}}> · no aplica hoy</span>}
+                    </div>
+                    {p.pausa.motivo&&<div style={{fontSize:11,color:C.taupe,marginTop:3,lineHeight:1.5}}>“{p.pausa.motivo}”</div>}
+                  </div>
+                  <button onClick={function(){guardar(p.name,null);}} style={{flexShrink:0,padding:"7px 13px",minHeight:36,borderRadius:100,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Reactivar</button>
+                </div>
+              </div>
+            );
+          })}
+
+          {!nueva
+            ? <button onClick={function(){setNueva({propiedad:"",modo:"indef",desde:hoy,hasta:"",motivo:""});}} style={{width:"100%",padding:"11px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>+ Pausar una propiedad</button>
+            : <div style={{display:"flex",flexDirection:"column",gap:11,borderTop:"1px solid "+C.line,paddingTop:13}}>
+                <div>
+                  <span style={LBL}>Propiedad</span>
+                  <select value={nueva.propiedad} onChange={function(e){setNueva(Object.assign({},nueva,{propiedad:e.target.value}));}} style={IN}>
+                    <option value="">Elegir…</option>
+                    {disponibles.map(function(p){ return <option key={p.id||p.name} value={p.name}>{p.name}</option>; })}
+                  </select>
+                </div>
+                <div>
+                  <span style={LBL}>Duración</span>
+                  <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                    {[["indef","Indefinida"],["fechas","Por fechas"]].map(function(it){
+                      var sel=nueva.modo===it[0];
+                      return <button key={it[0]} onClick={function(){setNueva(Object.assign({},nueva,{modo:it[0]}));}} style={{flex:1,minWidth:120,padding:"10px",minHeight:44,borderRadius:100,border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{it[1]}</button>;
+                    })}
+                  </div>
+                </div>
+                {nueva.modo==="fechas"&&(
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:11}}>
+                    <div><span style={LBL}>Desde</span><input type="date" value={nueva.desde} onChange={function(e){setNueva(Object.assign({},nueva,{desde:e.target.value}));}} style={IN}/></div>
+                    <div><span style={LBL}>Hasta</span><input type="date" value={nueva.hasta} min={nueva.desde} onChange={function(e){setNueva(Object.assign({},nueva,{hasta:e.target.value}));}} style={IN}/></div>
+                  </div>
+                )}
+                <div><span style={LBL}>Motivo</span><input value={nueva.motivo} onChange={function(e){setNueva(Object.assign({},nueva,{motivo:e.target.value}));}} placeholder="Estancia larga, remodelación, fuera de servicio…" style={IN}/></div>
+                <div style={{fontSize:11,color:C.taupe,lineHeight:1.6,textWrap:"pretty"}}>
+                  Mientras esté en pausa, esta propiedad no se le asigna a nadie. Lo ya programado no se borra: quítalo del día si corresponde.
+                </div>
+                <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+                  <button onClick={crear} disabled={!nueva.propiedad||(nueva.modo==="fechas"&&!nueva.desde)} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:100,border:"none",background:(!nueva.propiedad||(nueva.modo==="fechas"&&!nueva.desde))?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Pausar</button>
+                  <button onClick={function(){setNueva(null);}} style={{padding:"12px 18px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cancelar</button>
+                </div>
+              </div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   IMPORTAR LA RUTA DE UN DÍA
+   Para adoptar como oficial una ruta armada afuera (el export de Hospitable o
+   una repartida a mano). Se pega la tabla tal cual: cada línea trae la fecha,
+   la propiedad y el nombre del técnico. Las filas sin técnico se ignoran —
+   ésas se asignan a mano o la propiedad está en pausa.
+   Lo importado queda con origen "manual": el motor de las 6pm no lo toca.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function ImportarRuta({props, vendors, schedules, onSvSchedules, hoy, onAviso}){
+  const [abierto,setAbierto]=useState(false);
+  const [txt,setTxt]=useState("");
+  const [prev,setPrev]=useState(null);
+
+  var tecs=schedTecnicos(vendors);
+
+  function celdas(linea){
+    return String(linea).split(/\t|\s{2,}|\s*\|\s*/).map(function(x){ return x.trim(); }).filter(Boolean);
+  }
+  function buscarProp(cel){
+    var n=normalize(cel);
+    if(!n) return null;
+    return (props||[]).find(function(p){ return normalize(p.name)===n; })
+        || (props||[]).find(function(p){ return normalize(p.name).indexOf(n)>=0 && n.length>6; }) || null;
+  }
+  function buscarTec(cel){
+    var n=normNm(cel);
+    if(!n||n.length<3) return null;
+    return tecs.find(function(v){ return normNm(vendorDisplay(v))===n; })
+        || tecs.find(function(v){ return normNm(v.primerNombre||"")===n; })
+        || tecs.find(function(v){ return normNm(vendorDisplay(v)).split(" ")[0]===n; }) || null;
+  }
+
+  function analizar(){
+    var lineas=String(txt||"").split(/\r?\n/).map(function(x){ return x.trim(); }).filter(Boolean);
+    var filas=[], problemas=[], fechas={};
+    lineas.forEach(function(L){
+      var cs=celdas(L);
+      if(!cs.length) return;
+      var fecha="", prop=null, tec=null, tipo="Limpieza";
+      cs.forEach(function(c){
+        if(!fecha){ var m=c.match(/(\d{4})-(\d{2})-(\d{2})/); if(m){ fecha=m[0]; return; } }
+        if(!prop){ var p=buscarProp(c); if(p){ prop=p; return; } }
+        if(!tec){ var v=buscarTec(c); if(v){ tec=v; return; } }
+      });
+      if(/profunda/i.test(L)) tipo="Limpieza Profunda";
+      if(!prop){
+        /* Encabezados y líneas de la interfaz no son un problema que reportar. */
+        if(fecha) problemas.push(L+" — no reconocí la propiedad");
+        return;
+      }
+      if(!fecha){ problemas.push(prop.name+" — sin fecha en la línea"); return; }
+      if(!tec){ problemas.push(prop.name+" — sin técnico: queda fuera"); return; }
+      fechas[fecha]=(fechas[fecha]||0)+1;
+      filas.push({fecha:fecha, prop:prop, tec:tec, tipo:tipo});
+    });
+    setPrev({filas:filas, problemas:problemas, fechas:fechas});
+  }
+
+  function aplicar(){
+    if(!prev||!prev.filas.length) return;
+    var dias=Object.keys(prev.fechas);
+    var orden={};
+    var nuevas=prev.filas.map(function(f,i){
+      var em=String(f.tec.email||"").toLowerCase();
+      var k=f.fecha+"|"+em;
+      orden[k]=(orden[k]||0)+1;
+      var p=SCHED.partes(f.prop.name);
+      return {
+        id:"sc_imp_"+f.fecha.replace(/-/g,"")+"_"+i,
+        key:f.fecha+"|"+normalize(f.prop.name),
+        fecha:f.fecha, propiedad:f.prop.name,
+        zona:p.zona, edificio:p.edificio, unidad:p.unidad,
+        habitaciones:parseInt(f.prop.cuartos,10)||1,
+        tipo:f.tipo, entradaHoy:false, codigoAcceso:"",
+        vendorEmail:em, vendorId:f.tec.id,
+        hora:SCHED.HORA_INI, horaFin:SCHED.HORA_FIN,
+        orden:orden[k], minutos:SCHED.minutosLimpieza(parseInt(f.prop.cuartos,10)||1,f.tipo), viaje:0,
+        estado:"confirmada", origen:"manual", motivo:"ruta importada por el administrador",
+        generadoEn:hoy
+      };
+    });
+    /* Los días importados se reemplazan por completo: la ruta pegada es la oficial. */
+    var conservar=(schedules||[]).filter(function(s){ return !prev.fechas[String(s.fecha).slice(0,10)]; });
+    onSvSchedules(conservar.concat(nuevas));
+    try{ apiCall("logEvento",{tipo:"manual",detalle:"Ruta importada como oficial — "+nuevas.length+" limpiezas del "+dias.join(", "),usuario:"app · administrador"}).catch(function(){}); }catch(_){}
+    onAviso&&onAviso(nuevas.length+" limpiezas quedaron como la ruta oficial del "+dias.map(fmtDate).join(" y ")+". Revísala y presiona “Notificar al equipo”.");
+    setTxt(""); setPrev(null); setAbierto(false);
+  }
+
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+
+  return (
+    <div style={CARD}>
+      <button onClick={function(){setAbierto(!abierto);}} style={{width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:600,color:C.black}}>Pegar la ruta de un día</div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>
+              Adopta como oficial una ruta armada afuera. Reemplaza lo que haya ese día y queda como manual: el motor de las 6:00 pm no la toca.
+            </div>
+          </div>
+          <span style={{color:C.taupe,fontSize:13,flexShrink:0}}>{abierto?"▾":"▸"}</span>
+        </div>
+      </button>
+
+      {abierto&&(
+        <div style={{marginTop:13,display:"flex",flexDirection:"column",gap:11}}>
+          <textarea value={txt} onChange={function(e){setTxt(e.target.value); setPrev(null);}} rows={8}
+            placeholder={"2026-07-31\t11:00:00\tZ1 - Centro Vivo - 1104\tJackeline\n2026-07-31\t11:00:00\tZ10 - Airali - 1508\tMirla"}
+            style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:10,padding:"12px",fontSize:12,fontFamily:"ui-monospace,Menlo,monospace",lineHeight:1.7,outline:"none",background:"#fff",color:C.black,resize:"vertical"}}/>
+          <div style={{fontSize:11,color:C.taupe,lineHeight:1.6,textWrap:"pretty"}}>
+            Una limpieza por línea, en el orden de la ruta. Sirve el export de Hospitable tal cual (fecha, hora, nota, propiedad, técnico). Las filas sin técnico se ignoran.
+          </div>
+          <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+            <button onClick={analizar} disabled={!txt.trim()} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:txt.trim()?C.black:C.gray,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Revisar lo pegado</button>
+            {prev&&prev.filas.length>0&&(
+              <button onClick={aplicar} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Usar como ruta oficial →</button>
+            )}
+          </div>
+
+          {prev&&(
+            <div style={{background:C.surfaceWarm,borderRadius:10,padding:"12px 13px"}}>
+              <div style={{fontSize:12,fontWeight:600,color:C.black}}>
+                {prev.filas.length} limpieza{prev.filas.length===1?"":"s"} reconocida{prev.filas.length===1?"":"s"}
+                {Object.keys(prev.fechas).length?" · "+Object.keys(prev.fechas).map(fmtDate).join(", "):""}
+              </div>
+              {prev.filas.length>0&&(
+                <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:3}}>
+                  {prev.filas.map(function(f,i){
+                    return <div key={i} style={{fontSize:11,color:C.earth,lineHeight:1.6}}>{f.prop.name} → <span style={{color:C.black,fontWeight:600}}>{vendorDisplay(f.tec)}</span></div>;
+                  })}
+                </div>
+              )}
+              {prev.problemas.length>0&&(
+                <div style={{marginTop:10,paddingTop:9,borderTop:"1px solid "+C.line}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.orange,letterSpacing:".1em",textTransform:"uppercase"}}>Fuera de la ruta · {prev.problemas.length}</div>
+                  <div style={{marginTop:5,display:"flex",flexDirection:"column",gap:3}}>
+                    {prev.problemas.map(function(p,i){ return <div key={i} style={{fontSize:11,color:C.taupe,lineHeight:1.6}}>{p}</div>; })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, reps, reviews, rvCasos, onSvP, canNom, codigos, schedErr}) {
+  /* Abre en HOY: la ruta que el equipo está corriendo ahora mismo es la que el
+     administrador necesita ver al entrar, no la de mañana. */
+  const [dia,      setDia]      = useState(0);      /* 0 = hoy, 1 = mañana, … */
   const [busy,     setBusy]     = useState("");
   const [msg,      setMsg]      = useState(null);
   const [prop,     setPropu]    = useState(null);   /* propuesta de reajuste pendiente */
@@ -7031,6 +7578,20 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   const [drag,     setDrag]     = useState(null);
   const [verMotor, setVerMotor] = useState(false);
   const [sim,      setSim]      = useState(null);   /* simulacro: no guarda ni notifica */
+  const [reabrir,  setReabrir]  = useState({});     /* días ya notificados que se van a rehacer */
+  const [tocados,  setTocados]  = useState({});     /* días notificados que el admin ya cambió */
+
+  /* Si el administrador toca un día que ya salió por correo, el equipo tiene una
+     versión vieja. Se marca para ofrecer el reenvío — nunca se manda solo. */
+  function marcarCambio(f){
+    var yaSalio=(schedules||[]).some(function(s){ return String(s.fecha).slice(0,10)===f && s.notificadoEn; });
+    if(yaSalio) setTocados(function(p){ var u=Object.assign({},p); u[f]=1; return u; });
+  }
+
+  /* Bitácora: se registra en el servidor, nunca bloquea la interfaz. */
+  function bitacora(tipo, detalle, extra){
+    try{ apiCall("logEvento",{tipo:tipo, detalle:detalle, usuario:"app · administrador", extra:extra||""}).catch(function(){}); }catch(_){}
+  }
 
   var hoy   = SCHED.hoyGT();
   var tecs  = schedTecnicos(vendors);
@@ -7101,19 +7662,40 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
       ratings: ratings, ausencias: ausencias, existentes: schedules,
       historial: reps, pesoRating: 0.7
     });
-    /* Se conserva lo manual, lo de días pasados y lo de hoy ya confirmado. */
+    /* Se conserva lo manual, lo de días pasados, lo de hoy y TODO día que ya salió
+       por correo: la ruta que el técnico recibió es la ruta del día. Volver a
+       correr el motor no puede cambiarle el trabajo a alguien que ya lo tiene. */
     var conservar=(schedules||[]).filter(function(s){
       var sf=String(s.fecha).slice(0,10);
-      return sf<=hoy || s.origen==="manual";
+      return sf<=hoy || s.origen==="manual" || (s.notificadoEn && !reabrir[sf]);
     });
-    var nuevas=r.asignaciones.map(function(x){ return Object.assign({}, x, {id:"sc_"+x.key.replace(/[^a-z0-9]/gi,"").slice(0,28)+"_"+Math.floor(Math.random()*1000)}); });
+    var cerrados={};
+    (schedules||[]).forEach(function(s){
+      var sf=String(s.fecha).slice(0,10);
+      if(s.notificadoEn && !reabrir[sf] && sf>hoy) cerrados[sf]=1;
+    });
+    var nuevas=r.asignaciones
+      .filter(function(x){ return !cerrados[String(x.fecha).slice(0,10)]; })
+      .map(function(x){ return Object.assign({}, x, {id:"sc_"+x.key.replace(/[^a-z0-9]/gi,"").slice(0,28)+"_"+Math.floor(Math.random()*1000)}); });
     onSvSchedules(conservar.concat(nuevas));
     setBusy("");
     var prof=nuevas.filter(function(x){ return SCHED.esProfunda(x.tipo); }).length;
-    aviso(nuevas.length+" limpiezas programadas para los próximos 3 días"
+    var cerradosTxt=Object.keys(cerrados);
+    var resumen=nuevas.length+" limpiezas programadas para los próximos 3 días"
       +(prof?" · "+prof+" profunda"+(prof===1?"":"s"):"")
       +(r.sinAsignar.length?" · "+r.sinAsignar.length+" sin asignar":"")
-      +((r.postergadas||[]).length?" · "+r.postergadas.length+" profunda"+(r.postergadas.length===1?"":"s")+" postergada"+(r.postergadas.length===1?"":"s")+" por falta de espacio":"")+".");
+      +((r.postergadas||[]).length?" · "+r.postergadas.length+" profunda"+(r.postergadas.length===1?"":"s")+" postergada"+(r.postergadas.length===1?"":"s")+" por falta de espacio":"")
+      +(cerradosTxt.length?" · "+cerradosTxt.map(fmtDate).join(" y ")+" no se tocó: ya salió por correo":"")+".";
+    aviso(resumen);
+    bitacora("programacion","Programación manual desde el app — "+resumen);
+  }
+
+  /* Un día ya notificado queda cerrado. Si de verdad hay que rehacerlo, se
+     reabre a propósito y se vuelve a notificar: nunca en silencio. */
+  function reabrirDia(f){
+    if(!window.confirm("La ruta del "+fmtDate(f)+" ya se le envió al equipo.\n\n¿Rehacerla? Tendrás que volver a notificar — a los técnicos les cambia el trabajo del día.")) return;
+    var next=Object.assign({},reabrir); next[f]=1; setReabrir(next);
+    aviso("Día reabierto. Presiona “Programar 3 días” para rehacerlo y vuelve a notificar al equipo.", true);
   }
 
   /* ─── Simulacro: corre el motor para un día y muestra el resultado sin guardar
@@ -7161,8 +7743,9 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           hora: SCHED.HORA_INI+" a "+SCHED.HORA_FIN,
           total: String(lista.length),
           limpiezas: lista.map(function(s,i){
+            var cod=codigoSemana(codigos, s.propiedad, s.fecha, s.codigoAcceso);
             return (i+1)+". "+s.propiedad+" — "+(s.habitaciones||1)+" hab · "+s.tipo+
-                   (s.entradaHoy?" · TIENE ENTRADA HOY":"")+(s.codigoAcceso?" · código "+s.codigoAcceso:"");
+                   (s.entradaHoy?" · TIENE ENTRADA HOY":"")+(cod?" · código "+cod:"");
           }).join("\n")
         });
       }catch(_){}
@@ -7171,7 +7754,9 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
     onSvSchedules((schedules||[]).map(function(s){
       return String(s.fecha).slice(0,10)===f ? Object.assign({},s,{estado:"confirmada",notificadoEn:hoy}) : s;
     }));
+    setTocados(function(p){ var u=Object.assign({},p); delete u[f]; return u; });
     aviso("Programación del "+fmtDate(f)+" enviada a "+n+" técnico"+(n===1?"":"s")+".");
+    bitacora("correo","Ruta del "+f+" enviada a mano desde el app a "+n+" técnico"+(n===1?"":"s")+".");
   }
 
   /* ─── Ausencias: aprobar genera el reajuste; el admin lo confirma */
@@ -7223,26 +7808,29 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
 
   /* ─── Ajuste de ruta: reordenar y mover entre técnicos */
   function reordenar(email, from, to){
-    var mias=delDia.filter(function(s){ return String(s.vendorEmail||"").toLowerCase()===email; })
+    var mias=delDia.filter(function(s){ return emailVigente(s)===email; })
                    .sort(function(a,b){ return (a.orden||0)-(b.orden||0); });
     if(to<0||to>=mias.length) return;
     var arr=mias.slice(); var it=arr.splice(from,1)[0]; arr.splice(to,0,it);
     var ord={}; arr.forEach(function(s,i){ ord[s.id]=i+1; });
     onSvSchedules((schedules||[]).map(function(s){ return ord[s.id]?Object.assign({},s,{orden:ord[s.id]}):s; }));
+    marcarCambio(fecha);
   }
   function mover(sched, aEmail){
     var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===aEmail; });
     if(!v) return;
-    var cuantas=delDia.filter(function(s){ return String(s.vendorEmail||"").toLowerCase()===aEmail; }).length;
+    var cuantas=delDia.filter(function(s){ return emailVigente(s)===aEmail; }).length;
     onSvSchedules((schedules||[]).map(function(s){
       return s.id===sched.id
         ? Object.assign({},s,{vendorEmail:aEmail, vendorId:v.id, orden:cuantas+1, motivo:"movida por el administrador", ajustadaPorAdmin:true})
         : s;
     }));
+    marcarCambio(String(sched.fecha).slice(0,10));
   }
   function quitar(sched){
     if(!window.confirm("¿Quitar "+sched.propiedad+" de la programación del "+fmtDate(sched.fecha)+"?")) return;
     onSvSchedules((schedules||[]).filter(function(s){ return s.id!==sched.id; }));
+    marcarCambio(String(sched.fecha).slice(0,10));
   }
   function agregarManual(){
     if(!mForm.fecha||!mForm.propiedad||!mForm.vendorId) return;
@@ -7261,13 +7849,21 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
       motivo:"agregada por el administrador", generadoEn:hoy
     }]));
     setManual(false); setMForm({fecha:"",propiedad:"",vendorId:"",tipo:"Limpieza"});
+    marcarCambio(mForm.fecha);
     aviso("Limpieza agregada.");
   }
 
   /* ─── Datos del día mostrado */
   var delDia=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===fecha; });
+  /* El correo de la limpieza puede ser el viejo si el técnico lo cambió: se resuelve
+     al vigente por id (o por correo anterior) para que la ruta no se pierda. */
+  function emailVigente(s){
+    var v=(vendors||[]).find(function(x){ return s.vendorId && String(x.id)===String(s.vendorId); })
+       || (vendors||[]).find(function(x){ return vendorEmailSet(x).indexOf(String(s.vendorEmail||"").toLowerCase())>=0; });
+    return v?String(v.email||"").toLowerCase():String(s.vendorEmail||"").toLowerCase();
+  }
   var porTec={};
-  delDia.forEach(function(s){ var k=String(s.vendorEmail||"").toLowerCase(); if(!porTec[k])porTec[k]=[]; porTec[k].push(s); });
+  delDia.forEach(function(s){ var k=emailVigente(s); if(!porTec[k])porTec[k]=[]; porTec[k].push(s); });
   var firme = dia<=1;
   var notificado = delDia.length>0 && delDia.every(function(s){ return s.notificadoEn; });
 
@@ -7285,6 +7881,13 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   var requeridas=SCHED.limpiezasRequeridas({reservas:reservas, props:props, desde:fecha, hasta:fecha});
   var yaProg={}; delDia.forEach(function(s){ yaProg[normalize(s.propiedad)]=1; });
   var sinAsignar=requeridas.filter(function(x){ return !yaProg[normalize(x.propiedad)]; });
+  /* Checkouts que el motor dejó fuera a propósito porque la propiedad está en pausa. */
+  var pausadasHoy=(reservas||[]).filter(function(r){
+    if(!r||String(r.checkOut||"").slice(0,10)!==fecha) return false;
+    var p=(props||[]).find(function(x){ return normalize(x.name)===normalize(r.propiedad); });
+    return p&&SCHED.enPausa(p,fecha);
+  }).map(function(r){ return r.propiedad; });
+  pausadasHoy=pausadasHoy.filter(function(x,i){ return pausadasHoy.indexOf(x)===i; });
 
   var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6};
   var IN={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44};
@@ -7335,6 +7938,14 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           </div>
         )}
       </div>
+
+      {/* La programación que no llegó a Sheets no existe para nadie más */}
+      {schedErr&&(
+        <div style={{background:"#F5EDEC",border:"1.5px solid #DBC8C4",borderRadius:14,padding:"14px 16px"}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.red,letterSpacing:".14em",textTransform:"uppercase"}}>No se guardó en Google Sheets</div>
+          <div style={{fontSize:12,color:C.earth,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>{schedErr}</div>
+        </div>
+      )}
 
       {/* Ausencias por aprobar */}
       {pendAus.length>0&&(
@@ -7469,11 +8080,27 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
             <div style={{fontSize:11.5,color:C.earth,marginTop:3}}>{delDia.length} limpieza{delDia.length===1?"":"s"} · {libres.length} técnico{libres.length===1?"":"s"} disponible{libres.length===1?"":"s"} · carga {uso}%</div>
           </div>
           {delDia.length>0&&(
-            <button onClick={function(){notificar(fecha);}} style={{flexShrink:0,padding:"10px 15px",minHeight:44,borderRadius:100,border:"none",background:notificado?C.gray:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer"}}>
-              {notificado?"✓ Ya notificado":"Notificar al equipo →"}
-            </button>
+            <div style={{display:"flex",gap:8,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
+              {notificado&&fecha>hoy&&!reabrir[fecha]&&(
+                <button onClick={function(){reabrirDia(fecha);}} style={{padding:"10px 14px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Rehacer este día</button>
+              )}
+              <button onClick={function(){notificar(fecha);}} style={{padding:"10px 15px",minHeight:44,borderRadius:100,border:"none",background:notificado?C.gray:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer"}}>
+                {notificado?"✓ Ya notificado":"Notificar al equipo →"}
+              </button>
+            </div>
           )}
         </div>
+        {tocados[fecha]&&(
+          <div style={{marginTop:11,background:"#FBF6EC",border:"1px solid #E8DCC4",borderRadius:9,padding:"11px 13px"}}>
+            <div style={{fontSize:11.5,color:"#7a5c1e",fontWeight:700,lineHeight:1.6,textWrap:"pretty"}}>Cambiaste una ruta que ya salió por correo — el equipo todavía tiene la versión anterior.</div>
+            <button onClick={function(){notificar(fecha);}} style={{marginTop:9,padding:"9px 15px",minHeight:42,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Reenviar la ruta al equipo →</button>
+          </div>
+        )}
+        {notificado&&!tocados[fecha]&&(
+          <div style={{marginTop:11,background:"#EDF5EF",borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.green,lineHeight:1.6,fontWeight:600,textWrap:"pretty"}}>
+            Esta es la ruta que el equipo recibió por correo{delDia[0]&&delDia[0].notificadoEn?" el "+fmtDate(delDia[0].notificadoEn):""}. El motor ya no la toca{reabrir[fecha]?" — pero la reabriste: al volver a programar se rehará":""}.
+          </div>
+        )}
         {!firme&&delDia.length>0&&(
           <div style={{marginTop:11,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.earth,lineHeight:1.6}}>
             Programación tentativa — se valida el día anterior a las 6:00 pm. Los técnicos la ven, pero con esta misma advertencia.
@@ -7482,6 +8109,11 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
         {uso>=90&&delDia.length>0&&(
           <div style={{marginTop:11,background:"#F5EDEC",borderRadius:9,padding:"11px 13px",fontSize:11.5,color:C.red,lineHeight:1.6,fontWeight:600}}>
             Saturación: la carga usa {uso}% de la capacidad del equipo. Conviene bloquear calendario en Hospitable.
+          </div>
+        )}
+        {pausadasHoy.length>0&&(
+          <div style={{marginTop:11,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>
+            {pausadasHoy.length} checkout{pausadasHoy.length===1?"":"s"} fuera del reparto por pausa: {pausadasHoy.join(" · ")}.
           </div>
         )}
         {sinAsignar.length>0&&(
@@ -7537,6 +8169,9 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                           <div style={{fontSize:13,fontWeight:600,color:C.black}}>{s.propiedad}</div>
                           <div style={{fontSize:10.5,color:C.earth,marginTop:3}}>
                             {(s.habitaciones||1)} hab · {s.tipo}{s.viaje?" · "+s.viaje+" min de traslado":""}
+                            {codigoSemana(codigos,s.propiedad,s.fecha,s.codigoAcceso)
+                              ? <span style={{color:C.black,fontWeight:700,letterSpacing:".06em"}}> · código {codigoSemana(codigos,s.propiedad,s.fecha,s.codigoAcceso)}</span>
+                              : <span style={{color:C.orange}}> · sin código esta semana</span>}
                           </div>
                           {s.entradaHoy&&<div style={{fontSize:10,fontWeight:700,color:C.red,marginTop:4,letterSpacing:".06em",textTransform:"uppercase"}}>Tiene entrada hoy</div>}
                           {verMotor&&s.motivo&&<div style={{fontSize:10,color:C.taupe,marginTop:4,lineHeight:1.5}}>Motor: {s.motivo}</div>}
@@ -7562,7 +8197,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                   <div style={{fontSize:10.5,color:C.orange,fontWeight:600,lineHeight:1.5}}>La ruta excede las 4 horas de jornada por {schedMinsTxt(mins-SCHED.JORNADA_MIN)}.</div>
                 )}
                 {String((v.phone||v.telefono)||"").replace(/[^0-9]/g,"").length>=8&&(
-                  <a href={schedWaLink(v, mias, fecha)} target="_blank" rel="noopener noreferrer" style={{alignSelf:"flex-start",fontSize:11,fontWeight:600,color:C.earth,textDecoration:"none",padding:"8px 13px",minHeight:36,borderRadius:100,border:"1px solid "+C.gray,background:"#fff"}}>Enviar por WhatsApp →</a>
+                  <a href={schedWaLink(v, mias.map(function(s){ return Object.assign({},s,{codigoAcceso:codigoSemana(codigos,s.propiedad,s.fecha,s.codigoAcceso)}); }), fecha)} target="_blank" rel="noopener noreferrer" style={{alignSelf:"flex-start",fontSize:11,fontWeight:600,color:C.earth,textDecoration:"none",padding:"8px 13px",minHeight:36,borderRadius:100,border:"1px solid "+C.gray,background:"#fff"}}>Enviar por WhatsApp →</a>
                 )}
               </div>
             )}
@@ -7570,6 +8205,15 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           </div>
         );
       })}
+
+      {/* Adoptar una ruta armada afuera */}
+      <ImportarRuta props={props} vendors={vendors} schedules={schedules} onSvSchedules={onSvSchedules} hoy={hoy} onAviso={function(m){ aviso(m); }}/>
+
+      {/* Propiedades fuera del reparto automático */}
+      <PausasCfg props={props} onSvP={onSvP} hoy={hoy}/>
+
+      {/* Bitácora: qué corrió y a quién se le escribió */}
+      <BitacoraPanel/>
 
       {/* Control de limpiezas profundas */}
       <ProfundasCfg props={props} reps={reps} schedules={schedules} hoy={hoy} vendors={tecs} onSvSchedules={onSvSchedules}/>
@@ -7639,7 +8283,7 @@ function FeedbackCfg({feedback, onSave}) {
 }
 
 /* ─── Programación del técnico — solo la suya. */
-function VendorSchedule({vendor, schedules, ausencias, onSvAusencias}) {
+function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) {
   const [view, setView] = useState("hoy");
   const [pedir, setPedir] = useState(false);
   const [fAus, setFAus] = useState("");
@@ -7651,7 +8295,9 @@ function VendorSchedule({vendor, schedules, ausencias, onSvAusencias}) {
   var finSemana = SCHED.shift(hoy,6);
   var emails = vendorEmailSet(vendor);
   var mias = (schedules||[]).filter(function(s){
-    return s && emails.indexOf(String(s.vendorEmail||"").toLowerCase())>=0;
+    if(!s) return false;
+    if(s.vendorId && String(s.vendorId)===String(vendor.id)) return true;
+    return emails.indexOf(String(s.vendorEmail||"").toLowerCase())>=0;
   }).sort(function(a,b){
     if(a.fecha!==b.fecha) return a.fecha<b.fecha?-1:1;
     return (a.orden||0)-(b.orden||0);
@@ -7689,10 +8335,10 @@ function VendorSchedule({vendor, schedules, ausencias, onSvAusencias}) {
             <div style={{fontSize:11.5,color:C.earth,marginTop:4}}>{(s.habitaciones||1)} habitación{(s.habitaciones||1)===1?"":"es"} · {s.tipo}</div>
             <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{s.hora||SCHED.HORA_INI} a {s.horaFin||SCHED.HORA_FIN}</div>
           </div>
-          {s.codigoAcceso&&(
+          {codigoSemana(codigos, s.propiedad, s.fecha, s.codigoAcceso)&&(
             <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontSize:8.5,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:3}}>Código</div>
-              <div style={{fontSize:18,fontWeight:700,color:C.black,letterSpacing:".12em",background:C.surfaceWarm,padding:"5px 12px",borderRadius:8,fontVariantNumeric:"tabular-nums"}}>{s.codigoAcceso}</div>
+              <div style={{fontSize:8.5,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:3}}>Código de la semana</div>
+              <div style={{fontSize:20,fontWeight:700,color:C.black,letterSpacing:".12em",background:C.surfaceWarm,padding:"6px 13px",borderRadius:8,fontVariantNumeric:"tabular-nums"}}>{codigoSemana(codigos, s.propiedad, s.fecha, s.codigoAcceso)}</div>
             </div>
           )}
         </div>

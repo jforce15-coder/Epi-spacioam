@@ -188,6 +188,9 @@
       vistos[k] = 1;
       var p = partes(nombre);
       var cfg = props[norm(nombre)] || {};
+      /* Propiedad en pausa: no entra al reparto automático. Se usa para estancias
+         largas (Mónaco) y para apartamentos fuera de servicio. */
+      if (enPausa(cfg, f)) continue;
       out.push({
         key: k,
         fecha: f,
@@ -202,6 +205,22 @@
     }
     return out;
   }
+  /* ─── Pausa de programación de una propiedad ─────────────────────────────
+     pausa:{desde,hasta} — sin fechas es indefinida; solo `desde` es "a partir de";
+     solo `hasta` es "hasta esa fecha". Mientras esté en pausa la propiedad no se
+     programa: ni limpieza de checkout ni profunda. */
+  function enPausa(prop, f) {
+    if (!prop) return false;
+    var p = prop.pausa;
+    if (!p || !p.activa) return false;
+    var d = String(f || "").slice(0, 10);
+    var desde = String(p.desde || "").slice(0, 10);
+    var hasta = String(p.hasta || "").slice(0, 10);
+    if (desde && d < desde) return false;
+    if (hasta && d > hasta) return false;
+    return true;
+  }
+
   function hayEntrada(reservas, nombre, f) {
     for (var i = 0; i < reservas.length; i++) {
       var r = reservas[i];
@@ -461,7 +480,18 @@
 
     for (var c = 0; c < limpiezas.length; c++) {
       var lim = limpiezas[c];
-      var res = elegir(lim, disponibles, {
+      /* PRIMERA RONDA ANTES QUE LA SEGUNDA — regla de reparto.
+         Nadie recibe una segunda limpieza mientras haya alguien que pueda hacer
+         esta y todavía no tenga ninguna. Se calcula el piso de la ronda entre
+         quienes realmente podrían tomarla (zona, cupo, jornada) y solo ellos
+         compiten. Sin esto, agrupar por edificio hacía que dos o tres técnicos
+         se llevaran el día entero y el resto quedara en cero. */
+      var piso = rondaMin(lim, disponibles, { asignaciones: asignaciones, permitirExceso: false });
+      var res = piso == null ? { tec: null, razon: "" } : elegir(lim, disponibles, {
+        avgSemana: avgSemana, pesoRating: pesoRating,
+        asignaciones: asignaciones, permitirExceso: false, soloRonda: piso
+      });
+      if (!res.tec) res = elegir(lim, disponibles, {
         avgSemana: avgSemana, pesoRating: pesoRating,
         asignaciones: asignaciones, permitirExceso: false
       });
@@ -564,6 +594,31 @@
     return email;
   }
 
+  /* ─── Piso de ronda: la menor cantidad de limpiezas que ya lleva alguien que
+     PUEDE tomar esta. Devuelve null si nadie puede. Repite los filtros duros de
+     elegir() — zona, cupo, jornada y las reglas de profunda. */
+  function rondaMin(lim, candidatos, ctx) {
+    var min = null, esProf = esProfunda(lim.tipo);
+    for (var i = 0; i < candidatos.length; i++) {
+      var t = candidatos[i];
+      var tope = ctx.permitirExceso ? Math.min(MAX_DIA_TOPE, Math.max(t.maxDia, MAX_DIA_DEF + 2)) : t.maxDia;
+      if (t.usados >= tope) continue;
+      if (esProf && !t.puedeProfunda) continue;
+      if (lim.parDe && yaTieneKey(ctx.asignaciones, t.email, lim.parDe)) continue;
+      if (esProf && t.usados > 0) continue;
+      if (!esProf && tieneProfunda(ctx.asignaciones, t.email)) continue;
+      var z = zonaKey(lim.zona);
+      if (!z || t.zonas.indexOf(z) < 0) continue;
+      var primera = t.paradas.length === 0;
+      var viaje = travelMin(primera ? t.base : t.paradas[t.paradas.length - 1], lim);
+      var total = t.minutos + (primera ? 0 : viaje) + minutosLimpieza(lim.habitaciones, lim.tipo);
+      if (total > JORNADA_MIN + (ctx.permitirExceso ? TOLERANCIA_MIN : 0)) continue;
+      if (min === null || t.usados < min) min = t.usados;
+      if (min === 0) return 0;
+    }
+    return min;
+  }
+
   /* ─── Elegir técnico para una limpieza ──────────────────────────────────── */
   function elegir(lim, candidatos, ctx) {
     var mejor = null, mejorScore = -1e9, razon = "Sin técnico disponible";
@@ -573,6 +628,8 @@
       var t = candidatos[i];
       var tope = ctx.permitirExceso ? Math.min(MAX_DIA_TOPE, Math.max(t.maxDia, MAX_DIA_DEF + 2)) : t.maxDia;
       if (t.usados >= tope) { razon = "Todos con su cupo lleno"; continue; }
+      /* Ronda: mientras alguien elegible siga en cero, los que ya tienen esperan. */
+      if (ctx.soloRonda != null && t.usados > ctx.soloRonda) continue;
       if (esProf && !t.puedeProfunda) continue;
       /* La profunda va a un técnico distinto del de la tradicional del mismo día. */
       if (lim.parDe && yaTieneKey(ctx.asignaciones, t.email, lim.parDe)) continue;
@@ -631,6 +688,7 @@
       var vecesProp = t.rot.porProp[norm(lim.propiedad)] || 0;
       if (vecesProp >= 2) { s -= Math.min(20, (vecesProp - 1) * 7); notas.push("ya lo limpió " + vecesProp + " veces este mes"); }
 
+      if (ctx.soloRonda != null && t.usados === ctx.soloRonda) notas.push(t.usados === 0 ? "primera limpieza del día" : "ronda " + (t.usados + 1));
       s -= t.usados * 7;
       if (t.usados >= MAX_DIA_DEF) { s -= 40; notas.push("sobre el tope de " + MAX_DIA_DEF); }
       s += hash(t.email + lim.key) * 0.9;
@@ -819,6 +877,8 @@
     for (var p = 0; p < props.length; p++) {
       var nombre = props[p].name || props[p].nombre || "";
       if (!nombre) continue;
+      /* Una propiedad en pausa no debe salir como profunda vencida: no se programa. */
+      if (enPausa(props[p], hoy)) continue;
       var key = norm(nombre);
       var u = ultima[key] || "";
       out.push({
@@ -862,7 +922,7 @@
     MAX_DIA_DEF: MAX_DIA_DEF, MAX_DIA_TOPE: MAX_DIA_TOPE,
     PROFUNDA_CADA_DIAS: PROFUNDA_CADA_DIAS, INICIO: INICIO, ZONA_COORD: ZONA_COORD,
     zonaKey: zonaKey, zonaLabel: zonaLabel, zonasEnUso: zonasEnUso, travelMin: travelMin, minutosLimpieza: minutosLimpieza,
-    esProfunda: esProfunda, partes: partes, esLimpieza: esLimpieza,
+    esProfunda: esProfunda, partes: partes, esLimpieza: esLimpieza, enPausa: enPausa,
     hoyGT: hoyGT, ahoraGT: ahoraGT, shift: shift, lunesDe: lunesDe, dias: dias,
     limpiezasRequeridas: limpiezasRequeridas, agregarProfundas: agregarProfundas,
     planearDia: planearDia, programar: programar,
