@@ -490,22 +490,117 @@
 
     var asignaciones = [], sinAsignar = [], postergadas = [];
 
-    for (var c = 0; c < limpiezas.length; c++) {
-      var lim = limpiezas[c];
-      /* PRIMERA RONDA ANTES QUE LA SEGUNDA — regla de reparto.
-         Nadie recibe una segunda limpieza mientras haya alguien que pueda hacer
-         esta y todavía no tenga ninguna. Se calcula el piso de la ronda entre
-         quienes realmente podrían tomarla (zona, cupo, jornada) y solo ellos
-         compiten. Sin esto, agrupar por edificio hacía que dos o tres técnicos
-         se llevaran el día entero y el resto quedara en cero. */
-      var piso = rondaMin(lim, disponibles, { asignaciones: asignaciones, permitirExceso: false });
+    /* ── Filtros duros: puede este técnico tomar esta limpieza, sí o no. ─────── */
+    function factible(lim, t, exceso) {
+      var esP = esProfunda(lim.tipo);
+      var tope = exceso ? Math.min(MAX_DIA_TOPE, Math.max(t.maxDia, MAX_DIA_DEF + 2)) : t.maxDia;
+      if (t.usados >= tope) return false;
+      if (esP && !t.puedeProfunda) return false;
+      if (esP && t.usados > 0) return false;                       /* la profunda ocupa el turno */
+      if (!esP && tieneProfunda(asignaciones, t.email)) return false;
+      if (lim.parDe && yaTieneKey(asignaciones, t.email, lim.parDe)) return false;
+      var z = zonaKey(lim.zona);
+      if (!z || t.zonas.indexOf(z) < 0) return false;              /* zona: regla dura */
+      var primera = t.paradas.length === 0;
+      var prev = primera ? t.base : t.paradas[t.paradas.length - 1];
+      var total = t.minutos + (primera ? 0 : travelMin(prev, lim)) + minutosLimpieza(lim.habitaciones, lim.tipo);
+      return total <= JORNADA_MIN + (exceso ? TOLERANCIA_MIN : 0);
+    }
+
+    /* Piso de la ronda: la menor carga entre quienes PUEDEN tomar esta limpieza.
+       Mantiene el reparto parejo también en la tercera y la cuarta vuelta. */
+    function pisoRonda(lim) {
+      var min = null;
+      for (var i = 0; i < disponibles.length; i++) {
+        if (!factible(lim, disponibles[i], false)) continue;
+        if (min === null || disponibles[i].usados < min) min = disponibles[i].usados;
+        if (min === 0) return 0;
+      }
+      return min;
+    }
+
+    function colocar(lim, t, motivo) {
+      var prevParada = t.paradas.length ? t.paradas[t.paradas.length - 1] : t.base;
+      var viaje = travelMin(prevParada, lim);
+      var mins = minutosLimpieza(lim.habitaciones, lim.tipo);
+      var primeraParada = t.paradas.length === 0;
+      t.paradas.push({ zona: lim.zona, edificio: lim.edificio, propiedad: lim.propiedad });
+      t.usados++;
+      t.minutos += mins + (primeraParada ? 0 : viaje);
+      asignaciones.push({
+        key: lim.key, fecha: f, propiedad: lim.propiedad,
+        zona: lim.zona, edificio: lim.edificio, unidad: lim.unidad,
+        habitaciones: lim.habitaciones, tipo: lim.tipo,
+        entradaHoy: !!lim.entradaHoy,
+        codigoAcceso: lim.codigoAcceso || "",
+        vendorEmail: t.email, vendorId: t.v.id,
+        hora: HORA_INI, horaFin: HORA_FIN,
+        orden: t.usados, minutos: mins, viaje: viaje,
+        excedeJornada: t.minutos > JORNADA_MIN,
+        sobreTope: t.usados > MAX_DIA_DEF,
+        motivo: motivo,
+        parDe: lim.parDe || "", reservaId: lim.reservaId || ""
+      });
+    }
+
+    var pendientes = [];
+    for (var pc = 0; pc < limpiezas.length; pc++) pendientes.push(limpiezas[pc]);
+
+    /* ══ PRIMERA RONDA — regla dura, antes que cualquier criterio de calidad ══
+       Cada técnico disponible recibe UNA limpieza si existe alguna que pueda
+       hacer. Hasta que todos tengan la suya no se reparte una segunda. Que un
+       técnico quede en cero significa que no había ni una limpieza en sus zonas
+       — nunca que el reparto se lo saltó.
+       Se atiende primero a quien tiene MENOS opciones: si a una persona solo le
+       sirve una limpieza y a otra le sirven ocho, dársela antes a la de ocho
+       dejaría a la primera sin trabajo. */
+    var ronda1 = [];
+    for (var d1 = 0; d1 < disponibles.length; d1++) ronda1.push(disponibles[d1]);
+    for (var r1 = 0; r1 < ronda1.length; r1++) {
+      var op = 0;
+      for (var r2 = 0; r2 < pendientes.length; r2++) if (factible(pendientes[r2], ronda1[r1], false)) op++;
+      ronda1[r1].__opciones = op;
+    }
+    ronda1.sort(function (a, b) {
+      if (a.__opciones !== b.__opciones) return a.__opciones - b.__opciones;
+      if (a.semana !== b.semana) return a.semana - b.semana;
+      return b.rating - a.rating;
+    });
+    for (var ri = 0; ri < ronda1.length; ri++) {
+      var tr = ronda1[ri];
+      if (tr.usados > 0) continue;                 /* ya trae trabajo fijado ese día */
+      var elegida = null, mejorS = -1e9, notasR = [];
+      for (var rj = 0; rj < pendientes.length; rj++) {
+        var cnd = pendientes[rj];
+        if (!factible(cnd, tr, false)) continue;
+        var zc = zonaKey(cnd.zona), nn = [], sc = 0;
+        if (tr.pref.indexOf(zc) >= 0) { sc += 14; nn.push("zona de preferencia"); }
+        if (cnd.entradaHoy) sc += 12;
+        sc -= travelMin(tr.base, cnd) * 0.5;
+        if (tr.rot.total >= 5 && zc) {
+          var shZ = (tr.rot.porZona[zc] || 0) / tr.rot.total;
+          if (shZ > 0.45) { sc -= Math.min(26, (shZ - 0.45) * 70); nn.push("rotación de zona"); }
+        }
+        var vp = tr.rot.porProp[norm(cnd.propiedad)] || 0;
+        if (vp >= 2) { sc -= Math.min(20, (vp - 1) * 7); nn.push("ya lo limpió " + vp + " veces este mes"); }
+        sc += hash(tr.email + cnd.key) * 0.9;
+        if (sc > mejorS) { mejorS = sc; elegida = cnd; notasR = nn; }
+      }
+      if (!elegida) continue;
+      notasR.unshift("primera limpieza del día");
+      colocar(elegida, tr, notasR.join(" · "));
+      pendientes.splice(pendientes.indexOf(elegida), 1);
+    }
+
+    /* ══ RONDAS SIGUIENTES — ya con los criterios de siempre ══════════════════
+       Cercanía, rating, compensación semanal y rotación. El piso de ronda evita
+       que alguien salte a la tercera mientras otro sigue en la primera. */
+    for (var c = 0; c < pendientes.length; c++) {
+      var lim = pendientes[c];
+      var piso = pisoRonda(lim);
       var res = piso == null ? { tec: null, razon: "" } : elegir(lim, disponibles, {
         avgSemana: avgSemana, pesoRating: pesoRating,
         asignaciones: asignaciones, permitirExceso: false, soloRonda: piso
-      });
-      if (!res.tec) res = elegir(lim, disponibles, {
-        avgSemana: avgSemana, pesoRating: pesoRating,
-        asignaciones: asignaciones, permitirExceso: false
       });
       /* Segunda pasada: si nadie cabe con el tope normal, se abre hasta 4 y se
          avisa al administrador. Nunca para una profunda: esa se posterga. */
@@ -528,29 +623,7 @@
         else sinAsignar.push({ lim: lim, razon: razonBase });
         continue;
       }
-
-      var t = res.tec;
-      var prevParada = t.paradas.length ? t.paradas[t.paradas.length - 1] : t.base;
-      var viaje = travelMin(prevParada, lim);
-      var mins = minutosLimpieza(lim.habitaciones, lim.tipo);
-      var primeraParada = t.paradas.length === 0;
-      t.paradas.push({ zona: lim.zona, edificio: lim.edificio, propiedad: lim.propiedad });
-      t.usados++;
-      t.minutos += mins + (primeraParada ? 0 : viaje);
-      asignaciones.push({
-        key: lim.key, fecha: f, propiedad: lim.propiedad,
-        zona: lim.zona, edificio: lim.edificio, unidad: lim.unidad,
-        habitaciones: lim.habitaciones, tipo: lim.tipo,
-        entradaHoy: !!lim.entradaHoy,
-        codigoAcceso: lim.codigoAcceso || "",
-        vendorEmail: t.email, vendorId: t.v.id,
-        hora: HORA_INI, horaFin: HORA_FIN,
-        orden: t.usados, minutos: mins, viaje: viaje,
-        excedeJornada: t.minutos > JORNADA_MIN,
-        sobreTope: t.usados > MAX_DIA_DEF,
-        motivo: res.motivo,
-        parDe: lim.parDe || "", reservaId: lim.reservaId || ""
-      });
+      colocar(lim, res.tec, res.motivo);
     }
 
     /* Alertas del día. */
@@ -604,31 +677,6 @@
       }
     }
     return email;
-  }
-
-  /* ─── Piso de ronda: la menor cantidad de limpiezas que ya lleva alguien que
-     PUEDE tomar esta. Devuelve null si nadie puede. Repite los filtros duros de
-     elegir() — zona, cupo, jornada y las reglas de profunda. */
-  function rondaMin(lim, candidatos, ctx) {
-    var min = null, esProf = esProfunda(lim.tipo);
-    for (var i = 0; i < candidatos.length; i++) {
-      var t = candidatos[i];
-      var tope = ctx.permitirExceso ? Math.min(MAX_DIA_TOPE, Math.max(t.maxDia, MAX_DIA_DEF + 2)) : t.maxDia;
-      if (t.usados >= tope) continue;
-      if (esProf && !t.puedeProfunda) continue;
-      if (lim.parDe && yaTieneKey(ctx.asignaciones, t.email, lim.parDe)) continue;
-      if (esProf && t.usados > 0) continue;
-      if (!esProf && tieneProfunda(ctx.asignaciones, t.email)) continue;
-      var z = zonaKey(lim.zona);
-      if (!z || t.zonas.indexOf(z) < 0) continue;
-      var primera = t.paradas.length === 0;
-      var viaje = travelMin(primera ? t.base : t.paradas[t.paradas.length - 1], lim);
-      var total = t.minutos + (primera ? 0 : viaje) + minutosLimpieza(lim.habitaciones, lim.tipo);
-      if (total > JORNADA_MIN + (ctx.permitirExceso ? TOLERANCIA_MIN : 0)) continue;
-      if (min === null || t.usados < min) min = t.usados;
-      if (min === 0) return 0;
-    }
-    return min;
   }
 
   /* ─── Elegir técnico para una limpieza ──────────────────────────────────── */

@@ -7751,24 +7751,30 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   }
 
   /* ─── Corrida del motor (la misma que corre a las 6pm) */
-  function generar(){
+  function generar(desdeCero){
+    desdeCero = (desdeCero === true);   /* onClick manda el evento: solo `true` cuenta */
     setBusy("gen");
+    /* Desde cero: se descarta todo lo futuro que aún no salió por correo, para que
+       el motor reparta sin arrastrar un reparto viejo. Lo enviado nunca se toca. */
+    var previas = desdeCero
+      ? (schedules||[]).filter(function(s){ var sf=String(s.fecha).slice(0,10); return sf<=hoy || s.notificadoEn; })
+      : (schedules||[]);
     var r = SCHED.programar({
       hoy: hoy, dias: 3, reservas: reservas, props: props, vendors: vendors,
-      ratings: ratings, ausencias: ausencias, existentes: schedules,
+      ratings: ratings, ausencias: ausencias, existentes: previas,
       historial: reps, pesoRating: 0.7
     });
     /* Se conserva lo manual, lo de días pasados, lo de hoy y TODO día que ya salió
        por correo: la ruta que el técnico recibió es la ruta del día. Volver a
        correr el motor no puede cambiarle el trabajo a alguien que ya lo tiene. */
-    var conservar=(schedules||[]).filter(function(s){
+    var conservar=previas.filter(function(s){
       var sf=String(s.fecha).slice(0,10);
-      return sf<=hoy || s.origen==="manual" || (s.notificadoEn && !reabrir[sf]);
+      return sf<=hoy || (!desdeCero && s.origen==="manual") || (s.notificadoEn && !reabrir[sf]);
     });
     /* Se congela FILA por fila: la ruta de quien ya recibió su correo no cambia,
        pero el resto del día sí se puede replanificar. */
     var cerrados={};
-    (schedules||[]).forEach(function(s){
+    previas.forEach(function(s){
       var sf=String(s.fecha).slice(0,10);
       if(s.notificadoEn && !reabrir[sf] && sf>hoy) cerrados[sf]=(cerrados[sf]||0)+1;
     });
@@ -7778,13 +7784,21 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
     setBusy("");
     var prof=nuevas.filter(function(x){ return SCHED.esProfunda(x.tipo); }).length;
     var cerradosTxt=Object.keys(cerrados);
-    var resumen=nuevas.length+" limpiezas programadas para los próximos 3 días"
+    var resumen=(desdeCero?"Reparto rehecho desde cero: ":"")+nuevas.length+" limpiezas programadas para los próximos 3 días"
       +(prof?" · "+prof+" profunda"+(prof===1?"":"s"):"")
       +(r.sinAsignar.length?" · "+r.sinAsignar.length+" sin asignar":"")
       +((r.postergadas||[]).length?" · "+r.postergadas.length+" profunda"+(r.postergadas.length===1?"":"s")+" postergada"+(r.postergadas.length===1?"":"s")+" por falta de espacio":"")
       +(cerradosTxt.length?" · se respetaron las rutas ya enviadas del "+cerradosTxt.map(fmtDate).join(" y "):"")+".";
     aviso(resumen);
     bitacora("programacion","Programación manual desde el app — "+resumen);
+  }
+
+  /* Borra el borrador de los próximos días y lo vuelve a repartir de cero. Útil
+     cuando un reparto viejo quedó mal balanceado: arrastrarlo condiciona al motor. */
+  function rehacerFuturo(){
+    var futuras=(schedules||[]).filter(function(s){ var sf=String(s.fecha).slice(0,10); return sf>hoy && !s.notificadoEn; }).length;
+    if(!window.confirm("Se borran "+futuras+" limpieza"+(futuras===1?"":"s")+" de los próximos días que todavía NO se han enviado, y se reparten de nuevo desde cero.\n\nLo que ya salió por correo no se toca. ¿Continuar?")) return;
+    generar(true);
   }
 
   /* Un día ya notificado queda cerrado. Si de verdad hay que rehacerlo, se
@@ -8119,6 +8133,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           <button onClick={generar} disabled={!!busy||!resUtiles} style={{flex:1,minWidth:170,padding:"11px 16px",minHeight:44,borderRadius:100,border:"none",background:(busy||!resUtiles)?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:(busy||!resUtiles)?"default":"pointer",letterSpacing:".03em"}}>
             {busy==="gen"?"Programando…":"Programar 3 días"}
           </button>
+          <button onClick={rehacerFuturo} disabled={!!busy||!resUtiles} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Borrar y rehacer</button>
           <button onClick={revisarHoy} disabled={!!busy} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:busy?"default":"pointer"}}>
             Revisar hoy
           </button>
@@ -8289,6 +8304,23 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
             </div>
           )}
         </div>
+        {/* Borrador: hasta que salga el correo, el administrador manda. */}
+        {fecha>hoy&&!notificado&&delDia.length>0&&(
+          <div style={{marginTop:11,background:C.surfaceWarm,border:"1px solid "+C.gray,borderRadius:9,padding:"11px 13px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"baseline"}}>
+              <div style={{fontSize:11.5,color:C.black,fontWeight:700,lineHeight:1.6}}>Borrador · el equipo todavía no lo ve</div>
+              <div style={{fontSize:11,color:C.earth,fontVariantNumeric:"tabular-nums"}}>
+                {resumenTec.con} con ruta · {resumenTec.sin} sin trabajo
+              </div>
+            </div>
+            <div style={{fontSize:11,color:C.earth,marginTop:5,lineHeight:1.6,textWrap:"pretty"}}>
+              {fecha===manana
+                ? "Sale hoy a las 6:00 pm. Muévelo y ajústalo cuanto quieras hasta esa hora: nadie recibe nada mientras tanto."
+                : "Sale por correo la tarde anterior a las 6:00 pm. Puedes ajustarlo libremente hasta entonces."}
+              {resumenTec.sin>0?" Hay "+resumenTec.sin+" técnico"+(resumenTec.sin===1?"":"s")+" sin trabajo: revisa si es por falta de checkouts en sus zonas.":""}
+            </div>
+          </div>
+        )}
         {tocados[fecha]&&(
           <div style={{marginTop:11,background:"#FBF6EC",border:"1px solid #E8DCC4",borderRadius:9,padding:"11px 13px"}}>
             <div style={{fontSize:11.5,color:"#7a5c1e",fontWeight:700,lineHeight:1.6,textWrap:"pretty"}}>Cambiaste una ruta que ya salió por correo — el equipo todavía tiene la versión anterior.</div>
