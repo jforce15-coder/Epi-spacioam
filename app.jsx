@@ -8314,7 +8314,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
               </div>
             </div>
             <div style={{fontSize:11,color:C.earth,marginTop:5,lineHeight:1.6,textWrap:"pretty"}}>
-              {fecha===manana
+              {fecha===SCHED.shift(hoy,1)
                 ? "Sale hoy a las 6:00 pm. Muévelo y ajústalo cuanto quieras hasta esa hora: nadie recibe nada mientras tanto."
                 : "Sale por correo la tarde anterior a las 6:00 pm. Puedes ajustarlo libremente hasta entonces."}
               {resumenTec.sin>0?" Hay "+resumenTec.sin+" técnico"+(resumenTec.sin===1?"":"s")+" sin trabajo: revisa si es por falta de checkouts en sus zonas.":""}
