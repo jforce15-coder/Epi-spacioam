@@ -1262,6 +1262,10 @@ function App() {
   const [retryQ,   setRetryQ]   = useState([]);
   const [adelantos, setAdelantos] = useState([]);
   const [pagos, setPagos] = useState([]);
+  /* Hasta que el historial no haya cargado de verdad, la generación automática de
+     planillas queda quieta: si corre con la lista vacía, guarda solo lo que acaba
+     de crear y se lleva por delante todo lo anterior. */
+  const [pagosReady, setPagosReady] = useState(false);
   /* Planilla administrativa: bonos y ajustes asignados por el admin principal. */
   const [nomAjustes, setNomAjustes] = useState([]);
   async function svNomAjustes(v){ setNomAjustes(v); saveConfigItem("nomAjustes", v); }
@@ -1289,7 +1293,7 @@ function App() {
      y se migran/ligan a su técnico en el .then de carga. */
   async function svAdelantos(v){ setAdelantos(v); adv_persist(v); }
   /* Comprobantes de pago — historial consultable por admin y técnico. */
-  async function svPagos(v){ setPagos(v); pg_persist(v); }
+  async function svPagos(v, opts){ setPagos(v); pg_persist(v, opts); }
   /* Preferencias de notificaciones — qué perfiles reciben cada tipo de correo. */
   async function svNotifPrefs(v){ setNotifPrefs(v); NOTIF_PREFS=v; saveConfigItem("notifprefs", v); }
 
@@ -1363,7 +1367,7 @@ function App() {
           }
         }catch(_){}
       }
-      setPagos(pgFinal);
+      setPagos(pgFinal); setPagosReady(true);
       setNomAjustes(Array.isArray(d.nomAjustes)?d.nomAjustes:[]);
       setRegSol(Array.isArray(d.regSol)?d.regSol:[]);
       setReservas(Array.isArray(d.reservas)?d.reservas:[]);
@@ -1561,7 +1565,7 @@ function App() {
       <style>{".vercomo-wrap header{top:40px !important}"}</style>
       <div className="vercomo-wrap" style={{paddingTop:40}}>
         {vcV.isAdmin
-          ? <AdminApp reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={vcV} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={function(){setVerComo(null);}} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>
+          ? <AdminApp pagosReady={pagosReady} reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={vcV} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={function(){setVerComo(null);}} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>
           : <VendorApp vendor={vcV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,vcV);})} props={props} company={company} schedules={vcSched} codigos={codigos} ausencias={ausencias} onSvAusencias={svAusencias} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={function(){setVerComo(null);}} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>}
       </div>
     </>);
@@ -1581,7 +1585,7 @@ function App() {
     try{ if(localStorage.getItem("epi_onboard_done_"+freshV.id)) needsOnb=false; }catch(_){}
     inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={misSchedules} codigos={codigos} ausencias={ausencias} onSvAusencias={svAusencias} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
   } else {
-    inner = <AdminApp reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
+    inner = <AdminApp pagosReady={pagosReady} reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
   }
   return <ErrorBoundary>{inner}</ErrorBoundary>;
 }
@@ -1849,7 +1853,7 @@ function NotifCfg({prefs, vendors, onSave, readOnly}){
 }
 
 /* ═══ ADMIN */
-function AdminApp({reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegSol,nomAjustes,onSvNomAjustes,reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,vendors,props,adminPin,company,extCats,schedules,codigos,onSvCodigos,schedErr,onVerComo,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
+function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegSol,nomAjustes,onSvNomAjustes,reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,vendors,props,adminPin,company,extCats,schedules,codigos,onSvCodigos,schedErr,onVerComo,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
   const [tab,    setTab]    = useState("dash");
   const [detail, setDetail] = useState(null);
   const [cDel,   setCDel]   = useState(null);
@@ -1862,26 +1866,9 @@ function AdminApp({reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegS
   useEffect(function(){
     if(sheetsOk===null) return;
     if(!vendors||!vendors.length) return;
-    /* Migración: comprobantes creados antes de que los adelantos vivieran en el módulo
-       de Adelantos (descuento sin `advDebitos`) se descartan y se regeneran. */
-    /* Un comprobante cuyo débito no coincide con la cuota vigente del adelanto quedó
-       desfasado (cambió la cuota después de emitirlo): se descarta y se vuelve a generar. */
-    function debitoDesfasado(p){
-      var ds=(p.nomina&&p.nomina.advDebitos)||[];
-      return ds.some(function(d){
-        var a=(adelantos||[]).find(function(x){ return x.id===d.advId; });
-        if(!a) return false;
-        var q=advCuota(a);
-        return q>0 && Math.abs(nomN(d.monto)-q)>0.005 && nomN(d.monto)<q;
-      });
-    }
-    var limpios=(pagos||[]).filter(function(p){
-      if(!(p&&p.nomina)) return true;
-      if(!p.nomina.advDebitos) return false;
-      if(p.anticipado&&p.fechaPago==="2026-07-29") return false;
-      return !debitoDesfasado(p);
-    });
-    if(limpios.length!==(pagos||[]).length){ if(onSvPagos) onSvPagos(limpios); return; }
+    /* Sin el historial cargado no se genera nada: generar sobre una lista vacía
+       guardaba solo el comprobante nuevo y borraba todos los anteriores. */
+    if(!pagosReady) return;
     var res=nomGenerarPendientes({vendors:vendors,pagos:pagos,ajustes:nomAjustes,adelantos:adelantos});
     if(!res.nuevos.length) return;
     if(onSvPagos) onSvPagos(res.nuevos.concat(pagos||[]));
@@ -1889,7 +1876,7 @@ function AdminApp({reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegS
     if(Object.keys(usados).length&&onSvNomAjustes){
       onSvNomAjustes((nomAjustes||[]).map(function(a){ return usados[a.id]?Object.assign({},a,{aplicado:true,aplicadoEn:usados[a.id]}):a; }));
     }
-  },[vendors,pagos,nomAjustes,adelantos,sheetsOk]);
+  },[vendors,pagos,nomAjustes,adelantos,sheetsOk,pagosReady]);
   /* Solo el admin principal (o el acceso por PIN maestro, sin identidad de usuario) edita
      las preferencias de notificaciones; los demás admin ni siquiera ven la pestaña. */
   var canNotif = !adminVendor || isAdminPrincipalVendor(adminVendor, vendors);
@@ -2034,6 +2021,10 @@ function DashView({props,nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews
 function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
   const [view,     setView]     = useState("table");
   const [fVend,    setFVend]    = useState("Todos");
+  /* Interno y externo se pagan y se miden distinto: verlos por separado — y
+     dentro de cada uno por su categoría — es la lectura que más se pide. */
+  const [fVinc,    setFVinc]    = useState("Todos");
+  const [fCatV,    setFCatV]    = useState("Todas");
   const [fStatus,  setFStatus]  = useState("Todos");
   const [fCat,     setFCat]     = useState("Todos");
   const [fPagador, setFPagador] = useState("Todos");
@@ -2048,7 +2039,7 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
     var r = presetRange(val); setFDesde(r.from); setFHasta(r.to);
   }
 
-  function reset() { setFVend("Todos"); setFStatus("Todos"); setFCat("Todos"); setFPagador("Todos"); setFZona("Todas"); setFEdif("Todos"); setFUnidad("Todas"); setFDesde(""); setFHasta(""); setShowAll(false); }
+  function reset() { setFVend("Todos"); setFVinc("Todos"); setFCatV("Todas"); setFStatus("Todos"); setFCat("Todos"); setFPagador("Todos"); setFZona("Todas"); setFEdif("Todos"); setFUnidad("Todas"); setFDesde(""); setFHasta(""); setShowAll(false); }
 
   /* Zona › edificio › apartamento salen del propio nombre de la propiedad
      ("Z10 - Fiamene - 404"). El universo es el PORTAFOLIO — así aparecen también
@@ -2100,8 +2091,26 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
 
   var techOpts = techFilterGroups(reps, vendors, null, true);
   var selGroup = (fVend!=="Todos") ? techOpts.find(function(o){return o.value===fVend;}) : null;
+
+  /* Quién firmó el reporte, reconociendo también sus correos anteriores. */
+  function vendorDeRep(r){
+    var em=String(r.reportadoPor||"").toLowerCase().trim();
+    if(!em) return null;
+    return (vendors||[]).find(function(v){
+      return vendorEmailSet(v).map(function(x){return String(x||"").toLowerCase().trim();}).indexOf(em)>=0;
+    })||null;
+  }
+  /* El desglose sale de la gente que existe, no de un catálogo fijo. */
+  var catsVinc=uniq((vendors||[]).filter(function(v){ return fVinc==="Todos"||(v.tipo||"externo")===fVinc; })
+    .map(function(v){ return v.categoria||""; }).filter(Boolean)).sort();
   var fReps = reps.filter(function(r) {
     if (!matchProp(r)) return false;
+    if (fVinc!=="Todos"||fCatV!=="Todas") {
+      var vr=vendorDeRep(r);
+      if(!vr) return false;
+      if(fVinc!=="Todos"&&(vr.tipo||"externo")!==fVinc) return false;
+      if(fCatV!=="Todas"&&(vr.categoria||"")!==fCatV) return false;
+    }
     if (fVend!=="Todos") {
       if (selGroup) { if(!repInGroup(r, selGroup)) return false; }
       else return false;
@@ -2137,9 +2146,9 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
   (vendors||[]).forEach(function(v){if(v.email)vMap[v.email]=vendorDisplay(v);});
   /* Opciones del filtro Técnico: UNA entrada por técnico, mostrada solo con su nombre y
      apellido, unificando todos sus correos (actuales y anteriores). */
-  var actF   = [fVend!=="Todos",fStatus!=="Todos",fCat!=="Todos",fPagador!=="Todos",!!fDesde,!!fHasta].filter(Boolean).length;
+  var actF   = [fVend!=="Todos",fVinc!=="Todos",fCatV!=="Todas",fStatus!=="Todos",fCat!=="Todos",fPagador!=="Todos",!!fDesde,!!fHasta].filter(Boolean).length;
 
-  var IS = {border:"1.5px solid "+C.gray,borderRadius:9,padding:"7px 10px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",color:C.black,cursor:"pointer",transition:"all .2s"};
+  var IS = {width:"100%",maxWidth:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"7px 10px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",color:C.black,cursor:"pointer",transition:"all .2s"};
   var IS_A = Object.assign({},IS,{border:"1.5px solid "+C.black,fontWeight:600});
   var LBL = {fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".13em",textTransform:"uppercase",display:"block",marginBottom:5};
 
@@ -2174,7 +2183,24 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
             </select>
           </div>
           <div>
-            <span style={LBL}>Categoría</span>
+            <span style={LBL}>Vínculo</span>
+            <select value={fVinc} onChange={function(e){setFVinc(e.target.value);setFCatV("Todas");setShowAll(false);}} style={fVinc!=="Todos"?IS_A:IS}>
+              <option value="Todos">Todos</option>
+              <option value="interno">Internos</option>
+              <option value="externo">Externos</option>
+            </select>
+          </div>
+          {catsVinc.length>1&&(
+            <div>
+              <span style={LBL}>{fVinc==="externo"?"Servicio externo":fVinc==="interno"?"Equipo interno":"Categoría del proveedor"}</span>
+              <select value={fCatV} onChange={function(e){setFCatV(e.target.value);setShowAll(false);}} style={fCatV!=="Todas"?IS_A:IS}>
+                <option value="Todas">Todas</option>
+                {catsVinc.map(function(c){return <option key={c} value={c} title={c}>{c.length>30?c.slice(0,29).trim()+"…":c}</option>;})}
+              </select>
+            </div>
+          )}
+          <div>
+            <span style={LBL}>Tipo de trabajo</span>
             <select value={fCat} onChange={function(e){setFCat(e.target.value);setShowAll(false);}} style={fCat!=="Todos"?IS_A:IS}>
               {["Todos"].concat(CATS).concat(["Supervisión"]).map(function(c){return <option key={c}>{c}</option>;})}
             </select>
@@ -2663,11 +2689,14 @@ function RepForm({vendors,props,company,onSubmit,defaultVendor,onSaveFeedback,my
   var vend = vendors&&vendors.find(function(v){return v.email===defaultVendor;});
   var isEPILimpieza = vend&&vend.tipo==="interno"&&vend.categoria==="EPI Limpieza";
   var isEPIMant = vend&&vend.tipo==="interno"&&vend.categoria==="EPI Mantenimiento";
+  var isExterno = !!vend && vend.tipo==="externo";
   var allowedCats = isEPILimpieza
     ? ["Limpieza tradicional","Limpieza profunda","Ajuste","Reporte de Daños"]
     : isEPIMant
     ? ["Mantenimiento","Nuevo Producto","Ajuste","Reporte de Daños"]
-    : CATS; /* Admin + Administrativo + External: all categories */
+    : isExterno
+    ? ["Mantenimiento","Nuevo Producto","Ajuste"]
+    : CATS; /* Admin y administrativo: todas */
   /* El formulario de Supervisión solo existe para usuarios con la función activada */
   if (vend&&vend.isSupervisor&&allowedCats.indexOf("Supervisión")<0) allowedCats = allowedCats.concat(["Supervisión"]);
   /* Start with null (selector screen) so user always picks category first */
@@ -5818,6 +5847,8 @@ function VendorJobsView({reps, tot, cob, pnd, adelantos, pendingCorrections, onN
                   ? ["Todos","Limpieza tradicional","Limpieza profunda","Ajuste","Reporte de Daños"]
                   : isEPIM
                   ? ["Todos","Mantenimiento","Nuevo Producto","Ajuste","Reporte de Daños"]
+                  : (vendor&&vendor.tipo==="externo")
+                  ? ["Todos","Mantenimiento","Nuevo Producto","Ajuste"]
                   : ["Todos"].concat(CATS);
                 return cats.map(function(c){return <option key={c}>{c}</option>;});
               })()}
@@ -10673,7 +10704,18 @@ function printContract(adv){
    (cuota semanal) y admite un soporte adjunto (imagen/PDF de la transferencia,
    subido por el administrador después del pago).
    ═════════════════════════════════════════════════════════════════ */
-function pg_load(){ try{var v=localStorage.getItem("sam_pagos");return v?JSON.parse(v):null;}catch(e){return null;} }
+function pg_load(){
+  try{
+    var v=localStorage.getItem("sam_pagos"); if(!v) return null;
+    var arr=JSON.parse(v);
+    if(Array.isArray(arr)) PG_SEEN_MAX=Math.max(PG_SEEN_MAX, arr.length);
+    return arr;
+  }catch(e){ return null; }
+}
+/* Cuántos comprobantes se han visto de verdad, y si la última lectura del Sheet
+   trajo todos los campos que decía traer. */
+var PG_SEEN_MAX=0;
+var PG_COMPLETE=true;
 /* El historial de pagos se guarda como JSON en la config del Sheet. Una sola celda de Google
    Sheets tope ~50,000 caracteres; con el historial creciendo, un solo campo "pagos" se llena
    y los pagos nuevos dejaban de guardarse en silencio (se veían en el dispositivo que los creó
@@ -10702,14 +10744,42 @@ function pg_shard(list){
    que solo tienen el campo "pagos". */
 function pg_merge(cfg){
   if(!cfg) return null;
-  var base=Array.isArray(cfg.pagos)?cfg.pagos:null;
-  var n=parseInt(cfg.pagos_n,10);
-  if(!n||n<=1) return base;
-  var merged=Array.isArray(cfg.pagos)?cfg.pagos.slice():[];
-  for(var i=1;i<n;i++){ var arr=cfg["pagos_"+(i+1)]; if(Array.isArray(arr)) merged=merged.concat(arr); }
-  return merged.length?merged:base;
+  var base=salvageArray(cfg.pagos);
+  var out=Array.isArray(base)?base.slice():[];
+  var n=parseInt(cfg.pagos_n,10)||1;
+  var complete=true;
+  /* Se recorren MÁS campos que los que anuncia el contador: si una corrida vieja
+     dejó el contador en 1 y los comprobantes en pagos_2…, aquí se recuperan. */
+  var tope=Math.max(n,12);
+  for(var i=1;i<tope;i++){
+    var raw=cfg["pagos_"+(i+1)];
+    if(raw===undefined||raw===null||raw===""){ if(i<n) complete=false; continue; }
+    var arr=salvageArray(raw);
+    if(Array.isArray(arr)) out=out.concat(arr);
+    else if(i<n) complete=false;
+  }
+  PG_COMPLETE=complete;
+  var seen={}, ded=[];
+  out.forEach(function(p){
+    if(!p) return;
+    var k=String(p.folio||p.id||("x"+ded.length));
+    if(seen[k]) return; seen[k]=1; ded.push(p);
+  });
+  ded.sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
+  PG_SEEN_MAX=Math.max(PG_SEEN_MAX, ded.length);
+  return ded.length?ded:base;
 }
-function pg_persist(list){
+/* Guardar el historial. opts.permitirBorrar sirve para las bajas de verdad
+   (recalcular un comprobante), lo único que puede acortar la lista. */
+function pg_persist(list, opts){
+  var n=(list||[]).length;
+  var permitido=!!(opts&&opts.permitirBorrar);
+  if(!permitido&&(n<PG_SEEN_MAX-1||!PG_COMPLETE)){
+    /* Se preserva incluso la copia local: es la última red del rescate. */
+    try{ apiCall("logEvento",{tipo:"error",detalle:"Se evitó sobrescribir el historial de pagos: se intentó guardar "+n+" comprobante(s) habiendo "+PG_SEEN_MAX+(PG_COMPLETE?"":" · la lectura del Sheet llegó incompleta"),usuario:"app"}).catch(function(){}); }catch(_){}
+    return;
+  }
+  PG_SEEN_MAX=Math.max(PG_SEEN_MAX,n);
   try{ localStorage.setItem("sam_pagos", JSON.stringify(list)); }catch(e){}
   if(!IS_CLAUDE_SANDBOX){
     try{
@@ -11155,7 +11225,7 @@ function NominaAdmin({vendors, pagos, adelantos, onSvPagos, ajustes, onSvAjustes
   function recalcular(p){
     if(!onSvPagos) return;
     if(!confirm("¿Recalcular el comprobante "+p.folio+"? Se generará de nuevo con el salario y los ajustes vigentes.")) return;
-    onSvPagos((pagos||[]).filter(function(x){ return x.id!==p.id; }));
+    onSvPagos((pagos||[]).filter(function(x){ return x.id!==p.id; }), {permitirBorrar:true});
   }
 
   /* Edita un campo del colaborador desde la planilla misma. */
@@ -11364,6 +11434,46 @@ function NominaAdmin({vendors, pagos, adelantos, onSvPagos, ajustes, onSvAjustes
   );
 }
 
+/* ─── Rescate del historial: relee todos los campos repartidos del Sheet y la copia
+   local de este navegador, y devuelve al historial lo que falte. */
+function RecuperarPagos({pagos, onSvPagos}){
+  const [busy,setBusy] = useState(false);
+  const [msg,setMsg]   = useState("");
+  async function buscar(){
+    setBusy(true); setMsg("");
+    try{
+      var cfg=await apiCall("getConfig")||{};
+      var delSheet=pg_merge(cfg)||[];
+      var local=pg_load()||[];
+      var actual=(pagos||[]).slice();
+      var seen={}; actual.forEach(function(p){ if(p) seen[String(p.folio||p.id)]=1; });
+      var extra=[];
+      delSheet.concat(local).forEach(function(p){
+        if(!p) return;
+        var k=String(p.folio||p.id); if(!k||seen[k]) return;
+        seen[k]=1; extra.push(p);
+      });
+      if(!extra.length){ setMsg("No hay comprobantes fuera del historial: lo que se ve es todo lo que quedó guardado."); setBusy(false); return; }
+      var full=actual.concat(extra).sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
+      onSvPagos(full);
+      setMsg("Se recuperaron "+extra.length+" comprobante"+(extra.length===1?"":"s")+" y quedaron guardados de nuevo.");
+    }catch(e){ setMsg("No se pudo leer el respaldo: "+((e&&e.message)||"sin conexión")); }
+    setBusy(false);
+  }
+  return (
+    <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"14px 18px",marginBottom:12,boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <div style={{minWidth:0,flex:1}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Respaldo del historial</div>
+          <div style={{fontSize:11.5,color:C.earth,marginTop:5,lineHeight:1.6,textWrap:"pretty"}}>Si faltan comprobantes, esto relee todos los respaldos del Sheet y la copia de este navegador, y devuelve al historial lo que encuentre.</div>
+        </div>
+        <button onClick={buscar} disabled={busy} style={{flexShrink:0,padding:"10px 16px",minHeight:42,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:busy?C.taupe:C.black,fontSize:11.5,fontWeight:600,cursor:busy?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>{busy?"Buscando…":"Buscar comprobantes perdidos"}</button>
+      </div>
+      {msg&&<div style={{marginTop:11,fontSize:11.5,color:C.black,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",lineHeight:1.6,textWrap:"pretty"}}>{msg}</div>}
+    </div>
+  );
+}
+
 /* ─── Historial de pagos — lista de comprobantes (admin y técnico) */
 function PagosHistory({pagos, vendors, company, isAdmin, meEmails, meNames, onSvPagos}) {
   const [sel,   setSel]   = useState(null);
@@ -11444,6 +11554,8 @@ function PagosHistory({pagos, vendors, company, isAdmin, meEmails, meNames, onSv
           )}
         </div>
       </div>
+
+      {isAdmin&&onSvPagos&&<RecuperarPagos pagos={pagos} onSvPagos={onSvPagos}/>}
 
       {/* Lo que suma lo que se está viendo — la pregunta real detrás del historial. */}
       {list.length>0&&(
