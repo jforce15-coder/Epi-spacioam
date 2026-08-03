@@ -4645,7 +4645,13 @@ function RegistroCfg({regSol, onSvRegSol, vendors, onSaveVendors, puedeAprobar})
 function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, reps:cfgReps}) {
   const blankNew = {primerNombre:"",segundoNombre:"",primerApellido:"",segundoApellido:"",empresa:"",tipo:"interno",categoria:"EPI Limpieza",email:"",password:"",phone:"",tarifaLimpieza:""};
   const [newV,     setNewV]     = useState(blankNew);
+  /* Doce fichas abiertas a la vez son un muro. Cada persona entra cerrada y se
+     abre la que se va a editar. */
+  const [abiertoV, setAbiertoV] = useState({});
+  const [qV,       setQV]       = useState("");
   const [newExtCat,setNewExtCat]= useState("");
+  var qn=qV.trim().toLowerCase();
+  var vendorsVis=qn?(vendors||[]).filter(function(v){ return (vendorDisplay(v)+" "+(v.email||"")+" "+(v.empresa||"")+" "+(v.categoria||"")).toLowerCase().indexOf(qn)>=0; }):(vendors||[]);
   const [editId,   setEditId]   = useState(null);
   const [editFld,  setEFld]     = useState(null);
   const [editVal,  setEVal]     = useState("");
@@ -4681,8 +4687,20 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, re
   return (
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
 
+      {/* Buscar antes que desplazar: con el equipo completo la lista es larga. */}
+      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+        <input value={qV} onChange={function(e){setQV(e.target.value);}} placeholder="Buscar por nombre, correo o empresa…"
+          style={{flex:1,minWidth:200,border:"1.5px solid "+C.gray,borderRadius:9,padding:"9px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:42}}/>
+        <span style={{fontSize:11,color:C.taupe,fontVariantNumeric:"tabular-nums"}}>{vendorsVis.length} de {(vendors||[]).length}</span>
+        {Object.keys(abiertoV).length>0&&(
+          <button onClick={function(){setAbiertoV({});}} style={{fontSize:11,fontWeight:600,color:C.earth,background:"#fff",border:"1px solid "+C.gray,borderRadius:100,padding:"8px 13px",minHeight:38,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cerrar todo</button>
+        )}
+      </div>
+
       {/* Existing vendors */}
-      {vendors.map(function(v){
+      {vendorsVis.length===0&&<div style={{background:"#fff",borderRadius:10,padding:"22px 16px",border:"1px solid "+C.line,fontSize:12.5,color:C.taupe,textAlign:"center"}}>Nadie coincide con esa búsqueda.</div>}
+      {vendorsVis.map(function(v){
+        var abV=!!abiertoV[v.id];
         function EditRow(field,label,cur,type){
           var isMe=editId===v.id&&editFld===field;
           return (
@@ -4707,19 +4725,32 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, re
         }
         return (
           <div key={v.id} style={{background:"#fff",borderRadius:10,padding:"16px",border:"1px solid "+C.line}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",marginBottom:14}}>
-              <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",marginBottom:abV?14:0}}>
+              <button onClick={function(){ setAbiertoV(function(p){ var u=Object.assign({},p); if(u[v.id]) delete u[v.id]; else u[v.id]=1; return u; }); }}
+                style={{flex:1,minWidth:0,display:"flex",alignItems:"flex-start",gap:10,background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+                <span style={{color:C.taupe,fontSize:12,flexShrink:0,width:12,lineHeight:1.6}}>{abV?"▾":"▸"}</span>
+              <div style={{minWidth:0}}>
                 <div style={{fontSize:15,fontWeight:600,color:C.black}}>{vendorDisplay(v)}</div>
                 {v.primerApellido&&v.segundoApellido&&<div style={{fontSize:11.5,color:C.earth}}>{[v.segundoNombre,v.segundoApellido].filter(Boolean).join(" ")}</div>}
                 <div style={{fontSize:11,color:C.taupe,marginTop:2}}>{vendorTipo(v)}</div>
                 {v.empresa&&<div style={{fontSize:11,color:C.taupe}}>{v.empresa}</div>}
+                {!abV&&(
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:6}}>
+                    {v.isAdmin&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:100,background:C.black,color:"#fff"}}>Admin</span>}
+                    {v.isSupervisor&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:100,background:"#EDF2EE",color:"#3d6b52"}}>Supervisión</span>}
+                    {v.planilla&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:100,background:C.surfaceWarm,color:C.earth,border:"1px solid "+C.line}}>Planilla</span>}
+                    {SCHED.esLimpieza(v)&&<span style={{fontSize:8.5,fontWeight:600,letterSpacing:".06em",padding:"2px 8px",borderRadius:100,background:C.surfaceWarm,color:C.earth,border:"1px solid "+C.line}}>{(v.zonas||[]).length?(v.zonas||[]).map(SCHED.zonaLabel).join(" · "):"sin zonas"}</span>}
+                  </div>
+                )}
               </div>
+              </button>
               <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0,marginLeft:8}}>
                 <span style={{fontSize:10,fontWeight:700,color:v.active?C.green:C.red,background:v.active?"#EDF5EF":"#F5EDEC",padding:"3px 8px",borderRadius:100}}>{v.active?"Activo":"Inactivo"}</span>
                 <button onClick={function(){var u=vendors.map(function(x){if(x.id===v.id){var r=Object.assign({},x);r.active=!x.active;return r;}return x;});onSave(u);}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11,cursor:"pointer"}}>{v.active?"Desactivar":"Activar"}</button>
                 <button onClick={function(){if(confirm("¿Eliminar a "+vendorDisplay(v)+" permanentemente?")){onSave(vendors.filter(function(x){return x.id!==v.id;}));}}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #DBC8C4",background:"#fff",color:C.red,fontSize:11,cursor:"pointer",fontWeight:600}}>Eliminar</button>
               </div>
             </div>
+            {abV&&(
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
               {EditRow("email",          "Email",       v.email)}
               {EditRow("password",       "Password",    v.password, "password")}
@@ -4833,6 +4864,7 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, re
                 </div>
               )}
             </div>
+            )}
           </div>
         );
       })}
@@ -5645,6 +5677,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
 /* ═══ VENDOR APP */
 function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codigos,ausencias,onSvAusencias,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout,reviews,rvCasos,onSvRvCasos,rvIA}) {
   const [view,setView] = useState("jobs");
+  const [pagTab,setPagTab] = useState("hist");
   var tot=reps.reduce(function(s,r){return s+(isDanos(r.categoria)?0:parseFloat(r.total||0));},0);
   var cob=reps.filter(function(r){return r.paid;}).reduce(function(s,r){return s+parseFloat(r.total||0);},0);
   var pnd=reps.filter(function(r){return r.total&&!r.paid;});
@@ -5671,12 +5704,11 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codig
     var navItems = [["jobs","Mis trabajos","list"],["new","Nuevo reporte","edit"]];
     if(isInternal) navItems.push(["sched","Programa","calendar"]);
     if(isInternal) navItems.push(["hist","Calidad","star"]);
-    if(vendor.isSupervisor) navItems.push(["sup","Supervisión","settings"]);
-    if(isInternal) navItems.push(["adv","Adelanto","coins"]);
-    navItems.push(["pagos","Mis pagos","receipt"]);
-    navItems.push(["account","Cuenta","user"]);
+    if(vendor.isSupervisor) navItems.push(["sup","Supervisión","star"]);
+    navItems.push(["pagos","Pagos","coins"]);
     return navItems;
   })()}
+        onConfig={function(){setView("account");}} configActive={view==="account"}
         onLogout={onLogout}
         role={vendorDisplay(vendor)}
         feedbackVendor={vendor}
@@ -5684,12 +5716,24 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codig
       />
       <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} adelantos={adelantos} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}} onGoAccount={function(){setView("account");}} vendor={vendor} allVendors={allVendors} reviews={reviews} allReps={allReps} rvCasos={rvCasos} rvIA={rvIA} onGoCalidad={vendor.tipo==="interno"?function(){setView("hist");}:null}/></div>
       <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={allVendors||[]} props={props} company={company} defaultVendor={vendor.email} myReps={reps} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
-      <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} codigos={codigos||{}} ausencias={ausencias||[]} onSvAusencias={onSvAusencias}/></div>
+      <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} codigos={codigos||{}} ausencias={ausencias||[]} onSvAusencias={onSvAusencias} reps={reps}/></div>
       <div style={{display:view==="hist"   ?"block":"none"}}><VendorHistory reps={cleaningReps} onRespond={vendorRespond} vendor={vendor} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}} reviews={reviews} allReps={allReps} allVendors={allVendors} rvCasos={rvCasos} onSvRvCasos={onSvRvCasos} rvIA={rvIA}/></div>
       {vendor.isSupervisor&&<div style={{display:view==="sup"?"block":"none"}}><SupervisionPanel me={vendor} reps={allReps||[]} vendors={allVendors||[]} props={props} onUpdate={onUpdate}/></div>}
       <div style={{display:view==="account"?"block":"none"}}><VendorAccount vendor={vendor} allVendors={allVendors} allReps={allReps} onSvV={onSvV}/></div>
-      {isInternalVendor(vendor)&&<div style={{display:view==="adv"?"block":"none"}}><AdvanceRequest vendor={vendor} reps={reps} adelantos={adelantos} onSvAdelantos={onSvAdelantos}/></div>}
-      <div style={{display:view==="pagos"?"block":"none"}}><PagosHistory pagos={pagos} vendors={allVendors} company={company} isAdmin={false} meEmails={vendorEmailSet(vendor)}/></div>
+      {/* Pagos: el historial de comprobantes y el adelanto son la misma pregunta
+          —"¿cuánto me toca?"— así que viven bajo el mismo techo. */}
+      <div style={{display:view==="pagos"?"block":"none"}}>
+        {isInternalVendor(vendor)&&(
+          <div style={{background:"#fff",borderBottom:"1px solid "+C.gray,padding:"0 18px",display:"flex",gap:4}}>
+            {[["hist","Historial de pagos"],["adv","Adelanto"]].map(function(it){
+              var k=it[0],l=it[1];
+              return <button key={k} onClick={function(){setPagTab(k);}} style={{padding:"14px 14px",border:"none",borderBottom:"1.5px solid "+(pagTab===k?C.black:"transparent"),background:"none",fontSize:12.5,fontWeight:pagTab===k?700:500,color:pagTab===k?C.black:C.taupe,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{l}</button>;
+            })}
+          </div>
+        )}
+        <div style={{display:(!isInternalVendor(vendor)||pagTab==="hist")?"block":"none"}}><PagosHistory pagos={pagos} vendors={allVendors} company={company} isAdmin={false} meEmails={vendorEmailSet(vendor)} meNames={[vendorDisplay(vendor),vendor.name]}/></div>
+        {isInternalVendor(vendor)&&<div style={{display:pagTab==="adv"?"block":"none"}}><AdvanceRequest vendor={vendor} reps={reps} adelantos={adelantos} onSvAdelantos={onSvAdelantos}/></div>}
+      </div>
     </div>
   );
 }
@@ -7199,14 +7243,19 @@ function VerComoBanner({vendor, onExit}){
 
 function VerComoCfg({vendors, onVerComo}){
   const [q,setQ]=useState("");
+  const [abierto,setAbierto]=useState(false);
   var lista=(vendors||[]).filter(function(v){ return v.active!==false; })
     .filter(function(v){ return !q || vendorDisplay(v).toLowerCase().indexOf(q.toLowerCase())>=0; })
     .sort(function(a,b){ return vendorDisplay(a)<vendorDisplay(b)?-1:1; });
   var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)",marginBottom:16};
   return (
     <div style={CARD}>
-      <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Ver la app como otro usuario</div>
-      <div style={{fontSize:11.5,color:C.earth,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>
+      <button onClick={function(){setAbierto(!abierto);}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Ver la app como otro usuario</div>
+        <span style={{color:C.taupe,fontSize:12,flexShrink:0}}>{abierto?"▾":"▸"}</span>
+      </button>
+      {abierto&&(<>
+      <div style={{fontSize:11.5,color:C.earth,marginTop:8,lineHeight:1.6,textWrap:"pretty"}}>
         Abre la aplicación exactamente como la ve esa persona — su programación, sus pagos, sus permisos. Nada de lo que hagas cambia de dueño: sigues siendo tú, solo cambia lo que ves. Sales con un clic.
       </div>
       <input value={q} onChange={function(e){setQ(e.target.value);}} placeholder="Buscar persona…"
@@ -7223,6 +7272,7 @@ function VerComoCfg({vendors, onVerComo}){
         })}
         {lista.length===0&&<div style={{fontSize:12,color:C.taupe,padding:"6px 0"}}>Nadie coincide con esa búsqueda.</div>}
       </div>
+      </>)}
     </div>
   );
 }
@@ -7657,6 +7707,193 @@ function AnticipacionCfg({vendors, onSvV}){
   );
 }
 
+/* ═══ CIERRE DE LIMPIEZA ════════════════════════════════════════════════════
+   Una limpieza programada se da por hecha cuando existe el formulario de ESE día
+   para ESA propiedad. Vale la limpieza tradicional, la profunda y el ajuste: cuando
+   el técnico no puede llenar el formulario normal, el ajuste es su constancia. */
+var CATS_CIERRE = ["Limpieza tradicional","Limpieza profunda","Ajuste"];
+function esCierre(cat){ return CATS_CIERRE.indexOf(String(cat||""))>=0; }
+/* La hora que fijó el administrador: pasada la 1:00 pm, no haber registrado nada
+   ya no es "todavía no", es una limpieza que puede no estar ocurriendo. */
+var CIERRE_HORA_ALERTA = 13;
+function horaGT(){ var n=new Date(); return new Date(n.getTime()+(n.getTimezoneOffset()-360)*60000).getHours(); }
+function cierresIndex(reps){
+  var ix={};
+  (reps||[]).forEach(function(r){
+    if(!r||!esCierre(r.categoria)) return;
+    var f=String(r.fecha||"").slice(0,10); if(!f) return;
+    var k=f+"|"+normalize(r.propiedad||"");
+    (ix[k]=ix[k]||[]).push(r);
+  });
+  return ix;
+}
+/* hecha · pendiente (hoy antes de la 1pm) · atrasada (hoy después) · faltante (día
+   pasado sin formulario) · futura (todavía no toca). */
+function cierreDe(s, ix, hoy){
+  var f=String(s.fecha).slice(0,10);
+  var lista=ix[f+"|"+normalize(s.propiedad||"")]||[];
+  if(lista.length){
+    var mio=lista.filter(function(r){ return String(r.reportadoPor||"").toLowerCase()===String(s.vendorEmail||"").toLowerCase(); })[0];
+    var r=mio||lista[0];
+    return {estado:"hecha", rep:r, porOtro:!mio, ajuste:String(r.categoria)==="Ajuste", hora:cierreHora(r)};
+  }
+  if(f>hoy) return {estado:"futura"};
+  if(f<hoy) return {estado:"faltante"};
+  return {estado: horaGT()>=CIERRE_HORA_ALERTA ? "atrasada" : "pendiente"};
+}
+function cierreHora(r){
+  var ms=parseInt(r&&r.createdAt,10); if(!ms) return "";
+  var d=new Date(ms); var gt=new Date(d.getTime()+(d.getTimezoneOffset()-360)*60000);
+  var h=gt.getHours(), m=gt.getMinutes();
+  return ((h%12)||12)+":"+(m<10?"0":"")+m+" "+(h<12?"am":"pm");
+}
+
+/* ═══ DIAGNÓSTICO DE UNA PROGRAMACIÓN ═══════════════════════════════════════
+   "Había checkout y no se programó" no se contesta leyendo el motor: se contesta
+   con los datos de ese día. Este panel rehace la cadena completa —reserva →
+   propiedad en el portafolio → pausa → zona → técnico con esa zona → cupo— y
+   señala en qué eslabón se cayó. */
+function DiagProgramacion({props, reservas, schedules, vendors, ausencias, reps, hoy, fechaVista}){
+  const [abierto,setAbierto] = useState(false);
+  const [prop, setProp]      = useState("");
+  const [fecha,setFecha]     = useState(fechaVista||hoy);
+  var tecs = schedTecnicos(vendors);
+
+  var nombres = {};
+  (props||[]).forEach(function(p){ if(p&&p.name) nombres[p.name]=1; });
+  (reservas||[]).forEach(function(r){ if(r&&r.propiedad) nombres[r.propiedad]=1; });
+  (schedules||[]).forEach(function(s){ if(s&&s.propiedad) nombres[s.propiedad]=1; });
+  var opciones = Object.keys(nombres).sort();
+
+  var d = null;
+  if(prop&&fecha){
+    var np=normalize(prop);
+    var pObj=(props||[]).find(function(x){ return normalize(x.name)===np; })||null;
+    var resProp=(reservas||[]).filter(function(r){ return r&&normalize(r.propiedad||"")===np; });
+    var checkout=resProp.filter(function(r){ return String(r.checkOut||"").slice(0,10)===fecha; });
+    var checkin =resProp.filter(function(r){ return String(r.checkIn ||"").slice(0,10)===fecha; });
+    var sinNombre=(reservas||[]).filter(function(r){ return r&&!String(r.propiedad||"").trim(); });
+    var pausa=pObj?SCHED.enPausa(pObj,fecha):false;
+    var z=SCHED.zonaKey(SCHED.partes(prop).zona);
+    var conZona=tecs.filter(function(v){ return z&&(v.zonas||[]).map(SCHED.zonaKey).indexOf(z)>=0; });
+    var libresZona=conZona.filter(function(v){
+      var em=String(v.email||"").toLowerCase();
+      var aus=(ausencias||[]).some(function(a){ return a.estado==="aprobada"&&String(a.vendorEmail||"").toLowerCase()===em&&a.fecha===fecha; });
+      var desc=((v.descansos)||[]).indexOf(new Date(fecha+"T12:00:00").getDay())>=0;
+      return !aus&&!desc;
+    });
+    var req=SCHED.limpiezasRequeridas({reservas:reservas, props:props, desde:fecha, hasta:fecha})
+      .filter(function(x){ return normalize(x.propiedad)===np; });
+    var enSched=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===fecha&&normalize(s.propiedad||"")===np; });
+    var forms=(reps||[]).filter(function(r){ return esCierre(r.categoria)&&String(r.fecha||"").slice(0,10)===fecha&&normalize(r.propiedad||"")===np; });
+    /* Si el calendario la exigía y no está en la ruta, se vuelve a correr el motor
+       solo para ella: la razón sale del mismo código que la dejó fuera. */
+    var razonMotor="";
+    if(req.length&&!enSched.length){
+      try{
+        var rr=SCHED.planearDia({
+          fecha:fecha, hoy:hoy, limpiezas:req, vendors:vendors, ratings:{}, ausencias:ausencias,
+          historial:reps, fijos:(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===fecha; }),
+          existentes:schedules||[]
+        });
+        razonMotor = rr.asignaciones.length
+          ? "Corriendo el motor ahora sí cabría — se la daría a "+(vendorNameByEmail(vendors,rr.asignaciones[0].vendorEmail)||rr.asignaciones[0].vendorEmail)+". Lo que cambió desde entonces es el cupo del día."
+          : ((rr.sinAsignar[0]&&rr.sinAsignar[0].razon)||(rr.postergadas[0]&&rr.postergadas[0].razon)||"Sin técnico disponible");
+      }catch(e){ razonMotor="No se pudo reproducir la corrida: "+(e&&e.message||e); }
+    }
+    /* Otros checkouts de ese día: si el nombre del anuncio en Hospitable no es el
+       mismo que el del portafolio, aquí se ve la grafía real. */
+    var checkoutsDia=(reservas||[]).filter(function(r){ return r&&String(r.checkOut||"").slice(0,10)===fecha; })
+      .map(function(r){ return String(r.propiedad||"").trim()||"(sin propiedad)"; });
+    checkoutsDia=checkoutsDia.filter(function(x,i){ return checkoutsDia.indexOf(x)===i; }).sort();
+
+    var pasos=[
+      {ok:!!resProp.length, t:"Reservas de esta propiedad en Hospitable",
+       v:resProp.length?resProp.length+" reserva"+(resProp.length===1?"":"s")+" sincronizada"+(resProp.length===1?"":"s"):"Ninguna — Hospitable no devuelve este nombre de propiedad"},
+      {ok:!!checkout.length, t:"Checkout el "+fmtDate(fecha),
+       v:checkout.length?"Sí"+(checkin.length?" · y también hay check-in ese día (limpieza de entrada)":""):"No hay checkout ese día en los datos sincronizados"},
+      {ok:!!pObj, t:"Ficha en el portafolio",
+       v:pObj?"Sí · "+(pObj.cuartos||1)+" habitación"+((pObj.cuartos||1)===1?"":"es"):"No está en Propiedades — sin ficha no hay zona ni habitaciones"},
+      {ok:!pausa, t:"Fuera de pausa",
+       v:pausa?"En pausa ese día — el motor la excluye a propósito":"Sin pausa"},
+      {ok:!!z, t:"Zona reconocida en el nombre",
+       v:z?SCHED.zonaLabel(z)+" ("+z+")":"El nombre no trae zona — el motor no puede asignarla a nadie"},
+      {ok:!!libresZona.length, t:"Técnicos con esa zona ese día",
+       v:conZona.length?(libresZona.length+" de "+conZona.length+" disponibles: "+libresZona.map(function(v){return vendorDisplay(v);}).join(", ")||"—"):"Nadie tiene "+(z?SCHED.zonaLabel(z):"esa zona")+" asignada"},
+      {ok:!!req.length, t:"El motor la pidió ese día",
+       v:req.length?"Sí · "+req[0].habitaciones+" hab · "+req[0].tipo+(req[0].entradaHoy?" · con entrada el mismo día":""):"No entró en la lista de limpiezas requeridas"},
+      {ok:!!enSched.length, t:"Quedó en la programación",
+       v:enSched.length?enSched.map(function(s){ return (vendorNameByEmail(vendors,s.vendorEmail)||s.vendorEmail)+" · "+(s.estado||"—")+(s.notificadoEn?" · notificada":" · sin notificar")+(s.origen?" · "+s.origen:""); }).join(" | "):(razonMotor||"No")},
+      {ok:!!forms.length, t:"Formulario de ese día",
+       v:forms.length?forms.map(function(r){ return r.categoria+" · "+(vendorNameByEmail(vendors,r.reportadoPor)||r.reportadoPor||"—"); }).join(" | "):"Ninguno"}
+    ];
+
+    var veredicto;
+    if(enSched.length) veredicto="Sí se programó. Está asignada a "+(vendorNameByEmail(vendors,enSched[0].vendorEmail)||enSched[0].vendorEmail)+".";
+    else if(!resProp.length) veredicto="Hospitable no devolvió ninguna reserva con este nombre exacto. Casi siempre el anuncio se llama distinto allá: compara con la lista de checkouts de ese día que está abajo y corrige el nombre en Propiedades."+(sinNombre.length?" Además hay "+sinNombre.length+" reserva"+(sinNombre.length===1?"":"s")+" sincronizada"+(sinNombre.length===1?"":"s")+" sin propiedad identificable — esas el motor ni las ve.":"");
+    else if(!checkout.length) veredicto="Había reservas de la propiedad, pero ninguna con checkout ese día en los datos que tenía el motor. Si el huésped salió ese día, la reserva entró o se modificó después de la corrida.";
+    else if(pausa) veredicto="La propiedad estaba en pausa ese día: el motor la excluye a propósito. Se quita la pausa en Programación › Propiedades fuera del reparto.";
+    else if(!pObj) veredicto="La propiedad no tiene ficha en el portafolio, así que el motor no supo ni su zona ni sus habitaciones.";
+    else if(!z) veredicto="El nombre de la propiedad no trae zona al frente (formato «Z1 - Edificio - Unidad»). La zona es regla dura: sin ella nadie es candidato.";
+    else if(!conZona.length) veredicto="Ningún técnico tiene "+SCHED.zonaLabel(z)+" asignada. La zona es regla dura, así que la limpieza queda sin candidato y hay que asignarla a mano.";
+    else if(!libresZona.length) veredicto="Los técnicos con "+SCHED.zonaLabel(z)+" estaban todos ausentes o de descanso ese día.";
+    else veredicto=razonMotor||"El calendario la pedía y había técnicos con la zona: quedó sin asignar por cupo. Debió aparecer en «checkouts sin limpieza asignada» ese día.";
+
+    d={pasos:pasos, veredicto:veredicto, checkoutsDia:checkoutsDia, sinNombre:sinNombre.length};
+  }
+
+  var CARD2={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+  var IN2={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44};
+  return (
+    <div style={CARD2}>
+      <button onClick={function(){setAbierto(!abierto);}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left",fontFamily:"Montserrat,sans-serif"}}>
+        <div>
+          <div style={{fontSize:14,fontWeight:600,color:C.black}}>¿Por qué no se programó?</div>
+          <div style={{fontSize:11,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>Elige una propiedad y un día: se rehace la cadena completa y se señala dónde se cayó.</div>
+        </div>
+        <span style={{color:C.taupe,fontSize:12,flexShrink:0}}>{abierto?"▾":"▸"}</span>
+      </button>
+      {abierto&&(
+        <div style={{marginTop:13,display:"flex",flexDirection:"column",gap:11}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:10}}>
+            <select value={prop} onChange={function(e){setProp(e.target.value);}} style={IN2}>
+              <option value="">Elegir propiedad…</option>
+              {opciones.map(function(n){ return <option key={n} value={n}>{n}</option>; })}
+            </select>
+            <input type="date" value={fecha} onChange={function(e){setFecha(e.target.value);}} style={IN2}/>
+          </div>
+          {!d&&<div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6}}>Elige la propiedad para ver el rastro.</div>}
+          {d&&(
+            <>
+              <div style={{background:C.surfaceWarm,borderRadius:11,padding:"12px 13px"}}>
+                <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Veredicto</div>
+                <div style={{fontSize:12.5,color:C.black,marginTop:6,lineHeight:1.65,textWrap:"pretty"}}>{d.veredicto}</div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column"}}>
+                {d.pasos.map(function(p,i){
+                  return (
+                    <div key={i} style={{display:"flex",gap:10,alignItems:"flex-start",padding:"9px 0",borderTop:i?"1px solid "+C.line:"none"}}>
+                      <span style={{flexShrink:0,width:16,textAlign:"center",fontSize:12,fontWeight:700,color:p.ok?C.green:C.red,lineHeight:1.5}}>{p.ok?"✓":"✕"}</span>
+                      <div style={{minWidth:0,flex:1}}>
+                        <div style={{fontSize:12,fontWeight:600,color:C.black}}>{p.t}</div>
+                        <div style={{fontSize:11,color:C.earth,marginTop:2,lineHeight:1.6,textWrap:"pretty"}}>{p.v}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <details>
+                <summary style={{fontSize:11,color:C.taupe,cursor:"pointer"}}>Checkouts que Hospitable trae ese día ({d.checkoutsDia.length})</summary>
+                <div style={{fontSize:11,color:C.earth,marginTop:7,lineHeight:1.8}}>{d.checkoutsDia.length?d.checkoutsDia.join(" · "):"Ninguno."}</div>
+              </details>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, schedErr}) {
   /* Abre en HOY: la ruta que el equipo está corriendo ahora mismo es la que el
      administrador necesita ver al entrar, no la de mañana. */
@@ -7693,6 +7930,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   var tecs  = schedTecnicos(vendors);
   var fecha = SCHED.shift(hoy, dia);
   var ratings = React.useMemo(function(){ return schedRatings(reviews, reps, rvCasos); }, [reviews, reps, rvCasos]);
+  var ixCierre = React.useMemo(function(){ return cierresIndex(reps); }, [reps]);
   var pendAus = (ausencias||[]).filter(function(a){ return a.estado==="pendiente"; });
 
   function aviso(txt, ok){ setMsg({txt:txt, ok:ok!==false}); setTimeout(function(){ setMsg(null); }, 5000); }
@@ -7982,6 +8220,18 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   var firme = dia<=1;
   var notificado = delDia.length>0 && delDia.every(function(s){ return s.notificadoEn; });
 
+  /* ─── Cumplimiento: cada limpieza contra el formulario de ese día. */
+  var cierres={}; delDia.forEach(function(s){ cierres[s.id]=cierreDe(s, ixCierre, hoy); });
+  var hechas=delDia.filter(function(s){ return cierres[s.id].estado==="hecha"; }).length;
+  var esHoy=fecha===hoy, esPasado=fecha<hoy;
+  var alertaHora=esHoy&&horaGT()>=CIERRE_HORA_ALERTA;
+  /* La alerta que pidió el administrador: técnico con ruta y ni un formulario. */
+  var sinNingunForm=(esHoy||esPasado)?Object.keys(porTec).filter(function(em){
+    return (porTec[em]||[]).length && (porTec[em]||[]).every(function(s){ return (cierres[s.id]||{}).estado!=="hecha"; });
+  }):[];
+  var pendientes=(esHoy||esPasado)?delDia.filter(function(s){ return (cierres[s.id]||{}).estado!=="hecha"; })
+    .sort(function(a,b){ return (a.orden||0)-(b.orden||0); }):[];
+
   /* Capacidad y saturación del día */
   var demanda=delDia.reduce(function(s,x){ return s+SCHED.minutosLimpieza(x.habitaciones,x.tipo); },0);
   var libres=tecs.filter(function(v){
@@ -8014,6 +8264,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
     var mias=(porTec[em]||[]).slice().sort(function(a,b){ return (a.orden||0)-(b.orden||0); });
     return {
       v:v, em:em, mias:mias,
+      hechas:mias.filter(function(s){ return (cierres[s.id]||{}).estado==="hecha"; }).length,
       mins:mias.reduce(function(s,x){ return s+SCHED.minutosLimpieza(x.habitaciones,x.tipo)+(x.viaje||0); },0),
       aus:(ausencias||[]).some(function(a){ return a.estado==="aprobada" && String(a.vendorEmail||"").toLowerCase()===em && a.fecha===fecha; }),
       desc:((v.descansos)||[]).indexOf(new Date(fecha+"T12:00:00").getDay())>=0
@@ -8392,6 +8643,74 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
         )}
       </div>
 
+      {/* ─── Limpiezas completadas
+           Una limpieza se da por hecha cuando existe el formulario de ese día para
+           esa propiedad — tradicional, profunda o ajuste. Pasada la 1:00 pm, quien
+           no ha registrado nada aparece en rojo. */}
+      {(esHoy||esPasado)&&delDia.length>0&&(
+        <div style={CARD}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+            <div style={{minWidth:0}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Limpiezas completadas</div>
+              <div style={{fontSize:11.5,color:C.earth,marginTop:5,lineHeight:1.6,textWrap:"pretty"}}>Se da por hecha cuando existe el formulario de ese día: limpieza tradicional, profunda o ajuste.</div>
+            </div>
+            <div style={{textAlign:"right",flexShrink:0}}>
+              <div style={{fontSize:24,fontWeight:600,color:hechas===delDia.length?C.green:C.black,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{hechas}<span style={{color:C.taupe,fontSize:15}}>/{delDia.length}</span></div>
+            </div>
+          </div>
+          <div style={{height:5,borderRadius:100,background:C.line,overflow:"hidden",marginTop:12}}>
+            <div style={{width:(delDia.length?Math.round(hechas/delDia.length*100):0)+"%",height:"100%",background:hechas===delDia.length?C.green:((alertaHora||esPasado)?C.red:C.black),transition:"width .18s"}}/>
+          </div>
+
+          {sinNingunForm.length>0&&(alertaHora||esPasado)&&(
+            <div style={{marginTop:13,background:"#F5EDEC",border:"1px solid #E7D3CE",borderRadius:11,padding:"12px 13px"}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.red,letterSpacing:".14em",textTransform:"uppercase"}}>Sin un solo formulario</div>
+              <div style={{fontSize:12,color:C.black,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>
+                {esHoy?"Ya pasó la 1:00 pm y ":""}{sinNingunForm.length===1?"un técnico con ruta no ha registrado nada":sinNingunForm.length+" técnicos con ruta no han registrado nada"} {esHoy?"hoy":"ese día"}.
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:7,marginTop:10}}>
+                {sinNingunForm.map(function(em){
+                  var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===em; });
+                  var arr=porTec[em]||[];
+                  var tel=String((v&&(v.phone||v.telefono))||"").replace(/[^0-9]/g,"");
+                  return (
+                    <div key={em} style={{background:"#fff",borderRadius:9,padding:"10px 11px",display:"flex",justifyContent:"space-between",gap:9,flexWrap:"wrap",alignItems:"center"}}>
+                      <div style={{minWidth:0}}>
+                        <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{v?vendorDisplay(v):em}</div>
+                        <div style={{fontSize:10.5,color:C.earth,marginTop:2}}>{arr.length} limpieza{arr.length===1?"":"s"} · {arr.map(function(s){ return propCorta(s.propiedad); }).join(" → ")}</div>
+                      </div>
+                      {tel.length>=8&&(
+                        <a href={"https://wa.me/"+(tel.length===8?"502":"")+tel} target="_blank" rel="noopener noreferrer" style={{flexShrink:0,fontSize:11,fontWeight:600,color:C.earth,textDecoration:"none",padding:"8px 13px",minHeight:36,borderRadius:100,border:"1px solid "+C.gray,background:"#fff"}}>Escribirle →</a>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {pendientes.length>0&&(
+            <div style={{marginTop:13,display:"flex",flexDirection:"column",gap:6}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Todavía sin formulario · {pendientes.length}</div>
+              {pendientes.map(function(s){
+                var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===emailVigente(s); });
+                var rojo=(cierres[s.id]||{}).estado!=="pendiente";
+                return (
+                  <div key={s.id} style={{display:"flex",justifyContent:"space-between",gap:9,flexWrap:"wrap",alignItems:"baseline",padding:"7px 0",borderTop:"1px solid "+C.line}}>
+                    <span style={{fontSize:12,color:C.black,fontWeight:600}}>{s.propiedad}</span>
+                    <span style={{fontSize:10.5,color:rojo?C.red:C.earth}}>{v?vendorDisplay(v):"sin técnico"}{s.entradaHoy?" · entrada hoy":""}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {pendientes.length===0&&(
+            <div style={{marginTop:12,fontSize:11.5,color:C.green,fontWeight:600,lineHeight:1.6}}>Todas las limpiezas del día tienen su formulario.</div>
+          )}
+        </div>
+      )}
+
       {/* ─── Rutas del día · lista compacta
            Con 15 técnicos y creciendo, una tarjeta abierta por persona vuelve
            imposible revisar el día. Aquí cada técnico es una línea con su carga
@@ -8461,7 +8780,12 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                       </div>
                       <div style={{fontSize:9,color:C.taupe,marginTop:4,textAlign:"center",fontVariantNumeric:"tabular-nums"}}>{mins?schedMinsTxt(mins):"—"}</div>
                     </div>
-                    <div style={{fontSize:16,fontWeight:600,color:mias.length?C.black:C.gray,fontVariantNumeric:"tabular-nums",minWidth:18,textAlign:"right",flexShrink:0}}>{mias.length}</div>
+                    <div style={{minWidth:26,textAlign:"right",flexShrink:0}}>
+                      <div style={{fontSize:16,fontWeight:600,color:mias.length?C.black:C.gray,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{mias.length}</div>
+                      {(esHoy||esPasado)&&mias.length>0&&(
+                        <div style={{fontSize:9,fontWeight:700,marginTop:4,fontVariantNumeric:"tabular-nums",color:f.hechas===mias.length?C.green:((alertaHora||esPasado)?C.red:C.taupe)}}>{f.hechas}/{mias.length}</div>
+                      )}
+                    </div>
                     <span style={{color:C.taupe,fontSize:12,flexShrink:0}}>{abierta?"▾":"▸"}</span>
                   </button>
 
@@ -8496,6 +8820,13 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                                     : <span style={{color:C.orange}}> · sin código</span>}
                                 </div>
                                 {s.entradaHoy&&<div style={{fontSize:9.5,fontWeight:700,color:C.red,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>Tiene entrada hoy</div>}
+                                {(function(){
+                                  var cz=cierres[s.id]||{};
+                                  if(cz.estado==="futura"||!cz.estado) return null;
+                                  if(cz.estado==="hecha") return <div style={{fontSize:9.5,fontWeight:700,color:C.green,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>✓ {cz.ajuste?"Ajuste":"Formulario"}{cz.hora?" · "+cz.hora:""}{cz.porOtro?" · lo hizo otro":""}</div>;
+                                  var rojo=cz.estado==="atrasada"||cz.estado==="faltante";
+                                  return <div style={{fontSize:9.5,fontWeight:700,color:rojo?C.red:C.orange,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>{rojo?"Sin formulario":"Formulario pendiente"}</div>;
+                                })()}
                                 {verMotor&&s.motivo&&<div style={{fontSize:10,color:C.taupe,marginTop:3,lineHeight:1.5}}>Motor: {s.motivo}</div>}
                               </div>
                               <div style={{display:"flex",gap:4,flexShrink:0}}>
@@ -8540,6 +8871,9 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
 
       {/* Propiedades fuera del reparto automático */}
       <PausasCfg props={props} onSvP={onSvP} hoy={hoy}/>
+
+      {/* Por qué una limpieza no entró al reparto */}
+      <DiagProgramacion props={props} reservas={reservas} schedules={schedules} vendors={vendors} ausencias={ausencias} reps={reps} hoy={hoy} fechaVista={fecha}/>
 
       {/* Bitácora: qué corrió y a quién se le escribió */}
       <BitacoraPanel/>
@@ -8619,7 +8953,7 @@ function horaOk(v, fallback){
   return /^\d{1,2}:\d{2}$/.test(s) ? s : fallback;
 }
 
-function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) {
+function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, reps}) {
   const [view, setView] = useState("hoy");
   const [diasAbiertos, setDiasAbiertos] = useState({});
   const [pedir, setPedir] = useState(false);
@@ -8652,6 +8986,10 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) 
   });
   diasSemana.sort(function(a,b){ return a.fecha<b.fecha?-1:1; });
   var misAus = (ausencias||[]).filter(function(a){ return emails.indexOf(String(a.vendorEmail||"").toLowerCase())>=0 && a.fecha>=hoy; });
+  /* Su propio marcador de avance: la limpieza queda registrada con el formulario
+     del día — el tradicional, el profundo o el de ajuste. */
+  var ixCierre = React.useMemo(function(){ return cierresIndex(reps); }, [reps]);
+  var hechasHoy = deHoy.filter(function(s){ return cierreDe(s, ixCierre, hoy).estado==="hecha"; }).length;
 
   function enviarAusencia(){
     if(!fAus) return;
@@ -8672,11 +9010,14 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) 
 
   function Tarjeta({s, idx}){
     return (
-      <div style={{background:"#fff",borderRadius:14,border:"1px solid "+(s.entradaHoy?"#E5C9BF":C.gray),padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
+      <div style={{background:"#fff",borderRadius:14,border:"1px solid "+(SCHED.esProfunda(s.tipo)?C.peach:s.entradaHoy?"#E5C9BF":C.gray),padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
           <div style={{minWidth:0}}>
             <div style={{fontSize:15,fontWeight:600,color:C.black,lineHeight:1.3}}>{idx!=null?(idx+1)+". ":""}{s.propiedad}</div>
-            <div style={{fontSize:11.5,color:C.earth,marginTop:4}}>{(s.habitaciones||1)} habitación{(s.habitaciones||1)===1?"":"es"} · {s.tipo}</div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:4}}>{(s.habitaciones||1)} habitación{(s.habitaciones||1)===1?"":"es"}{SCHED.esProfunda(s.tipo)?"":" · "+s.tipo}</div>
+            {SCHED.esProfunda(s.tipo)&&(
+              <div style={{display:"inline-block",marginTop:7,background:C.peach,color:"#fff",fontSize:10.5,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",padding:"5px 12px",borderRadius:100}}>Limpieza profunda</div>
+            )}
             <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{horaOk(s.hora,SCHED.HORA_INI)} a {horaOk(s.horaFin,SCHED.HORA_FIN)}</div>
           </div>
           {codigoSemana(codigos, s.propiedad, s.fecha, s.codigoAcceso)&&(
@@ -8694,8 +9035,8 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) 
           </div>
         )}
         {SCHED.esProfunda(s.tipo)&&(
-          <div style={{marginTop:11,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.earth,lineHeight:1.6}}>
-            Limpieza profunda — ocupa todo el turno. Otro técnico hace la tradicional del mismo apartamento en paralelo.
+          <div style={{marginTop:11,background:"#FCEDE8",border:"1px solid "+C.peach,borderRadius:9,padding:"10px 12px",fontSize:11.5,color:"#B4553C",fontWeight:600,lineHeight:1.6,textWrap:"pretty"}}>
+            Esta es profunda: ocupa todo el turno y lleva el formulario de limpieza profunda. Otro técnico hace la tradicional del mismo apartamento en paralelo.
           </div>
         )}
         {String(s.fecha).slice(0,10)>hoy&&(
@@ -8707,6 +9048,13 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) 
                 <span style={{fontWeight:700}}>Sin confirmar todavía.</span> Te llega confirmada por correo el {SCHED.shift(String(s.fecha).slice(0,10),-1)===hoy?"día de hoy":fmtDate(SCHED.shift(String(s.fecha).slice(0,10),-1))} a las 6:00 pm.
               </div>
         )}
+        {(function(){
+          var cz=cierreDe(s, ixCierre, hoy);
+          if(cz.estado==="futura") return null;
+          if(cz.estado==="hecha") return <div style={{marginTop:11,background:"#EDF5EF",borderRadius:9,padding:"9px 12px",fontSize:11.5,color:C.green,fontWeight:600,lineHeight:1.5}}>✓ Registrada{cz.ajuste?" con formulario de ajuste":""}{cz.hora?" · "+cz.hora:""}</div>;
+          var rojo=cz.estado==="atrasada"||cz.estado==="faltante";
+          return <div style={{marginTop:11,background:rojo?"#F5EDEC":C.surfaceWarm,borderRadius:9,padding:"9px 12px",fontSize:11.5,color:rojo?C.red:C.earth,fontWeight:rojo?700:400,lineHeight:1.5,textWrap:"pretty"}}>{rojo?"Falta el formulario de esta limpieza.":"Al terminar, llena el formulario para que quede registrada."}</div>;
+        })()}
         {s.reajustada&&<div style={{marginTop:9,fontSize:10.5,fontWeight:600,color:C.orange}}>Cambio reciente en tu programación</div>}
       </div>
     );
@@ -8730,6 +9078,16 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) 
         </div>
       )}
 
+      {deHoy.length>0&&(
+        <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"13px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
+          <div style={{minWidth:0}}>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Hoy</div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>{hechasHoy===deHoy.length?"Todas tus limpiezas de hoy quedaron registradas.":"Cada limpieza queda registrada con su formulario."}</div>
+          </div>
+          <div style={{fontSize:22,fontWeight:600,color:hechasHoy===deHoy.length?C.green:C.black,fontVariantNumeric:"tabular-nums",flexShrink:0,lineHeight:1}}>{hechasHoy}<span style={{color:C.taupe,fontSize:15}}>/{deHoy.length}</span></div>
+        </div>
+      )}
+
       <div style={{display:"flex",background:C.surfaceWarm,borderRadius:100,padding:3,gap:3,border:"1px solid "+C.line}}>
         {[["hoy","Hoy"],["semana","Esta semana"]].map(function(it){
           var sel=view===it[0];
@@ -8747,7 +9105,14 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) 
       {/* Hoy: cuántas son y cuánto es, antes de la primera tarjeta. */}
       {view==="hoy"&&deHoy.length>0&&(
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,padding:"0 4px"}}>
-          <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{deHoy.length} limpieza{deHoy.length===1?"":"s"} hoy</div>
+          <div style={{fontSize:12.5,fontWeight:600,color:C.black,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            {deHoy.length} limpieza{deHoy.length===1?"":"s"} hoy
+            {deHoy.filter(function(s){return SCHED.esProfunda(s.tipo);}).length>0&&(
+              <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"3px 9px",borderRadius:100}}>
+                {deHoy.filter(function(s){return SCHED.esProfunda(s.tipo);}).length===1?"1 profunda":deHoy.filter(function(s){return SCHED.esProfunda(s.tipo);}).length+" profundas"}
+              </span>
+            )}
+          </div>
           <div style={{fontSize:11,color:C.taupe}}>{SCHED.HORA_INI} a {SCHED.HORA_FIN}</div>
         </div>
       )}
@@ -8774,6 +9139,9 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias}) 
               )}
               {d.lista.some(function(s){return s.entradaHoy;})&&(
                 <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#B4553C",background:"#FCF4F1",padding:"3px 8px",borderRadius:100,flexShrink:0}}>Entrada</span>
+              )}
+              {d.lista.some(function(s){return SCHED.esProfunda(s.tipo);})&&(
+                <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"3px 8px",borderRadius:100,flexShrink:0}}>Profunda</span>
               )}
               <span style={{fontSize:16,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums",flexShrink:0}}>{d.lista.length}</span>
               <span style={{color:C.taupe,fontSize:12,flexShrink:0}}>{abierto?"▾":"▸"}</span>
@@ -9151,6 +9519,59 @@ function supPatrones(reps, email, n){
     return {item:q, fallas:fall, total:h.length};
   }).filter(function(x){ return x.fallas>=2; }).sort(function(a,b){ return b.fallas-a.fallas || b.item.peso-a.item.peso; });
 }
+/* ─── Las fotos de la limpieza, etiquetadas por punto.
+   El supervisor juzga sarro o pelos mirando una foto concreta, no la galería
+   completa: cada criterio trae las suyas y la lupa abre el resto. */
+function repSlots(r){
+  var out=[];
+  function ok(v){ return v&&typeof v==="string"&&(v.indexOf("http")===0||v.indexOf("data:")===0); }
+  function add(slot,t,v){
+    if(Array.isArray(v)) v.forEach(function(x,i){ if(ok(x)) out.push({slot:slot,t:t+(v.length>1?" "+(i+1):""),src:x}); });
+    else if(ok(v)) out.push({slot:slot,t:t,src:v});
+  }
+  if(!r) return out;
+  (r.fotosHabitaciones||[]).forEach(function(f,i){ add("cuarto","Cuarto "+(i+1),f); });
+  add("piso","Piso general",r.fotoPisoGeneral);
+  (r.fotosBanos||[]).forEach(function(b,i){ if(!b) return; add("ducha","Baño "+(i+1)+" · ducha",b.ducha); add("inodoro","Baño "+(i+1)+" · inodoro",b.inodoro); });
+  (r.fotosDrenajes||[]).forEach(function(f,i){ add("drenaje","Drenaje "+(i+1),f); });
+  add("regadera","Regadera",r.fotosRegadera);
+  add("ducha","Ducha y mampara",r.fotosDucha);
+  add("micro","Microondas",r.fotosMicroondas);
+  add("micro","Microondas por dentro",r.fotosMicroondas2);
+  add("refri","Refrigerador",r.fotosRefrigerador);
+  add("estufa","Estufa",r.fotosEstufa);
+  add("lavatrastos","Lavatrastos",r.fotosLavatrastos);
+  add("cafetera","Cafetera",r.fotosCafetera);
+  add("ecofiltro","Ecofiltro",r.fotosEcofiltro);
+  add("platos","Platos y cubiertos",r.fotosPlatos);
+  add("gavetas","Gavetas",r.fotosGavetas);
+  add("detras","Detrás de electrodomésticos",r.fotosDetrasElect);
+  add("tv","Televisor",r.fotosTv);
+  add("sillon","Sillón",r.fotosSillon);
+  add("insumos","Insumos de cortesía",r.fotosInsumos);
+  add("cama","Debajo de la cama",r.fotosDebajoCama);
+  add("closet","Clóset y blancos",r.fotosCloset);
+  add("ventanas","Ventanas",r.fotosVentanas);
+  add("detalle","Detalle extra",r.fotosDetalle);
+  return out;
+}
+/* Qué foto sirve para juzgar cada tipo de falla. */
+var SUP_SLOTS={
+  pelos:     ["ducha","drenaje","cuarto","cama","piso","inodoro"],
+  omitido:   ["cama","detras","inodoro","micro","refri","closet","gavetas","piso"],
+  olor:      ["inodoro","drenaje","ducha","refri","piso"],
+  cama:      ["cuarto","closet"],
+  residuo:   ["ventanas","tv","estufa","lavatrastos","sillon","micro","piso"],
+  sarro:     ["ducha","regadera","drenaje","inodoro","lavatrastos"],
+  cocinaInt: ["micro","refri","estufa","platos","gavetas","lavatrastos","cafetera","ecofiltro"],
+  basura:    ["piso","cuarto","sillon"],
+  detalle:   ["insumos","cuarto","closet","sillon","tv","cafetera","detalle"]
+};
+function supFotos(slots, itemId){
+  var ord=SUP_SLOTS[itemId]||[];
+  return slots.filter(function(s){ return ord.indexOf(s.slot)>=0; })
+              .sort(function(a,b){ return ord.indexOf(a.slot)-ord.indexOf(b.slot); });
+}
 function SupervisionForm({rep, vendors, reps, onCancel, onSubmit}) {
   const [items,setItems] = useState({});
   const [notas,setNotas] = useState({});
@@ -9158,7 +9579,10 @@ function SupervisionForm({rep, vendors, reps, onCancel, onSubmit}) {
   const [extra,setExtra] = useState("");
   const [busy, setBusy]  = useState(false);
   const [verHist,setVerHist] = useState(false);
+  const [light,  setLight]   = useState(null);
+  const [verTodo,setVerTodo] = useState(false);
 
+  var slots    = React.useMemo(function(){ return repSlots(rep); }, [rep]);
   var tecEmail = rep.reportadoPor;
   var patrones = supPatrones(reps, tecEmail, 8);
   var resp     = SUP_ITEMS.filter(function(q){ return items[q.id]; });
@@ -9221,6 +9645,30 @@ function SupervisionForm({rep, vendors, reps, onCancel, onSubmit}) {
                   <button onClick={function(){marcar(q.id,"falla");}} style={{minWidth:62,minHeight:44,padding:"0 13px",borderRadius:100,border:"1.5px solid "+(falla?C.red:C.gray),background:falla?C.red:"#fff",color:falla?"#fff":C.earth,fontSize:12,fontWeight:700,cursor:"pointer"}}>Falla</button>
                 </div>
               </div>
+              {(function(){
+                var fs=supFotos(slots, q.id);
+                if(!fs.length) return (
+                  <div style={{marginTop:10,fontSize:10.5,color:C.taupe,lineHeight:1.5}}>Sin fotos de este punto en el formulario del técnico.</div>
+                );
+                return (
+                  <div style={{marginTop:11}}>
+                    <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase",marginBottom:6}}>Fotos de este punto · {fs.length}</div>
+                    <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:3}}>
+                      {fs.map(function(ft,fi){
+                        return (
+                          <button key={fi} onClick={function(){ setLight({photos:fs.map(function(x){return x.src;}), idx:fi}); }}
+                            title={ft.t}
+                            style={{flexShrink:0,padding:0,border:"1px solid "+C.line,borderRadius:9,background:"#f0f0f0",cursor:"zoom-in",overflow:"hidden",lineHeight:0}}>
+                            <img src={driveThumb(ft.src,300)} alt={ft.t} onError={function(e){e.target.src=ft.src;}}
+                              style={{width:96,height:80,objectFit:"cover",display:"block"}}/>
+                            <span style={{display:"block",fontSize:8.5,color:C.earth,padding:"4px 5px",background:"#fff",maxWidth:96,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.4,textAlign:"left"}}>{ft.t}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
               {falla&&(
                 <div style={{marginTop:11}}>
                   <span style={LBL}>¿Dónde exactamente?</span>
@@ -9239,11 +9687,29 @@ function SupervisionForm({rep, vendors, reps, onCancel, onSubmit}) {
 
   return (
     <Overlay>
+      {light&&<PhotoLightbox photos={light.photos} initialIdx={light.idx} onClose={function(){setLight(null);}}/>}
       <div style={{background:"#fff",borderRadius:18,width:"min(580px,94vw)",maxHeight:"92vh",overflowY:"auto",fontFamily:"Montserrat,sans-serif",boxShadow:"0 28px 80px rgba(62,63,63,.18)"}}>
         <div style={{padding:"20px 22px 14px",borderBottom:"1px solid "+C.line,position:"sticky",top:0,background:"#fff",zIndex:2,borderRadius:"18px 18px 0 0"}}>
           <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Supervisión de limpieza</div>
           <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:20,color:C.black,marginTop:4,lineHeight:1.2}}>{rep.propiedad||"—"}</div>
           <div style={{fontSize:11.5,color:C.earth,marginTop:3}}>{fmtDate(rep.fecha)} · {vendorNameByEmail(vendors,tecEmail)||tecEmail||"—"}</div>
+          <div style={{marginTop:10}}>
+            <button onClick={function(){setVerTodo(!verTodo);}} style={{background:"none",border:"none",padding:0,fontSize:11,fontWeight:600,color:slots.length?C.earth:C.taupe,cursor:slots.length?"pointer":"default",fontFamily:"Montserrat,sans-serif"}}>
+              {slots.length?(verTodo?"Ocultar las fotos de la limpieza ▾":"Ver las "+slots.length+" fotos de la limpieza ▸"):"El técnico no subió fotos en esta limpieza"}
+            </button>
+            {verTodo&&slots.length>0&&(
+              <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:9}}>
+                {slots.map(function(ft,fi){
+                  return (
+                    <button key={fi} onClick={function(){ setLight({photos:slots.map(function(x){return x.src;}), idx:fi}); }} title={ft.t}
+                      style={{padding:0,border:"1px solid "+C.line,borderRadius:8,background:"#f0f0f0",cursor:"zoom-in",overflow:"hidden",lineHeight:0}}>
+                      <img src={driveThumb(ft.src,200)} alt={ft.t} onError={function(e){e.target.src=ft.src;}} style={{width:62,height:52,objectFit:"cover",display:"block"}}/>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <div style={{display:"flex",alignItems:"center",gap:9,marginTop:11}}>
             <div style={{flex:1,height:4,background:C.surfaceWarm,borderRadius:100,overflow:"hidden"}}>
               <div style={{height:"100%",width:(resp.length/SUP_ITEMS.length*100)+"%",background:criticas.length?C.red:(fallas.length?C.orange:C.green),borderRadius:100,transition:"width .18s"}}/>
@@ -10319,13 +10785,32 @@ function buildComprobante(repsPaid, opts){
     soporte: null,
   };
 }
+/* ─── Foco de un comprobante: un correo suelto (uso del admin) o un {emails,names}
+   cuando la persona ha cambiado de correo con el tiempo. Un solo criterio de "esto
+   es mío" para la lista, el modal, la imagen, el PDF, la impresión y el nombre del
+   archivo: antes la lista reconocía al técnico por nombre y todo lo demás solo por
+   correo, así que al que le cambiaron el correo le salía la fila con su monto y el
+   comprobante en blanco. */
+function pgFocusMatch(t, focus){
+  if(!focus) return true;
+  if(!t) return false;
+  var em=String(t.vendorEmail||"").toLowerCase().trim();
+  if(typeof focus==="string") return em===String(focus).toLowerCase().trim();
+  if((focus.emails||[]).indexOf(em)>=0) return true;
+  var nm=normalize(t.vendorName||"");
+  return !!nm && (focus.names||[]).indexOf(nm)>=0;
+}
+function pgFocusTechs(pago, focus){
+  return (pago.tecnicos||[]).filter(function(t){ return pgFocusMatch(t, focus); });
+}
+
 /* Recibo imprimible / PDF (window.print). focusEmail limita a un solo técnico. */
 function printComprobante(pago, company, focusEmail){
   if(!pago) return;
   function esc(s){ return String(s==null?"":s).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c];}); }
   var coName=(company&&company.name)?company.name:"Spacio AM S.A.";
   var coNit =(company&&company.nit)?company.nit:"118287796";
-  var techs=(pago.tecnicos||[]).filter(function(t){return !focusEmail || t.vendorEmail===focusEmail;});
+  var techs=pgFocusTechs(pago, focusEmail);
   var multi=techs.length>1;
   var gBruto=techs.reduce(function(s,t){return s+t.subtotal;},0);
   var gDesc =techs.reduce(function(s,t){return s+t.adelanto;},0);
@@ -10880,25 +11365,44 @@ function NominaAdmin({vendors, pagos, adelantos, onSvPagos, ajustes, onSvAjustes
 }
 
 /* ─── Historial de pagos — lista de comprobantes (admin y técnico) */
-function PagosHistory({pagos, vendors, company, isAdmin, meEmails, onSvPagos}) {
+function PagosHistory({pagos, vendors, company, isAdmin, meEmails, meNames, onSvPagos}) {
   const [sel,   setSel]   = useState(null);
   const [fTipo, setFTipo] = useState("Todos");
+  const [fDesde,setFDesde]= useState("");
+  const [fHasta,setFHasta]= useState("");
   var mine=(meEmails||[]).map(function(e){return (e||"").toLowerCase().trim();}).filter(Boolean);
-  var list=(pagos||[]).slice().sort(function(a,b){return (b.createdAt||0)-(a.createdAt||0);});
-  if(!isAdmin){
-    list=list.filter(function(p){return (p.tecnicos||[]).some(function(t){return mine.indexOf((t.vendorEmail||"").toLowerCase().trim())>=0;});});
-  }
-  if(fTipo!=="Todos") list=list.filter(function(p){return p.tipo===fTipo;});
-  var focusEmail=(!isAdmin&&mine.length)?mine[0]:null;
+  /* Un correo cambiado dejaba comprobantes viejos invisibles para su dueño: el
+     nombre sirve de respaldo para reconocerlos. */
+  var misNombres=(meNames||[]).map(function(n){return normalize(n||"");}).filter(Boolean);
+  var foco=isAdmin?null:{emails:mine, names:misNombres};
+  function esMio(t){ return pgFocusMatch(t, foco); }
+  var todos=(pagos||[]).slice().sort(function(a,b){return (b.createdAt||0)-(a.createdAt||0);});
+  if(!isAdmin) todos=todos.filter(function(p){return (p.tecnicos||[]).some(esMio);});
+  /* Los tipos del menú salen de los comprobantes que existen, no de un catálogo. */
+  var tiposPresentes=[];
+  todos.forEach(function(p){ if(p.tipo&&tiposPresentes.indexOf(p.tipo)<0) tiposPresentes.push(p.tipo); });
+  var tiposOrden=["lote","individual","nomina","bono14","aguinaldo"].filter(function(x){return tiposPresentes.indexOf(x)>=0;})
+    .concat(tiposPresentes.filter(function(x){return ["lote","individual","nomina","bono14","aguinaldo"].indexOf(x)<0;}));
+  var list=todos.filter(function(p){
+    if(fTipo!=="Todos"&&p.tipo!==fTipo) return false;
+    var f=String(p.fechaPago||"").slice(0,10);
+    if(fDesde&&f&&f<fDesde) return false;
+    if(fHasta&&f&&f>fHasta) return false;
+    return true;
+  });
+  var focusEmail=foco;
+  var filtrando=fTipo!=="Todos"||!!fDesde||!!fHasta;
 
   function techBadges(p){
-    var ts=isAdmin?(p.tecnicos||[]):(p.tecnicos||[]).filter(function(t){return mine.indexOf((t.vendorEmail||"").toLowerCase().trim())>=0;});
+    var ts=isAdmin?(p.tecnicos||[]):(p.tecnicos||[]).filter(esMio);
     return ts.map(function(t){return t.vendorName;});
   }
   function shownNeto(p){
     if(isAdmin) return p.totalNeto;
-    return (p.tecnicos||[]).filter(function(t){return mine.indexOf((t.vendorEmail||"").toLowerCase().trim())>=0;}).reduce(function(s,t){return s+t.neto;},0);
+    return (p.tecnicos||[]).filter(esMio).reduce(function(s,t){return s+t.neto;},0);
   }
+  var sumaVista=list.reduce(function(s,p){return s+(shownNeto(p)||0);},0);
+  function preset(val){ var r=presetRange(val); setFDesde(r.from); setFHasta(r.to); }
 
   var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".13em",textTransform:"uppercase",display:"block",marginBottom:5};
   var IS={border:"1.5px solid "+C.gray,borderRadius:9,padding:"7px 10px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",color:C.black,cursor:"pointer"};
@@ -10910,21 +11414,58 @@ function PagosHistory({pagos, vendors, company, isAdmin, meEmails, onSvPagos}) {
           <div style={{fontSize:19,fontWeight:600,color:C.black,letterSpacing:".01em"}}>Historial de pagos</div>
           <div style={{fontSize:12,color:C.earth,marginTop:3}}>{isAdmin?"Comprobantes generados al marcar trabajos como pagados.":"Tus comprobantes de pago. Puedes descargarlos o imprimirlos."}</div>
         </div>
-        <div>
-          <span style={LBL}>Tipo</span>
-          <select value={fTipo} onChange={function(e){setFTipo(e.target.value);}} style={IS}>
-            <option value="Todos">Todos</option>
-            <option value="lote">Pago en lote</option>
-            <option value="individual">Pago individual</option>
-            <option value="nomina">Planilla — quincena</option>
-            <option value="bono14">Bono 14</option>
-            <option value="aguinaldo">Aguinaldo</option>
-          </select>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <div>
+            <span style={LBL}>Período rápido</span>
+            <select value="" onChange={function(e){ if(e.target.value) preset(e.target.value); }} style={IS}>
+              <option value="">Elegir…</option>
+              {PRESET_OPTS.map(function(o){ return <option key={o[0]} value={o[0]}>{o[1]}</option>; })}
+            </select>
+          </div>
+          <div>
+            <span style={LBL}>Desde</span>
+            <input type="date" value={fDesde} onChange={function(e){setFDesde(e.target.value);}} style={IS}/>
+          </div>
+          <div>
+            <span style={LBL}>Hasta</span>
+            <input type="date" value={fHasta} onChange={function(e){setFHasta(e.target.value);}} style={IS}/>
+          </div>
+          {tiposOrden.length>1&&(
+            <div>
+              <span style={LBL}>Tipo</span>
+              <select value={fTipo} onChange={function(e){setFTipo(e.target.value);}} style={IS}>
+                <option value="Todos">Todos</option>
+                {tiposOrden.map(function(k){ return <option key={k} value={k}>{pgTipoLabel(k)}</option>; })}
+              </select>
+            </div>
+          )}
+          {filtrando&&(
+            <button onClick={function(){setFTipo("Todos");setFDesde("");setFHasta("");}} style={{fontSize:11,fontWeight:600,color:C.earth,background:"#fff",border:"1px solid "+C.gray,borderRadius:100,padding:"8px 13px",minHeight:38,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Quitar filtros</button>
+          )}
         </div>
       </div>
 
+      {/* Lo que suma lo que se está viendo — la pregunta real detrás del historial. */}
+      {list.length>0&&(
+        <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"14px 18px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
+          <div style={{fontSize:11.5,color:C.earth,lineHeight:1.6}}>
+            {list.length} comprobante{list.length===1?"":"s"}{(fDesde||fHasta)?" · "+(fDesde?fmtDate(fDesde):"inicio")+" a "+(fHasta?fmtDate(fHasta):"hoy"):""}
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase"}}>{isAdmin?"Neto pagado":"Neto recibido"}</div>
+            <div style={{fontSize:19,fontWeight:700,color:C.black,fontVariantNumeric:"tabular-nums",marginTop:2}}>{pgMoney(sumaVista)}</div>
+          </div>
+        </div>
+      )}
+
       {list.length===0
-        ? <div style={{textAlign:"center",padding:"56px 20px",color:C.earth,fontSize:13.5,background:"#fff",borderRadius:16,border:"1px solid "+C.gray}}>Aún no hay comprobantes de pago.{isAdmin?" Se generará uno automáticamente cada vez que marques trabajos como pagados.":""}</div>
+        ? <div style={{textAlign:"center",padding:"46px 22px",color:C.earth,fontSize:13,background:"#fff",borderRadius:16,border:"1px solid "+C.gray,lineHeight:1.7,textWrap:"pretty",maxWidth:460,margin:"0 auto"}}>
+            {filtrando
+              ? <>Ningún comprobante en este rango. <button onClick={function(){setFTipo("Todos");setFDesde("");setFHasta("");}} style={{background:"none",border:"none",padding:0,color:C.black,fontWeight:700,fontSize:13,cursor:"pointer",textDecoration:"underline",fontFamily:"Montserrat,sans-serif"}}>Ver todo el historial</button></>
+              : (isAdmin
+                  ? "Aún no hay comprobantes de pago. Se generará uno automáticamente cada vez que marques trabajos como pagados."
+                  : "Todavía no tienes comprobantes. Aparecen aquí en cuanto el administrador marca tus trabajos como pagados o se emite tu quincena — con el detalle de cada limpieza y el neto que recibiste.")}
+          </div>
         : <div style={{display:"flex",flexDirection:"column",gap:10}}>
             {list.map(function(p){
               var techs=techBadges(p);
@@ -10960,7 +11501,7 @@ function pgEsc(s){ return String(s==null?"":s).replace(/[&<>]/g,function(c){retu
 function pgComprobanteCardHTML(pago, company, focusEmail){
   var coName=(company&&company.name)?company.name:"Spacio AM S.A.";
   var coNit =(company&&company.nit)?company.nit:"118287796";
-  var techs=(pago.tecnicos||[]).filter(function(t){return !focusEmail||t.vendorEmail===focusEmail;});
+  var techs=pgFocusTechs(pago, focusEmail);
   var multi=techs.length>1;
   var gBruto=techs.reduce(function(s,t){return s+t.subtotal;},0);
   var gDesc =techs.reduce(function(s,t){return s+t.adelanto;},0);
@@ -11014,7 +11555,7 @@ async function pgRenderCanvas(pago, company, focusEmail){
   } finally { try{document.body.removeChild(host);}catch(_){} }
 }
 function pgFileBase(pago, focusEmail){
-  var techs=(pago.tecnicos||[]).filter(function(t){return !focusEmail||t.vendorEmail===focusEmail;});
+  var techs=pgFocusTechs(pago, focusEmail);
   var who=String(focusEmail&&techs[0]?techs[0].vendorName:"tecnicos").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^\w\-]+/g,"_");
   return "Comprobante_"+(pago.folio||"pago")+"_"+who;
 }
@@ -11068,7 +11609,7 @@ function PagoComprobanteModal({pago, company, isAdmin, focusEmail, onClose, onSv
   const [shareBusy,setShareBusy]=useState("");
   const [soporte,setSoporte]=useState(pago.soporte||null);
   const [okMsg,setOkMsg]=useState(false);
-  var techs=(pago.tecnicos||[]).filter(function(t){return !focusEmail || t.vendorEmail===focusEmail;});
+  var techs=pgFocusTechs(pago, focusEmail);
   var gBruto=techs.reduce(function(s,t){return s+t.subtotal;},0);
   var gDesc =techs.reduce(function(s,t){return s+t.adelanto;},0);
   var gNeto =techs.reduce(function(s,t){return s+t.neto;},0);
