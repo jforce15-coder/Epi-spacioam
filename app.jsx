@@ -1293,7 +1293,7 @@ function App() {
      y se migran/ligan a su técnico en el .then de carga. */
   async function svAdelantos(v){ setAdelantos(v); adv_persist(v); }
   /* Comprobantes de pago — historial consultable por admin y técnico. */
-  async function svPagos(v, opts){ setPagos(v); pg_persist(v, opts); }
+  async function svPagos(v, opts){ setPagos(v); return pg_persist(v, opts); }
   /* Preferencias de notificaciones — qué perfiles reciben cada tipo de correo. */
   async function svNotifPrefs(v){ setNotifPrefs(v); NOTIF_PREFS=v; saveConfigItem("notifprefs", v); }
 
@@ -2011,7 +2011,7 @@ function DashView({props,nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews
       <div style={{display:sub==="exec"?"block":"none"}}><ExecDash reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos}/></div>
       {/* Historial de pagos: el admin principal ve todos los comprobantes; un admin
           secundario solo los suyos, igual que un técnico. */}
-      <div style={{display:sub==="pagos"?"block":"none"}}><PagosHistory pagos={pagos} vendors={vendors} company={company} isAdmin={canNom} meEmails={canNom?null:meEmails} onSvPagos={canNom?onSvPagos:null}/></div>
+      <div style={{display:sub==="pagos"?"block":"none"}}><PagosHistory pagos={pagos} vendors={vendors} company={company} reps={reps} isAdmin={canNom} meEmails={canNom?null:meEmails} onSvPagos={canNom?onSvPagos:null}/></div>
       {canNom&&<div style={{display:sub==="planilla"?"block":"none"}}><NominaAdmin vendors={vendors} pagos={pagos} adelantos={adelantos} onSvPagos={onSvPagos} ajustes={nomAjustes||[]} onSvAjustes={onSvNomAjustes} onSvV={onSvV}/></div>}
     </div>
   );
@@ -10774,10 +10774,12 @@ function pg_merge(cfg){
 function pg_persist(list, opts){
   var n=(list||[]).length;
   var permitido=!!(opts&&opts.permitirBorrar);
-  if(!permitido&&(n<PG_SEEN_MAX-1||!PG_COMPLETE)){
+  var acorta=n<PG_SEEN_MAX-1;
+  var incompletoYSinCrecer=!PG_COMPLETE&&n<=PG_SEEN_MAX;
+  if(!permitido&&(acorta||incompletoYSinCrecer)){
     /* Se preserva incluso la copia local: es la última red del rescate. */
     try{ apiCall("logEvento",{tipo:"error",detalle:"Se evitó sobrescribir el historial de pagos: se intentó guardar "+n+" comprobante(s) habiendo "+PG_SEEN_MAX+(PG_COMPLETE?"":" · la lectura del Sheet llegó incompleta"),usuario:"app"}).catch(function(){}); }catch(_){}
-    return;
+    return false;
   }
   PG_SEEN_MAX=Math.max(PG_SEEN_MAX,n);
   try{ localStorage.setItem("sam_pagos", JSON.stringify(list)); }catch(e){}
@@ -10793,6 +10795,7 @@ function pg_persist(list, opts){
       apiCall("saveConfig",{key:"pagos_n",value:shards.length});
     }catch(e){}
   }
+  return true;
 }
 function pgMoney(n){
   var v=Math.round((n||0)*100)/100, d=(v*100)%100===0?0:2;
@@ -11434,6 +11437,20 @@ function NominaAdmin({vendors, pagos, adelantos, onSvPagos, ajustes, onSvAjustes
   );
 }
 
+/* Escribir no es haber guardado: se relee el Sheet y se cuenta. */
+async function pgVerificar(esperado){
+  for(var intento=0; intento<3; intento++){
+    await new Promise(function(r){ setTimeout(r, 1800); });
+    try{
+      var cfg=await apiCall("getConfig")||{};
+      var n=(pg_merge(cfg)||[]).length;
+      if(n>=esperado) return {ok:true, n:n};
+      if(intento===2) return {ok:false, n:n};
+    }catch(e){ if(intento===2) return {ok:false, n:0}; }
+  }
+  return {ok:false, n:0};
+}
+
 /* ─── Rescate del historial: relee todos los campos repartidos del Sheet y la copia
    local de este navegador, y devuelve al historial lo que falte. */
 function RecuperarPagos({pagos, onSvPagos}){
@@ -11455,8 +11472,17 @@ function RecuperarPagos({pagos, onSvPagos}){
       });
       if(!extra.length){ setMsg("No hay comprobantes fuera del historial: lo que se ve es todo lo que quedó guardado."); setBusy(false); return; }
       var full=actual.concat(extra).sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
-      onSvPagos(full);
-      setMsg("Se recuperaron "+extra.length+" comprobante"+(extra.length===1?"":"s")+" y quedaron guardados de nuevo.");
+      var ok=await onSvPagos(full);
+      if(ok===false){
+        setMsg("Se encontraron "+extra.length+" comprobante"+(extra.length===1?"":"s")+", pero no se pudieron guardar: la lectura del Sheet llegó incompleta. Recarga la página y vuelve a intentarlo.");
+        setBusy(false); return;
+      }
+      setMsg("Se encontraron "+extra.length+" comprobante"+(extra.length===1?"":"s")+". Confirmando que quedaron en Google Sheets…");
+      var enSheet=await pgVerificar(full.length);
+      setMsg("Se recuperaron "+extra.length+" comprobante"+(extra.length===1?"":"s")+"."
+        + (enSheet.ok
+            ? " Confirmado en Google Sheets: "+enSheet.n+" comprobantes guardados."
+            : " ATENCIÓN: en Google Sheets solo se leen "+enSheet.n+" de "+full.length+". NO borres los datos de este navegador — es la única copia. Espera unos segundos y vuelve a presionar el botón; si sigue igual, avísame."));
     }catch(e){ setMsg("No se pudo leer el respaldo: "+((e&&e.message)||"sin conexión")); }
     setBusy(false);
   }
@@ -11474,8 +11500,251 @@ function RecuperarPagos({pagos, onSvPagos}){
   );
 }
 
+/* ─── Reconstruir el historial desde los trabajos ya pagados.
+   Un comprobante no es un dato original: es el resumen de trabajos que en su día
+   se marcaron como pagados, y esos trabajos siguen intactos en la hoja de
+   Reportes. Así que el historial se puede volver a levantar: un comprobante por
+   técnico y por semana (lunes→domingo), con el detalle real de cada limpieza.
+   Lo único que no se puede adivinar es el descuento de adelanto que llevaba el
+   original, así que el reconstruido va en bruto y se marca como tal. */
+function ReconstruirPagos({reps, vendors, pagos, onSvPagos}){
+  const [busy,setBusy] = useState(false);
+  const [msg,setMsg]   = useState("");
+  const [prev,setPrev] = useState(null);
+
+  function armar(){
+    /* Trabajos que ya figuran en algún comprobante: esos no se tocan. */
+    var yaEn={};
+    (pagos||[]).forEach(function(p){
+      (p.tecnicos||[]).forEach(function(tc){
+        (tc.trabajos||[]).forEach(function(w){ if(w&&w.repId!=null) yaEn[String(w.repId)]=1; });
+      });
+    });
+    var pagados=(reps||[]).filter(function(r){
+      return r && r.paid && !isDanos(r.categoria) && isPayable(r,vendors) && r.fecha && !yaEn[String(r.id)];
+    });
+    if(!pagados.length) return {grupos:[], reps:0};
+    /* Un comprobante por persona y por semana, como se pagaba de verdad. */
+    var g={};
+    pagados.forEach(function(r){
+      var v=(vendors||[]).find(function(x){ return repMatchesVendor(r,x); });
+      var em=String((v&&(v.email||vendorEmailSet(v)[0]))||r.reportadoPor||"").toLowerCase();
+      var wk=weekKeyOf(new Date(r.fecha+"T12:00:00"));
+      var k=em+"|"+wk;
+      if(!g[k]) g[k]={email:em, nombre:v?vendorDisplay(v):(r.reportadoPor||"—"), semana:wk, reps:[]};
+      g[k].reps.push(r);
+    });
+    var grupos=Object.keys(g).map(function(k){ return g[k]; })
+      .sort(function(a,b){ return a.semana<b.semana?1:(a.semana>b.semana?-1:(a.nombre||"").localeCompare(b.nombre||"")); });
+    return {grupos:grupos, reps:pagados.length};
+  }
+
+  function revisar(){
+    setBusy(true); setMsg("");
+    try{
+      var r=armar();
+      if(!r.grupos.length){ setMsg("No hay trabajos pagados fuera del historial: todo lo que está pagado ya tiene su comprobante."); setPrev(null); }
+      else setPrev(r);
+    }catch(e){ setMsg("No se pudo revisar: "+((e&&e.message)||e)); }
+    setBusy(false);
+  }
+
+  async function aplicar(){
+    if(!prev) return;
+    setBusy(true);
+    try{
+      var nuevos=prev.grupos.map(function(gr,i){
+        var fechas=gr.reps.map(function(r){return r.fecha;}).sort();
+        var domingo=SCHED.shift(gr.semana,6);
+        var p=buildComprobante(gr.reps,{
+          vendors:vendors, adelantos:[], allReps:reps||[], applyAdelanto:false,
+          tipo:"lote", generadoPor:"Reconstruido del historial",
+          folio:"REC-"+gr.semana+"-"+String(i+1).padStart(2,"0"),
+          rangoDesde:fechas[0]||gr.semana, rangoHasta:fechas[fechas.length-1]||domingo
+        });
+        p.id="pgrec_"+gr.semana+"_"+i+"_"+Date.now();
+        p.fechaPago=fechas[fechas.length-1]||domingo;
+        p.createdAt=new Date((fechas[fechas.length-1]||domingo)+"T12:00:00").getTime();
+        p.reconstruido=true;
+        return p;
+      });
+      var total=nuevos.length+(pagos||[]).length;
+      var ok=await onSvPagos(nuevos.concat(pagos||[]).sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); }));
+      if(ok===false){
+        setMsg("Se armaron "+nuevos.length+" comprobantes, pero no se pudieron guardar: la lectura del Sheet llegó incompleta. Recarga la página y vuelve a intentarlo — nada quedó a medias.");
+        setBusy(false); return;
+      }
+      setMsg("Se reconstruyeron "+nuevos.length+" comprobantes con "+prev.reps+" trabajos pagados. Confirmando que quedaron en Google Sheets…");
+      setPrev(null);
+      var enSheet=await pgVerificar(total);
+      setMsg("Se reconstruyeron "+nuevos.length+" comprobantes con "+prev.reps+" trabajos pagados, sin el descuento de adelanto del original."
+        + (enSheet.ok
+            ? " Confirmado en Google Sheets: "+enSheet.n+" comprobantes guardados."
+            : " ATENCIÓN: en Google Sheets solo se leen "+enSheet.n+" de "+total+". No cierres esta pestaña — espera unos segundos y vuelve a presionar «Revisar qué se puede reconstruir» para confirmar. Si sigue igual, avísame: el guardado al Sheet está fallando."));
+    }catch(e){ setMsg("No se pudo reconstruir: "+((e&&e.message)||e)); }
+    setBusy(false);
+  }
+
+  var porTec={};
+  if(prev) prev.grupos.forEach(function(gr){ porTec[gr.nombre]=(porTec[gr.nombre]||0)+1; });
+
+  return (
+    <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"14px 18px",marginBottom:12,boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <div style={{minWidth:0,flex:1}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Reconstruir desde los trabajos pagados</div>
+          <div style={{fontSize:11.5,color:C.earth,marginTop:5,lineHeight:1.6,textWrap:"pretty"}}>Los trabajos siguen completos en la hoja de Reportes. Esto vuelve a levantar un comprobante por técnico y por semana con el detalle real de cada trabajo pagado que hoy no aparece en ningún comprobante.</div>
+        </div>
+        <button onClick={revisar} disabled={busy} style={{flexShrink:0,padding:"10px 16px",minHeight:42,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:busy?C.taupe:C.black,fontSize:11.5,fontWeight:600,cursor:busy?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>{busy?"Revisando…":"Revisar qué se puede reconstruir"}</button>
+      </div>
+
+      {prev&&(
+        <div style={{marginTop:12,background:C.surfaceWarm,borderRadius:11,padding:"12px 13px"}}>
+          <div style={{fontSize:12.5,color:C.black,fontWeight:600,lineHeight:1.6,textWrap:"pretty"}}>
+            {prev.grupos.length} comprobante{prev.grupos.length===1?"":"s"} a reconstruir · {prev.reps} trabajo{prev.reps===1?"":"s"} pagado{prev.reps===1?"":"s"} · {Object.keys(porTec).length} técnico{Object.keys(porTec).length===1?"":"s"}
+          </div>
+          <div style={{fontSize:11,color:C.earth,marginTop:7,lineHeight:1.75}}>
+            {Object.keys(porTec).sort().map(function(n){ return n+" ("+porTec[n]+")"; }).join(" · ")}
+          </div>
+          <div style={{fontSize:11,color:C.earth,marginTop:9,lineHeight:1.65,textWrap:"pretty"}}>
+            Cada uno lleva la fecha del último trabajo de su semana y el folio REC-. El descuento de adelanto del comprobante original no se puede reconstruir: van en bruto.
+          </div>
+          <div style={{display:"flex",gap:9,marginTop:11,flexWrap:"wrap"}}>
+            <button onClick={aplicar} disabled={busy} style={{padding:"11px 18px",minHeight:44,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Reconstruir el historial</button>
+            <button onClick={function(){setPrev(null);}} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cancelar</button>
+          </div>
+        </div>
+      )}
+      {msg&&<div style={{marginTop:11,fontSize:11.5,color:C.black,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",lineHeight:1.6,textWrap:"pretty"}}>{msg}</div>}
+    </div>
+  );
+}
+
+/* ─── Restaurar desde el historial de versiones del Sheet.
+   Los comprobantes SÍ llegaron a Google Sheets: están en las versiones anteriores
+   de la hoja de configuración, repartidos en los campos pagos, pagos_2, pagos_3…
+   Este panel acepta ese texto pegado tal cual —una celda, varias, o la fila
+   completa con el nombre del campo al principio— encuentra cada arreglo de
+   comprobantes y devuelve al historial los que falten, con su folio y su
+   descuento originales. */
+function pgArraysEnTexto(txt){
+  var out=[], s=String(txt||"");
+  for(var i=0;i<s.length;i++){
+    if(s[i]!=="[") continue;
+    var j=i+1; while(j<s.length&&/\s/.test(s[j])) j++;
+    if(s[j]!=="{") continue;
+    /* Recorrido consciente de comillas y escapes: así una descripción con
+       corchetes dentro no rompe el conteo. */
+    var depth=0, enStr=false, esc=false, fin=-1;
+    for(var k=i;k<s.length;k++){
+      var c=s[k];
+      if(esc){ esc=false; continue; }
+      if(c==="\\"){ esc=true; continue; }
+      if(c==='"'){ enStr=!enStr; continue; }
+      if(enStr) continue;
+      if(c==="["||c==="{") depth++;
+      else if(c==="]"||c==="}"){ depth--; if(depth===0){ fin=k; break; } }
+    }
+    if(fin<0) break;
+    try{
+      var arr=JSON.parse(s.slice(i,fin+1));
+      if(Array.isArray(arr)&&arr.length&&arr.some(function(x){ return x&&(x.folio||x.tecnicos); })) out.push(arr);
+    }catch(e){}
+    i=fin;
+  }
+  return out;
+}
+
+function RestaurarPagos({pagos, onSvPagos}){
+  const [abierto,setAbierto] = useState(false);
+  const [txt,setTxt]   = useState("");
+  const [busy,setBusy] = useState(false);
+  const [msg,setMsg]   = useState("");
+  const [prev,setPrev] = useState(null);
+
+  function leer(){
+    setMsg("");
+    var arrays=pgArraysEnTexto(txt);
+    if(!arrays.length){ setPrev(null); setMsg("No encontré ningún comprobante en ese texto. Pega el contenido de las celdas «pagos», «pagos_2», «pagos_3»… tal como aparece en la versión anterior del Sheet."); return; }
+    var encontrados=[];
+    arrays.forEach(function(a){ a.forEach(function(p){ if(p&&(p.folio||p.tecnicos)) encontrados.push(p); }); });
+    var seen={}; (pagos||[]).forEach(function(p){ if(p) seen[String(p.folio||p.id)]=1; });
+    var nuevos=[], dupInterno={};
+    encontrados.forEach(function(p){
+      var k=String(p.folio||p.id); if(!k||seen[k]||dupInterno[k]) return;
+      dupInterno[k]=1; nuevos.push(p);
+    });
+    var fechas=nuevos.map(function(p){ return String(p.fechaPago||"").slice(0,10); }).filter(Boolean).sort();
+    setPrev({nuevos:nuevos, hallados:encontrados.length, campos:arrays.length, desde:fechas[0]||"", hasta:fechas[fechas.length-1]||""});
+    if(!nuevos.length) setMsg("Los "+encontrados.length+" comprobantes de ese texto ya están en el historial: no hay nada que restaurar.");
+  }
+
+  async function restaurar(){
+    if(!prev||!prev.nuevos.length) return;
+    setBusy(true);
+    var total=prev.nuevos.length+(pagos||[]).length;
+    var cuantos=prev.nuevos.length;
+    var ok=await onSvPagos(prev.nuevos.concat(pagos||[]).sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); }));
+    if(ok===false){
+      setMsg("No se pudieron guardar: la lectura del Sheet llegó incompleta. Recarga la página y vuelve a pegar el texto.");
+      setBusy(false); return;
+    }
+    setMsg("Restaurados "+cuantos+" comprobantes. Confirmando que quedaron en Google Sheets…");
+    setPrev(null); setTxt("");
+    var enSheet=await pgVerificar(total);
+    setMsg("Restaurados "+cuantos+" comprobantes con su folio y su descuento originales."
+      + (enSheet.ok
+          ? " Confirmado en Google Sheets: "+enSheet.n+" comprobantes guardados."
+          : " ATENCIÓN: en Google Sheets solo se leen "+enSheet.n+" de "+total+". No cierres esta pestaña: espera unos segundos y vuelve a pegar el texto para confirmar."));
+    setBusy(false);
+  }
+
+  return (
+    <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"14px 18px",marginBottom:12,boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
+      <button onClick={function(){setAbierto(!abierto);}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Restaurar desde una versión anterior del Sheet</div>
+          <div style={{fontSize:11.5,color:C.earth,marginTop:5,lineHeight:1.6,textWrap:"pretty"}}>Los comprobantes originales están en el historial de versiones de Google Sheets. Pega aquí el texto de las celdas y vuelven con su folio y su descuento exactos.</div>
+        </div>
+        <span style={{color:C.taupe,fontSize:12,flexShrink:0}}>{abierto?"▾":"▸"}</span>
+      </button>
+
+      {abierto&&(
+        <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{fontSize:11,color:C.earth,lineHeight:1.75,background:C.surfaceWarm,borderRadius:9,padding:"11px 12px",textWrap:"pretty"}}>
+            En el Google Sheet: <b style={{color:C.black}}>Archivo → Historial de versiones → Ver historial de versiones</b>. Abre una versión anterior, ve a la hoja de configuración y copia las celdas <b style={{color:C.black}}>pagos</b>, <b style={{color:C.black}}>pagos_2</b>, <b style={{color:C.black}}>pagos_3</b>… Puedes pegarlas todas juntas de una sola vez, incluso con el nombre del campo al principio de cada línea.
+          </div>
+          <textarea value={txt} onChange={function(e){setTxt(e.target.value);setPrev(null);}} rows={5} placeholder='pagos&#9;[{"id":"pg_…","folio":"CP-2026-0054",…}]'
+            style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"10px 12px",fontSize:11,fontFamily:"ui-monospace,SFMono-Regular,Menlo,monospace",outline:"none",resize:"vertical",lineHeight:1.5}}/>
+          <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+            <button onClick={leer} disabled={busy||!txt.trim()} style={{padding:"10px 16px",minHeight:42,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:(busy||!txt.trim())?C.taupe:C.black,fontSize:11.5,fontWeight:600,cursor:(busy||!txt.trim())?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>Revisar el texto pegado</button>
+            {txt&&<button onClick={function(){setTxt("");setPrev(null);setMsg("");}} style={{padding:"10px 14px",minHeight:42,borderRadius:100,border:"none",background:"none",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Limpiar</button>}
+          </div>
+
+          {prev&&prev.nuevos.length>0&&(
+            <div style={{background:C.surfaceWarm,borderRadius:11,padding:"12px 13px"}}>
+              <div style={{fontSize:12.5,color:C.black,fontWeight:600,lineHeight:1.6}}>
+                {prev.nuevos.length} comprobante{prev.nuevos.length===1?"":"s"} a restaurar
+                {prev.hallados>prev.nuevos.length?" · "+(prev.hallados-prev.nuevos.length)+" ya estaban":""}
+              </div>
+              <div style={{fontSize:11,color:C.earth,marginTop:6,lineHeight:1.7}}>
+                {prev.desde?fmtDate(prev.desde)+" a "+fmtDate(prev.hasta):"sin fechas de pago"} · leídos de {prev.campos} campo{prev.campos===1?"":"s"} de respaldo
+              </div>
+              <div style={{fontSize:11,color:C.earth,marginTop:7,lineHeight:1.7,maxHeight:120,overflowY:"auto"}}>
+                {prev.nuevos.map(function(p){ return p.folio||p.id; }).join(" · ")}
+              </div>
+              <button onClick={restaurar} disabled={busy} style={{marginTop:11,padding:"11px 18px",minHeight:44,borderRadius:100,border:"none",background:busy?C.gray:C.black,color:"#fff",fontSize:12,fontWeight:700,cursor:busy?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>{busy?"Restaurando…":"Restaurar al historial"}</button>
+            </div>
+          )}
+          {msg&&<div style={{fontSize:11.5,color:C.black,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",lineHeight:1.6,textWrap:"pretty"}}>{msg}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Historial de pagos — lista de comprobantes (admin y técnico) */
-function PagosHistory({pagos, vendors, company, isAdmin, meEmails, meNames, onSvPagos}) {
+function PagosHistory({pagos, vendors, company, isAdmin, meEmails, meNames, reps, onSvPagos}) {
   const [sel,   setSel]   = useState(null);
   const [fTipo, setFTipo] = useState("Todos");
   const [fDesde,setFDesde]= useState("");
@@ -11555,7 +11824,9 @@ function PagosHistory({pagos, vendors, company, isAdmin, meEmails, meNames, onSv
         </div>
       </div>
 
+      {isAdmin&&onSvPagos&&<RestaurarPagos pagos={pagos} onSvPagos={onSvPagos}/>}
       {isAdmin&&onSvPagos&&<RecuperarPagos pagos={pagos} onSvPagos={onSvPagos}/>}
+      {isAdmin&&onSvPagos&&<ReconstruirPagos reps={reps||[]} vendors={vendors} pagos={pagos} onSvPagos={onSvPagos}/>}
 
       {/* Lo que suma lo que se está viendo — la pregunta real detrás del historial. */}
       {list.length>0&&(
@@ -11587,6 +11858,7 @@ function PagosHistory({pagos, vendors, company, isAdmin, meEmails, meNames, onSv
                     <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:5}}>
                       <span style={{fontSize:13.5,fontWeight:700,color:C.black,fontVariantNumeric:"tabular-nums"}}>{p.folio}</span>
                       <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:100,background:pgTipoBg(p.tipo),color:pgTipoFg(p.tipo)}}>{pgTipoLabel(p.tipo)}</span>
+                      {p.reconstruido&&<span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:100,background:C.surfaceWarm,color:C.earth,border:"1px solid "+C.line}}>Reconstruido</span>}
                     </div>
                     <div style={{fontSize:12,color:C.earth}}>{fmtDate(p.fechaPago)} · {techs.length} técnico{techs.length!==1?"s":""} · {techs.slice(0,3).join(", ")}{techs.length>3?" +"+(techs.length-3):""}</div>
                   </div>
