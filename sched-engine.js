@@ -263,6 +263,7 @@
       /* Una profunda ocupa un turno completo: debe caber además de lo ya previsto. */
       return (cargaDia[f] || 0) + minutosLimpieza(1, "profunda") <= capacidadDia * 0.85;
     }
+    /* Solo formularios entregados: una profunda agendada no es una profunda hecha. */
     var ultima = {};
     for (var i = 0; i < historial.length; i++) {
       var h = historial[i];
@@ -279,9 +280,11 @@
       var kk = norm(c.propiedad);
       if (!porProp[kk] || c.fecha < porProp[kk].fecha) porProp[kk] = c;
     }
+    var excluir = o.excluir || {};
     var candidatas = [];
     for (var pk in porProp) {
       if (!porProp.hasOwnProperty(pk)) continue;
+      if (excluir[pk]) continue; /* ya tiene una profunda agendada sin hacer */
       var base = porProp[pk];
       var prev = ultima[pk];
       /* Sin historial: se programa la primera. Con historial: cuando ya pasaron
@@ -790,8 +793,12 @@
 
     var base = limpiezasRequeridas({ reservas: o.reservas, props: o.props, desde: desde, hasta: hasta });
     var equipo = (o.vendors || []).filter(esLimpieza).length;
+    var yaAgendada = {};
+    (o.existentes || []).forEach(function (s) {
+      if (s && esProfunda(s.tipo) && String(s.fecha).slice(0, 10) >= hoy) yaAgendada[norm(s.propiedad)] = 1;
+    });
     base = agregarProfundas(base, {
-      props: o.props, historial: (o.historial || []).concat(previos), hoy: hoy,
+      props: o.props, historial: o.historial || [], hoy: hoy, excluir: yaAgendada,
       maxPorDia: Math.max(1, Math.floor(equipo / 5)),
       capacidadDia: equipo * JORNADA_MIN
     });

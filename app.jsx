@@ -7834,6 +7834,8 @@ function DiagProgramacion({props, reservas, schedules, vendors, ausencias, reps,
     }
     /* Otros checkouts de ese día: si el nombre del anuncio en Hospitable no es el
        mismo que el del portafolio, aquí se ve la grafía real. */
+    var entradas=(reservas||[]).map(function(r){ return String(r.checkIn||"").slice(0,10); }).filter(Boolean).sort();
+    var alcanceSync=entradas[0]||"";
     var checkoutsDia=(reservas||[]).filter(function(r){ return r&&String(r.checkOut||"").slice(0,10)===fecha; })
       .map(function(r){ return String(r.propiedad||"").trim()||"(sin propiedad)"; });
     checkoutsDia=checkoutsDia.filter(function(x,i){ return checkoutsDia.indexOf(x)===i; }).sort();
@@ -7843,6 +7845,8 @@ function DiagProgramacion({props, reservas, schedules, vendors, ausencias, reps,
        v:resProp.length?resProp.length+" reserva"+(resProp.length===1?"":"s")+" sincronizada"+(resProp.length===1?"":"s"):"Ninguna — Hospitable no devuelve este nombre de propiedad"},
       {ok:!!checkout.length, t:"Checkout el "+fmtDate(fecha),
        v:checkout.length?"Sí"+(checkin.length?" · y también hay check-in ese día (limpieza de entrada)":""):"No hay checkout ese día en los datos sincronizados"},
+      {ok:!!checkout.length||!alcanceSync, t:"Alcance de la sincronización",
+       v:alcanceSync?"La entrada más antigua que trajo Hospitable es del "+fmtDate(alcanceSync)+". Las estancias que empezaron antes no vienen, y con ellas se pierde su checkout.":"Sin reservas sincronizadas"},
       {ok:!!pObj, t:"Ficha en el portafolio",
        v:pObj?"Sí · "+(pObj.cuartos||1)+" habitación"+((pObj.cuartos||1)===1?"":"es"):"No está en Propiedades — sin ficha no hay zona ni habitaciones"},
       {ok:!pausa, t:"Fuera de pausa",
@@ -7862,7 +7866,10 @@ function DiagProgramacion({props, reservas, schedules, vendors, ausencias, reps,
     var veredicto;
     if(enSched.length) veredicto="Sí se programó. Está asignada a "+(vendorNameByEmail(vendors,enSched[0].vendorEmail)||enSched[0].vendorEmail)+".";
     else if(!resProp.length) veredicto="Hospitable no devolvió ninguna reserva con este nombre exacto. Casi siempre el anuncio se llama distinto allá: compara con la lista de checkouts de ese día que está abajo y corrige el nombre en Propiedades."+(sinNombre.length?" Además hay "+sinNombre.length+" reserva"+(sinNombre.length===1?"":"s")+" sincronizada"+(sinNombre.length===1?"":"s")+" sin propiedad identificable — esas el motor ni las ve.":"");
-    else if(!checkout.length) veredicto="Había reservas de la propiedad, pero ninguna con checkout ese día en los datos que tenía el motor. Si el huésped salió ese día, la reserva entró o se modificó después de la corrida.";
+    else if(!checkout.length) veredicto="Había reservas de la propiedad, pero ninguna con checkout ese día en los datos que tenía el motor."
+      +(alcanceSync&&fecha>alcanceSync
+        ? " Hospitable filtra por fecha de ENTRADA y la sincronización solo alcanzaba desde el "+fmtDate(alcanceSync)+": si el huésped llegó antes de esa fecha, su reserva no vino y su salida quedó invisible para el motor. Es la causa típica en estancias largas."
+        : " Si el huésped salió ese día, la reserva entró o se modificó después de la corrida.");
     else if(pausa) veredicto="La propiedad estaba en pausa ese día: el motor la excluye a propósito. Se quita la pausa en Programación › Propiedades fuera del reparto.";
     else if(!pObj) veredicto="La propiedad no tiene ficha en el portafolio, así que el motor no supo ni su zona ni sus habitaciones.";
     else if(!z) veredicto="El nombre de la propiedad no trae zona al frente (formato «Z1 - Edificio - Unidad»). La zona es regla dura: sin ella nadie es candidato.";
@@ -7925,6 +7932,27 @@ function DiagProgramacion({props, reservas, schedules, vendors, ausencias, reps,
   );
 }
 
+var FAROL_COLOR = {verde:"#3d6b52", amarillo:"#D9A441", rojo:"#9B3A3A", gris:"#D8D4CE"};
+var FAROL_TXT   = {verde:"Ruta completa", amarillo:"En curso — le falta", rojo:"Sin empezar", gris:"Todavía no toca"};
+function farolDe(lista, cierres, activo){
+  var n=(lista||[]).length;
+  if(!n) return "gris";
+  if(!activo) return "gris";
+  var hechas=lista.filter(function(s){ return (cierres[s.id]||{}).estado==="hecha"; }).length;
+  if(hechas===n) return "verde";
+  return hechas===0 ? "rojo" : "amarillo";
+}
+function Farol({estado, hechas, total, size}){
+  var d=size||13;
+  return (
+    <span title={FAROL_TXT[estado]+(total!=null?" · "+hechas+" de "+total:"")}
+      style={{display:"inline-flex",alignItems:"center",gap:6,flexShrink:0}}>
+      <span style={{width:d,height:d,borderRadius:"50%",background:FAROL_COLOR[estado],display:"inline-block",boxShadow:estado==="gris"?"none":"0 0 0 3px "+FAROL_COLOR[estado]+"22"}}/>
+      {total!=null&&<span style={{fontSize:10,fontWeight:700,color:estado==="gris"?C.taupe:FAROL_COLOR[estado],fontVariantNumeric:"tabular-nums"}}>{hechas}/{total}</span>}
+    </span>
+  );
+}
+
 function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, schedErr}) {
   /* Abre en HOY: la ruta que el equipo está corriendo ahora mismo es la que el
      administrador necesita ver al entrar, no la de mañana. */
@@ -7939,6 +7967,9 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   const [sim,      setSim]      = useState(null);   /* simulacro: no guarda ni notifica */
   const [reabrir,  setReabrir]  = useState({});     /* días ya notificados que se van a rehacer */
   const [tocados,  setTocados]  = useState({});     /* días notificados que el admin ya cambió */
+  const [herram,   setHerram]   = useState(false);  /* controles manuales — solo para emergencias */
+  const [vistaRuta,setVistaRuta]= useState("tec");  /* el mismo día visto por técnico o por apartamento */
+  const [zonasAb,  setZonasAb]  = useState({});     /* zonas abiertas en la vista por apartamento */
   const [abiertos, setAbiertos] = useState({});     /* técnicos con la ruta desplegada */
   const [filtroTec,setFiltroTec]= useState("todos");
   const [buscaTec, setBuscaTec] = useState("");
@@ -8262,6 +8293,37 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   }):[];
   var pendientes=(esHoy||esPasado)?delDia.filter(function(s){ return (cierres[s.id]||{}).estado!=="hecha"; })
     .sort(function(a,b){ return (a.orden||0)-(b.orden||0); }):[];
+  /* El semáforo solo tiene sentido cuando el día ya está corriendo. */
+  var farolActivo=esHoy||esPasado;
+  function farol(lista){ return farolDe(lista, cierres, farolActivo); }
+  function hechasDe(lista){ return (lista||[]).filter(function(s){ return (cierres[s.id]||{}).estado==="hecha"; }).length; }
+
+  /* Mismo día, otra lectura: zona › edificio › apartamento. Con 60 propiedades,
+     "¿cómo va la Zona 10?" no se responde recorriendo doce técnicos. */
+  var arbolZonas = React.useMemo(function(){
+    var zs={};
+    delDia.forEach(function(s){
+      var p=SCHED.partes(s.propiedad||"");
+      var zk=SCHED.zonaKey(p.zona)||"—";
+      var ed=(p.edificio||p.full||s.propiedad||"—").trim();
+      if(!zs[zk]) zs[zk]={key:zk, label:p.zona?SCHED.zonaLabel(zk):"Sin zona", lista:[], edificios:{}};
+      zs[zk].lista.push(s);
+      if(!zs[zk].edificios[ed]) zs[zk].edificios[ed]={nombre:ed, lista:[], unidades:{}};
+      zs[zk].edificios[ed].lista.push(s);
+      var un=(p.unidad||"").trim()||ed;
+      if(!zs[zk].edificios[ed].unidades[un]) zs[zk].edificios[ed].unidades[un]={nombre:un, lista:[]};
+      zs[zk].edificios[ed].unidades[un].lista.push(s);
+    });
+    return Object.keys(zs).sort().map(function(zk){
+      var z=zs[zk];
+      z.edificiosArr=Object.keys(z.edificios).sort().map(function(e){
+        var ed=z.edificios[e];
+        ed.unidadesArr=Object.keys(ed.unidades).sort(function(a,b){ return a.localeCompare(b,"es",{numeric:true}); }).map(function(u){ return ed.unidades[u]; });
+        return ed;
+      });
+      return z;
+    });
+  }, [delDia, fecha]);
 
   /* Capacidad y saturación del día */
   var demanda=delDia.reduce(function(s,x){ return s+SCHED.minutosLimpieza(x.habitaciones,x.tipo); },0);
@@ -8408,7 +8470,15 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
             )}
           </div>
         </div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:14}}>
+        <button onClick={function(){setHerram(!herram);}} style={{marginTop:12,background:"none",border:"none",padding:0,fontSize:11,fontWeight:600,color:C.taupe,cursor:"pointer",fontFamily:"Montserrat,sans-serif",letterSpacing:".04em"}}>
+          {herram?"Ocultar controles manuales ▾":"Controles manuales ▸"}
+        </button>
+        {herram&&(
+        <>
+        <div style={{fontSize:11,color:C.earth,lineHeight:1.65,marginTop:9,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",textWrap:"pretty"}}>
+          Todo esto corre solo. Úsalos únicamente si algo falló: rehacer o borrar cambia el trabajo del día a todo el equipo.
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:11}}>
           <button onClick={sincronizar} disabled={!!busy} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:busy?"default":"pointer"}}>
             {busy==="sync"?"Sincronizando…":"↻ Actualizar ahora"}
           </button>
@@ -8423,6 +8493,8 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
             Simulacro del día
           </button>
         </div>
+        </>
+        )}
         {msg&&<div style={{marginTop:11,fontSize:11.5,fontWeight:600,color:msg.ok?C.green:C.red,lineHeight:1.5}}>{msg.txt}</div>}
         {!resUtiles&&(
           <div style={{marginTop:11,fontSize:11.5,color:C.earth,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",lineHeight:1.6,textWrap:"pretty"}}>
@@ -8430,7 +8502,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
               ? "Sincronizando reservas con Hospitable…"
               : (reservas||[]).length
                 ? "Llegaron "+(reservas||[]).length+" reservas pero ninguna trae la propiedad identificada, así que no se puede saber la zona ni las habitaciones. Republica el Code.gs y presiona Actualizar ahora."
-                : "Aún no hay reservas cargadas. Se traen solas al abrir esta pestaña; si no aparecen, presiona Actualizar ahora."}
+                : "Aún no hay reservas cargadas. Se traen solas al abrir esta pestaña; si no aparecen, abre los controles manuales y presiona Actualizar ahora."}
           </div>
         )}
       </div>
@@ -8674,74 +8746,6 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
         )}
       </div>
 
-      {/* ─── Limpiezas completadas
-           Una limpieza se da por hecha cuando existe el formulario de ese día para
-           esa propiedad — tradicional, profunda o ajuste. Pasada la 1:00 pm, quien
-           no ha registrado nada aparece en rojo. */}
-      {(esHoy||esPasado)&&delDia.length>0&&(
-        <div style={CARD}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
-            <div style={{minWidth:0}}>
-              <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Limpiezas completadas</div>
-              <div style={{fontSize:11.5,color:C.earth,marginTop:5,lineHeight:1.6,textWrap:"pretty"}}>Se da por hecha cuando existe el formulario de ese día: limpieza tradicional, profunda o ajuste.</div>
-            </div>
-            <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontSize:24,fontWeight:600,color:hechas===delDia.length?C.green:C.black,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{hechas}<span style={{color:C.taupe,fontSize:15}}>/{delDia.length}</span></div>
-            </div>
-          </div>
-          <div style={{height:5,borderRadius:100,background:C.line,overflow:"hidden",marginTop:12}}>
-            <div style={{width:(delDia.length?Math.round(hechas/delDia.length*100):0)+"%",height:"100%",background:hechas===delDia.length?C.green:((alertaHora||esPasado)?C.red:C.black),transition:"width .18s"}}/>
-          </div>
-
-          {sinNingunForm.length>0&&(alertaHora||esPasado)&&(
-            <div style={{marginTop:13,background:"#F5EDEC",border:"1px solid #E7D3CE",borderRadius:11,padding:"12px 13px"}}>
-              <div style={{fontSize:9.5,fontWeight:700,color:C.red,letterSpacing:".14em",textTransform:"uppercase"}}>Sin un solo formulario</div>
-              <div style={{fontSize:12,color:C.black,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>
-                {esHoy?"Ya pasó la 1:00 pm y ":""}{sinNingunForm.length===1?"un técnico con ruta no ha registrado nada":sinNingunForm.length+" técnicos con ruta no han registrado nada"} {esHoy?"hoy":"ese día"}.
-              </div>
-              <div style={{display:"flex",flexDirection:"column",gap:7,marginTop:10}}>
-                {sinNingunForm.map(function(em){
-                  var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===em; });
-                  var arr=porTec[em]||[];
-                  var tel=String((v&&(v.phone||v.telefono))||"").replace(/[^0-9]/g,"");
-                  return (
-                    <div key={em} style={{background:"#fff",borderRadius:9,padding:"10px 11px",display:"flex",justifyContent:"space-between",gap:9,flexWrap:"wrap",alignItems:"center"}}>
-                      <div style={{minWidth:0}}>
-                        <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{v?vendorDisplay(v):em}</div>
-                        <div style={{fontSize:10.5,color:C.earth,marginTop:2}}>{arr.length} limpieza{arr.length===1?"":"s"} · {arr.map(function(s){ return propCorta(s.propiedad); }).join(" → ")}</div>
-                      </div>
-                      {tel.length>=8&&(
-                        <a href={"https://wa.me/"+(tel.length===8?"502":"")+tel} target="_blank" rel="noopener noreferrer" style={{flexShrink:0,fontSize:11,fontWeight:600,color:C.earth,textDecoration:"none",padding:"8px 13px",minHeight:36,borderRadius:100,border:"1px solid "+C.gray,background:"#fff"}}>Escribirle →</a>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {pendientes.length>0&&(
-            <div style={{marginTop:13,display:"flex",flexDirection:"column",gap:6}}>
-              <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Todavía sin formulario · {pendientes.length}</div>
-              {pendientes.map(function(s){
-                var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===emailVigente(s); });
-                var rojo=(cierres[s.id]||{}).estado!=="pendiente";
-                return (
-                  <div key={s.id} style={{display:"flex",justifyContent:"space-between",gap:9,flexWrap:"wrap",alignItems:"baseline",padding:"7px 0",borderTop:"1px solid "+C.line}}>
-                    <span style={{fontSize:12,color:C.black,fontWeight:600}}>{s.propiedad}</span>
-                    <span style={{fontSize:10.5,color:rojo?C.red:C.earth}}>{v?vendorDisplay(v):"sin técnico"}{s.entradaHoy?" · entrada hoy":""}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {pendientes.length===0&&(
-            <div style={{marginTop:12,fontSize:11.5,color:C.green,fontWeight:600,lineHeight:1.6}}>Todas las limpiezas del día tienen su formulario.</div>
-          )}
-        </div>
-      )}
-
       {/* ─── Rutas del día · lista compacta
            Con 15 técnicos y creciendo, una tarjeta abierta por persona vuelve
            imposible revisar el día. Aquí cada técnico es una línea con su carga
@@ -8749,14 +8753,30 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
       {tecs.length===0&&<div style={{textAlign:"center",padding:"40px 20px",color:C.earth,fontSize:13,background:"#fff",borderRadius:14,border:"1px solid "+C.gray}}>Sin técnicos de limpieza activos. Agrégalos en Ajustes › Equipo.</div>}
       {tecs.length>0&&(
         <div style={CARD}>
-          <div style={{display:"flex",justifyContent:"space-between",gap:12,flexWrap:"wrap",alignItems:"baseline"}}>
-            <div style={{fontSize:14,fontWeight:600,color:C.black}}>Rutas del día</div>
-            <div style={{fontSize:11,color:C.earth}}>
-              {resumenTec.con} con ruta · {resumenTec.sin} sin trabajo
-              {resumenTec.sobre?" · "+resumenTec.sobre+" sobre jornada":""}
+          <div style={{display:"flex",justifyContent:"space-between",gap:12,flexWrap:"wrap",alignItems:"center"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <div style={{fontSize:14,fontWeight:600,color:C.black}}>Rutas del día</div>
+              {farolActivo&&delDia.length>0&&<Farol estado={farol(delDia)} hechas={hechasDe(delDia)} total={delDia.length} size={14}/>}
+            </div>
+            <div style={{display:"flex",background:C.surfaceWarm,borderRadius:100,padding:3,gap:3,border:"1px solid "+C.line}}>
+              {[["tec","Por técnico"],["apto","Por apartamento"]].map(function(it){
+                var sel=vistaRuta===it[0];
+                return <button key={it[0]} onClick={function(){setVistaRuta(it[0]);}} style={{padding:"7px 14px",minHeight:36,borderRadius:100,border:"none",background:sel?"#fff":"transparent",color:sel?C.black:C.taupe,fontSize:11,fontWeight:sel?700:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif",boxShadow:sel?"0 1px 4px rgba(62,63,63,.08)":"none"}}>{it[1]}</button>;
+              })}
             </div>
           </div>
+          <div style={{fontSize:11,color:C.earth,marginTop:6}}>
+            {resumenTec.con} con ruta · {resumenTec.sin} sin trabajo
+            {resumenTec.sobre?" · "+resumenTec.sobre+" sobre jornada":""}
+          </div>
+          {/* Lo que antes era una tarjeta entera: una línea, y solo cuando urge. */}
+          {sinNingunForm.length>0&&(alertaHora||esPasado)&&(
+            <div style={{marginTop:10,background:"#F5EDEC",border:"1px solid #E7D3CE",borderRadius:9,padding:"9px 12px",fontSize:11.5,color:C.red,fontWeight:600,lineHeight:1.55,textWrap:"pretty"}}>
+              {esHoy?"Pasada la 1:00 pm, ":""}{sinNingunForm.length===1?"un técnico con ruta no ha registrado nada":sinNingunForm.length+" técnicos con ruta no han registrado nada"}: {sinNingunForm.map(function(em){ var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===em; }); return v?vendorDisplay(v):em; }).join(" · ")}.
+            </div>
+          )}
 
+          {vistaRuta==="tec"&&(<>
           <div style={{display:"flex",gap:6,marginTop:11,flexWrap:"wrap"}}>
             {[["todos","Todos",tecs.length],["con","Con ruta",resumenTec.con],["sin","Sin trabajo",resumenTec.sin],["sobre","Sobre jornada",resumenTec.sobre]].map(function(it){
               if(it[0]==="sobre"&&!resumenTec.sobre) return null;
@@ -8811,12 +8831,9 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                       </div>
                       <div style={{fontSize:9,color:C.taupe,marginTop:4,textAlign:"center",fontVariantNumeric:"tabular-nums"}}>{mins?schedMinsTxt(mins):"—"}</div>
                     </div>
-                    <div style={{minWidth:26,textAlign:"right",flexShrink:0}}>
-                      <div style={{fontSize:16,fontWeight:600,color:mias.length?C.black:C.gray,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{mias.length}</div>
-                      {(esHoy||esPasado)&&mias.length>0&&(
-                        <div style={{fontSize:9,fontWeight:700,marginTop:4,fontVariantNumeric:"tabular-nums",color:f.hechas===mias.length?C.green:((alertaHora||esPasado)?C.red:C.taupe)}}>{f.hechas}/{mias.length}</div>
-                      )}
-                    </div>
+                    {farolActivo&&mias.length>0
+                      ? <Farol estado={farol(mias)} hechas={f.hechas} total={mias.length}/>
+                      : <div style={{minWidth:20,textAlign:"right",flexShrink:0,fontSize:16,fontWeight:600,color:mias.length?C.black:C.gray,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{mias.length}</div>}
                     <span style={{color:C.taupe,fontSize:12,flexShrink:0}}>{abierta?"▾":"▸"}</span>
                   </button>
 
@@ -8890,6 +8907,80 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
               );
             })}
           </div>
+          </>)}
+
+          {/* ─── El mismo día por apartamento: zona › edificio › unidad.
+               Cada nivel lleva su farol, así "¿cómo va Centro Vivo?" se contesta
+               sin abrir a nadie. */}
+          {vistaRuta==="apto"&&(
+            <div style={{marginTop:11}}>
+              {arbolZonas.length===0&&<div style={{padding:"22px 0",textAlign:"center",fontSize:12,color:C.taupe}}>No hay limpiezas programadas este día.</div>}
+              {arbolZonas.map(function(z,zi){
+                var abierta=zonasAb[z.key]!==undefined?zonasAb[z.key]:(arbolZonas.length<=3);
+                return (
+                  <div key={z.key} style={{borderTop:"1px solid "+C.line}}>
+                    <button onClick={function(){ setZonasAb(function(p){ var u=Object.assign({},p); u[z.key]=!abierta; return u; }); }}
+                      style={{width:"100%",display:"flex",alignItems:"center",gap:11,padding:"12px 0",background:"none",border:"none",textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:13,fontWeight:600,color:C.black}}>{z.label}</div>
+                        <div style={{fontSize:10.5,color:C.taupe,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                          {z.edificiosArr.length} edificio{z.edificiosArr.length===1?"":"s"} · {z.lista.length} limpieza{z.lista.length===1?"":"s"}
+                        </div>
+                      </div>
+                      {farolActivo
+                        ? <Farol estado={farol(z.lista)} hechas={hechasDe(z.lista)} total={z.lista.length} size={14}/>
+                        : <span style={{fontSize:16,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>{z.lista.length}</span>}
+                      <span style={{color:C.taupe,fontSize:12,flexShrink:0}}>{abierta?"▾":"▸"}</span>
+                    </button>
+
+                    {abierta&&(
+                      <div style={{paddingBottom:12,display:"flex",flexDirection:"column",gap:9}}>
+                        {z.edificiosArr.map(function(ed){
+                          return (
+                            <div key={ed.nombre} style={{background:C.surfaceWarm,borderRadius:11,padding:"10px 12px"}}>
+                              <div style={{display:"flex",alignItems:"center",gap:10,justifyContent:"space-between"}}>
+                                <span style={{fontSize:12,fontWeight:700,color:C.black,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ed.nombre}</span>
+                                {farolActivo
+                                  ? <Farol estado={farol(ed.lista)} hechas={hechasDe(ed.lista)} total={ed.lista.length}/>
+                                  : <span style={{fontSize:11,color:C.taupe,fontVariantNumeric:"tabular-nums"}}>{ed.lista.length}</span>}
+                              </div>
+                              <div style={{display:"flex",flexDirection:"column",gap:5,marginTop:8}}>
+                                {ed.unidadesArr.map(function(un){
+                                  var uno=un.lista[0];
+                                  var quien=un.lista.map(function(s){
+                                    var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===emailVigente(s); });
+                                    return v?vendorDisplay(v):"sin técnico";
+                                  });
+                                  quien=quien.filter(function(x,i){ return quien.indexOf(x)===i; });
+                                  var cz=cierres[uno.id]||{};
+                                  return (
+                                    <div key={un.nombre} style={{background:"#fff",borderRadius:9,padding:"9px 11px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                                      {farolActivo&&<Farol estado={farol(un.lista)} size={11}/>}
+                                      <div style={{flex:1,minWidth:0}}>
+                                        <div style={{fontSize:12,fontWeight:600,color:C.black}}>
+                                          {un.nombre}
+                                          {un.lista.some(function(s){ return SCHED.esProfunda(s.tipo); })&&<span style={{marginLeft:7,fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"2px 7px",borderRadius:100}}>Profunda</span>}
+                                          {un.lista.some(function(s){ return s.entradaHoy; })&&<span style={{marginLeft:7,fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#B4553C"}}>Entrada</span>}
+                                        </div>
+                                        <div style={{fontSize:10.5,color:C.earth,marginTop:2}}>
+                                          {quien.join(" · ")}
+                                          {farolActivo&&cz.estado==="hecha"?" · ✓ "+(cz.ajuste?"ajuste":"formulario")+(cz.hora?" "+cz.hora:""):""}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
