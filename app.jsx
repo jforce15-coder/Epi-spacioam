@@ -2078,6 +2078,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
         onConfig={function(){setTab("cfg");}} configActive={tab==="cfg"}
         onLogout={onLogout}
         role="Admin"
+        wifiProps={props}
       />
 
       <div style={{display:tab==="dash"?"block":"none"}}><DashView props={props} nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} meEmails={adminVendor?vendorEmailSet(adminVendor):[]} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh} schedules={schedules||[]} onSvSchedules={onSvSchedules} onUpsert={onUpsert} onDelete={onDelete}/></div>
@@ -3207,6 +3208,7 @@ function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendo
   return (
     <div style={{width:"100%",maxWidth:560,margin:"0 auto",padding:"24px 16px 90px",fontFamily:"Montserrat,sans-serif"}}>
       <ResumeDraftModal data={dr.pend} stepCaption="Formulario" stepLabel={cat||"Reporte"} onResume={dr.resume} onFresh={dr.fresh}/>
+      <WifiAviso propiedad={form.propiedad} props={props}/>
       <div style={{marginBottom:24}}>
         <div style={{fontSize:9.5,fontWeight:600,color:C.earth,letterSpacing:".28em",textTransform:"uppercase",marginBottom:8}}>Nuevo reporte</div>
         <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:28,fontWeight:400,color:C.black,letterSpacing:".04em"}}>¿Qué trabajo se realizó?</div>
@@ -3314,6 +3316,7 @@ function NuevoProductoForm({vendors,props,onSubmit,defaultVendor,onBack}) {
   return (
     <div style={{maxWidth:520,margin:"0 auto",padding:"24px 16px 90px",fontFamily:"Montserrat,sans-serif"}}>
       <ResumeDraftModal data={dr.pend} stepCaption="Formulario" stepLabel="Nuevo producto" onResume={dr.resume} onFresh={dr.fresh}/>
+      <WifiAviso propiedad={prop} props={props}/>
       <div style={{marginBottom:10}}><button onClick={onBack} style={{background:"none",border:"none",color:C.earth,fontSize:12.5,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>← Cambiar tipo</button></div>
       <div style={{marginBottom:24}}>
         <div style={{fontSize:11,color:C.peach,fontWeight:700,letterSpacing:".18em",textTransform:"uppercase",marginBottom:6}}>Nuevo Producto</div>
@@ -3454,6 +3457,7 @@ function AjusteForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) {
   return (
     <div style={{maxWidth:480,margin:"0 auto",padding:"24px 16px 90px",fontFamily:"Montserrat,sans-serif"}}>
       <ResumeDraftModal data={dr.pend} stepCaption="Formulario" stepLabel="Ajuste" onResume={dr.resume} onFresh={dr.fresh}/>
+      <WifiAviso propiedad={prop} props={props}/>
       <div style={{marginBottom:10}}><button onClick={onBack} style={{background:"none",border:"none",color:C.earth,fontSize:12.5,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>← Cambiar tipo</button></div>
       <div style={{marginBottom:24}}>
         <div style={{fontSize:9.5,fontWeight:600,color:C.earth,letterSpacing:".28em",textTransform:"uppercase",marginBottom:8}}>Ajuste</div>
@@ -3531,6 +3535,7 @@ function DanosFormSolo({vendors,props,onSubmit,defaultVendor,onBack}) {
   return (
     <div style={{maxWidth:580,margin:"0 auto",padding:"24px 16px 90px",fontFamily:"Montserrat,sans-serif"}}>
       <ResumeDraftModal data={dr.pend} stepCaption="Formulario" stepLabel="Reporte de daños" onResume={dr.resume} onFresh={dr.fresh}/>
+      <WifiAviso propiedad={prop} props={props}/>
       <div style={{marginBottom:10}}><button onClick={onBack} style={{background:"none",border:"none",color:C.earth,fontSize:12.5,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>← Cambiar tipo</button></div>
       <div style={{marginBottom:24}}>
         <div style={{fontSize:11,color:C.red,fontWeight:700,letterSpacing:".18em",textTransform:"uppercase",marginBottom:6}}>Reporte de Daños</div>
@@ -3847,6 +3852,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
   return (
     <div style={{maxWidth:560,margin:"0 auto",padding:"0 0 80px",fontFamily:"Montserrat,sans-serif"}}>
       <ResumeDraftModal data={resumeData} stepLabel={resumeData?STEPS[resumeData.step]:""} onResume={doResume} onFresh={doFresh}/>
+      <WifiAviso propiedad={form.propiedad} props={props}/>
       {/* Progress bar */}
       {step>0&&step<STEPS.length-1&&(
         <div style={{position:"sticky",top:58,zIndex:20,background:"#fff",borderBottom:"1px solid "+C.gray,padding:"12px 18px"}}>
@@ -4316,6 +4322,7 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack}) {
   return (
     <div style={{maxWidth:560,margin:"0 auto",padding:"0 0 80px",fontFamily:"Montserrat,sans-serif"}}>
       <ResumeDraftModal data={resumeDataP} stepLabel={resumeDataP?STEPS_P[resumeDataP.step]:""} accent="#2e7d52" onResume={doResumeP} onFresh={doFreshP}/>
+      <WifiAviso propiedad={form.propiedad} props={props}/>
       {step>0&&step<STEPS_P.length-1&&(
         <div style={{position:"sticky",top:58,zIndex:20,background:"#fff",borderBottom:"1px solid "+C.gray,padding:"12px 18px"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
@@ -5566,6 +5573,216 @@ async function fetchOwnerRaw(){
   for(var r=1;r<rows.length;r++){ var nm=(rows[r][iName]||"").trim(); if(!nm) continue; var k=normNm(nm); if(seen[k])continue; seen[k]=1; out.push({name:nm,link:iLink>=0?(rows[r][iLink]||"").trim():""}); }
   return out;
 }
+/* ═══ WI-FI DE LAS PROPIEDADES ═══════════════════════════════════════════════
+   La red y la contraseña de cada apartamento ya viven en la base del proyecto
+   "Guest app" (hoja PropiedadesInfo). Aquí se leen igual que los enlaces del
+   dashboard de propietarios: lectura pública, sin backend nuevo, y se guardan en
+   el teléfono para que sirvan también sin señal —que es justo cuando el técnico
+   las necesita. */
+var GUEST_SHEET_ID = "12TF-FO6vld2VkzDr9YlUnHlNjh4d1u9Ss6qWz3F3KeQ";
+/* Si la hoja se renombra, se prueba la siguiente de la lista antes de rendirse. */
+var GUEST_WIFI_TABS = ["PropiedadesInfo","Propiedades","PropiedadesInfo_backup"];
+var WIFI_CACHE     = "sam_wifi_v1";
+/* Los encabezados de esa hoja no son nuestros: se reconocen por su significado,
+   no por su nombre exacto, para que un cambio de rótulo no rompa nada. */
+function wifiCols(head){
+  var h=head.map(function(x){ return normalize(String(x||"")); });
+  function buscar(re, evitar){
+    for(var i=0;i<h.length;i++){ if(!h[i]) continue; if(evitar&&evitar.test(h[i])) continue; if(re.test(h[i])) return i; }
+    return -1;
+  }
+  var iClave = buscar(/pass|clave|contrasen|contrase/);
+  var iRed   = buscar(/ssid|red|wifi/, /pass|clave|contrasen|contrase/);
+  var iName  = buscar(/^(property_?name|propiedad|apartamento|nombre|property|unidad)$/);
+  if(iName<0) iName = buscar(/propiedad|property|apartamento/);
+  if(iName<0) iName = 0;
+  return {name:iName, red:iRed, clave:iClave};
+}
+async function fetchWifiTab(tab){
+  var url="https://docs.google.com/spreadsheets/d/"+GUEST_SHEET_ID+"/gviz/tq?tqx=out:csv&sheet="+encodeURIComponent(tab);
+  var res=await fetch(url);
+  if(!res.ok) throw new Error("no se pudo leer la hoja "+tab+" ("+res.status+")");
+  var rows=parseCSVrows(await res.text());
+  if(rows.length<2) throw new Error("la hoja "+tab+" viene vacía");
+  var ix=wifiCols(rows[0]);
+  if(ix.red<0&&ix.clave<0) throw new Error("la hoja "+tab+" no tiene columnas de red ni contraseña");
+  return {rows:rows, ix:ix};
+}
+async function fetchWifiMap(){
+  var datos=null, ultimo="";
+  for(var t=0;t<GUEST_WIFI_TABS.length&&!datos;t++){
+    try{ datos=await fetchWifiTab(GUEST_WIFI_TABS[t]); }catch(e){ ultimo=String(e.message||e); }
+  }
+  if(!datos) throw new Error(ultimo||"no se pudo leer la base de Guest app");
+  var rows=datos.rows, ix=datos.ix;
+  var map={};
+  for(var r=1;r<rows.length;r++){
+    var nm=String(rows[r][ix.name]||"").trim(); if(!nm) continue;
+    var red=ix.red>=0?String(rows[r][ix.red]||"").trim():"";
+    var cl =ix.clave>=0?String(rows[r][ix.clave]||"").trim():"";
+    if(!red&&!cl) continue;
+    var k=rvPropKey(nm);
+    if(!map[k]) map[k]={nombre:nm, red:red, clave:cl};
+  }
+  return map;
+}
+/* Un solo lector para toda la app: entrega lo guardado de inmediato y refresca
+   por detrás cada 12 horas. */
+var __wifiMem=null, __wifiFetching=null;
+function useWifi(){
+  const [map,setMap] = useState(function(){
+    if(__wifiMem) return __wifiMem;
+    try{ var raw=localStorage.getItem(WIFI_CACHE); if(raw){ var d=JSON.parse(raw); if(d&&d.map){ __wifiMem=d.map; return d.map; } } }catch(_){}
+    return null;
+  });
+  const [err,setErr] = useState("");
+  useEffect(function(){
+    var viejo=true;
+    try{ var raw=localStorage.getItem(WIFI_CACHE); if(raw){ var d=JSON.parse(raw); if(d&&d.ts&&Date.now()-d.ts<12*3600*1000) viejo=false; } }catch(_){}
+    if(!viejo&&map) return;
+    if(!__wifiFetching) __wifiFetching=fetchWifiMap();
+    var alive=true;
+    __wifiFetching.then(function(m){
+      __wifiMem=m; try{ localStorage.setItem(WIFI_CACHE, JSON.stringify({ts:Date.now(),map:m})); }catch(_){}
+      if(alive) setMap(m);
+    }).catch(function(e){ if(alive&&!map) setErr(String(e.message||e)); })
+      .then(function(){ __wifiFetching=null; });
+    return function(){ alive=false; };
+  },[]);
+  return {map:map, err:err, de:function(nombre){ return map?(map[rvPropKey(nombre||"")]||null):null; }};
+}
+function wifiCopiar(txt){
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText) return navigator.clipboard.writeText(txt);
+    var t=document.createElement("textarea"); t.value=txt; t.setAttribute("readonly","");
+    t.style.position="fixed"; t.style.opacity="0"; document.body.appendChild(t);
+    t.select(); document.execCommand("copy"); document.body.removeChild(t);
+  }catch(_){}
+  return Promise.resolve();
+}
+
+/* La ficha del Wi-Fi: la red, la contraseña y un botón que la copia. Nada más —
+   el técnico entra a los ajustes de su teléfono y la pega. */
+function WifiFicha({dato, nombre}){
+  const [copiado,setCopiado] = useState("");
+  function copiar(qué,val){ wifiCopiar(val); setCopiado(qué); setTimeout(function(){setCopiado("");},1800); }
+  if(!dato) return (
+    <div style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"14px 15px",fontSize:12,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>
+      No tenemos la red de <b style={{color:C.black}}>{nombre}</b> registrada. Pídesela a la administración y se agrega a la base de Guest app.
+    </div>
+  );
+  var Fila=function(p){
+    return (
+      <div style={{display:"flex",alignItems:"center",gap:10,background:"#fff",border:"1px solid "+C.line,borderRadius:11,padding:"11px 13px"}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:8.5,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase",marginBottom:3}}>{p.label}</div>
+          <div style={{fontSize:14,fontWeight:600,color:C.black,wordBreak:"break-all",fontFamily:p.mono?"ui-monospace,SFMono-Regular,Menlo,monospace":"inherit",letterSpacing:p.mono?".04em":"0"}}>{p.val||"—"}</div>
+        </div>
+        {p.val&&(
+          <button onClick={function(){copiar(p.label,p.val);}} style={{flexShrink:0,padding:"9px 13px",minHeight:40,borderRadius:100,border:"1px solid "+(copiado===p.label?C.green:C.gray),background:copiado===p.label?"#EDF5EF":"#fff",color:copiado===p.label?C.green:C.earth,fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif",whiteSpace:"nowrap"}}>
+            {copiado===p.label?"✓ Copiado":"Copiar"}
+          </button>
+        )}
+      </div>
+    );
+  };
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      <Fila label="Red" val={dato.red}/>
+      <Fila label="Contraseña" val={dato.clave} mono/>
+      <div style={{fontSize:11,color:C.earth,lineHeight:1.65,textWrap:"pretty"}}>
+        Copia la contraseña, abre los ajustes de Wi-Fi de tu teléfono, elige <b style={{color:C.black}}>{dato.red||"la red"}</b> y pégala.
+      </div>
+    </div>
+  );
+}
+
+/* Hoja inferior: se usa igual desde el aviso del formulario y desde el botón del
+   encabezado (ahí con selector de apartamento). */
+function WifiSheet({propiedad, props, onClose}){
+  var w=useWifi();
+  const [sel,setSel] = useState(propiedad||"");
+  var lista=(function(){
+    var nombres=(props||[]).map(function(p){ return p.name||p.nombre||""; }).filter(Boolean);
+    if(!nombres.length&&w.map) nombres=Object.keys(w.map).map(function(k){ return w.map[k].nombre; });
+    var seen={},out=[];
+    nombres.forEach(function(n){ var k=rvPropKey(n); if(!k||seen[k])return; seen[k]=1; out.push(n); });
+    return out.sort(function(a,b){ return a.localeCompare(b,"es",{numeric:true,sensitivity:"base"}); });
+  })();
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:900,background:"rgba(62,63,63,.34)",display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div onClick={function(e){e.stopPropagation();}} style={{width:"100%",maxWidth:460,background:"#fff",borderRadius:"22px 22px 0 0",padding:"20px 20px 26px",fontFamily:"Montserrat,sans-serif",boxShadow:"0 -18px 60px rgba(62,63,63,.2)",maxHeight:"86vh",overflowY:"auto"}}>
+        <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,marginBottom:14}}>
+          <div style={{minWidth:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:5}}>
+              <Icon name="wifi" size={15} stroke={C.earth}/>
+              <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".22em",textTransform:"uppercase"}}>Wi-Fi de la propiedad</span>
+            </div>
+            <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:22,color:C.black,lineHeight:1.2}}>{sel||"Elige el apartamento"}</div>
+          </div>
+          <button onClick={onClose} style={{flexShrink:0,width:34,height:34,borderRadius:"50%",border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:14,cursor:"pointer",lineHeight:1}}>✕</button>
+        </div>
+        {(!propiedad||lista.length>0)&&(
+          <select value={sel} onChange={function(e){setSel(e.target.value);}} style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:10,padding:"11px 12px",fontSize:13,fontFamily:"Montserrat,sans-serif",background:"#fff",color:C.black,marginBottom:12,minHeight:44}}>
+            <option value="">Seleccionar apartamento…</option>
+            {lista.map(function(n){ return <option key={n} value={n}>{n}</option>; })}
+          </select>
+        )}
+        {sel
+          ? <WifiFicha dato={w.de(sel)} nombre={sel}/>
+          : <div style={{fontSize:12,color:C.earth,lineHeight:1.7}}>Elige el apartamento para ver su red y su contraseña.</div>}
+        {w.err&&<div style={{marginTop:11,fontSize:11,color:C.orange,lineHeight:1.6,textWrap:"pretty"}}>No se pudo actualizar la lista de redes ({w.err}). Se muestra lo último guardado en este teléfono.</div>}
+      </div>
+    </div>
+  );
+}
+
+/* Aviso discreto: aparece al pie una sola vez por apartamento, después de que el
+   técnico lo elige en el formulario. No tapa nada y se cierra con un toque. */
+function WifiAviso({propiedad, props}){
+  const [visto,setVisto] = useState({});
+  const [abierto,setAbierto] = useState(false);
+  const [oculto,setOculto] = useState(false);
+  var w=useWifi();
+  var p=String(propiedad||"").trim();
+  useEffect(function(){ setOculto(false); },[p]);
+  if(!p) return null;
+  var dato=w.de(p);
+  if(!dato) return null;
+  if(visto[rvPropKey(p)]&&!abierto) return null;
+  return (
+    <>
+      {!oculto&&!abierto&&(
+        <div style={{position:"fixed",left:12,right:12,bottom:14,zIndex:880,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
+          <div style={{pointerEvents:"auto",display:"flex",alignItems:"center",gap:10,maxWidth:440,width:"100%",background:"#3E3F3F",borderRadius:100,padding:"9px 10px 9px 15px",boxShadow:"0 14px 40px rgba(62,63,63,.28)"}}>
+            <Icon name="wifi" size={15} stroke="rgba(255,255,255,.75)"/>
+            <div style={{flex:1,minWidth:0,fontSize:11.5,color:"#fff",lineHeight:1.4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              Wi-Fi de {propCorta(p)} disponible
+            </div>
+            <button onClick={function(){setAbierto(true);}} style={{flexShrink:0,padding:"7px 13px",minHeight:34,borderRadius:100,border:"none",background:"#fff",color:C.black,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Conectarme</button>
+            <button onClick={function(){setOculto(true);}} title="Cerrar" style={{flexShrink:0,width:30,height:30,borderRadius:"50%",border:"none",background:"transparent",color:"rgba(255,255,255,.6)",fontSize:13,cursor:"pointer",lineHeight:1}}>✕</button>
+          </div>
+        </div>
+      )}
+      {abierto&&<WifiSheet propiedad={p} props={props} onClose={function(){ setAbierto(false); setOculto(true); setVisto(function(v){ var u=Object.assign({},v); u[rvPropKey(p)]=1; return u; }); }}/>}
+    </>
+  );
+}
+
+/* Botón del encabezado, al lado de Configuración. */
+function WifiBtn({props, isMobile}){
+  const [open,setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={function(){setOpen(true);}} title="Wi-Fi de las propiedades"
+        style={{display:"flex",alignItems:"center",gap:6,background:"transparent",border:"1px solid "+C.line,borderRadius:100,color:C.earth,cursor:"pointer",padding:isMobile?"7px 9px":"7px 13px",fontSize:11.5,fontWeight:600,letterSpacing:".04em",fontFamily:"Montserrat,sans-serif"}}>
+        <Icon name="wifi" size={16} stroke={C.earth}/>{!isMobile&&"Wi-Fi"}
+      </button>
+      {open&&<WifiSheet props={props} onClose={function(){setOpen(false);}}/>}
+    </>
+  );
+}
+
 function VBlock({title,hint,children}){
   return (
     <div style={{marginTop:14}}>
@@ -6222,6 +6439,7 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codig
         role={vendorDisplay(vendor)}
         feedbackVendor={vendor}
         onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}
+        wifiProps={props}
       />
       <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} adelantos={adelantos} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}} onGoAccount={function(){setView("account");}} vendor={vendor} allVendors={allVendors} reviews={reviews} allReps={allReps} rvCasos={rvCasos} rvIA={rvIA} onGoCalidad={vendor.tipo==="interno"?function(){setView("hist");}:null}/></div>
       <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={allVendors||[]} props={props} company={company} defaultVendor={vendor.email} myReps={reps} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
@@ -6717,6 +6935,7 @@ var ICONS = {
   user:"M12 12a4 4 0 100-8 4 4 0 000 8zM4.5 20a7.5 7.5 0 0115 0",
   clip:"M21 11.5l-8.6 8.6a5 5 0 01-7-7l8.5-8.5a3.3 3.3 0 014.7 4.7l-8.5 8.5a1.7 1.7 0 01-2.4-2.4l7.8-7.8",
   bell:"M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0",
+  wifi:"M2.5 8.5a15 15 0 0119 0M5.5 12.2a10.5 10.5 0 0113 0M8.6 15.9a6 6 0 016.8 0M12 19.8v.05",
 };
 function Icon({name, size, stroke, width, style}) {
   var d = ICONS[name] || "";
@@ -6828,7 +7047,7 @@ function HeaderFeedback({vendor, onSaveFeedback, isMobile}) {
 }
 
 /* ─── Responsive Header Component */
-function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogout, onConfig, configActive, role, sheetsOk, adminLabel, feedbackVendor, onSaveFeedback}) {
+function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogout, onConfig, configActive, role, sheetsOk, adminLabel, feedbackVendor, onSaveFeedback, wifiProps}) {
   var sc = useScreen();
   var isMobile = sc.mobile;
 
@@ -6862,6 +7081,7 @@ function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogou
 
         {/* Configuración + Salir */}
         <div style={{display:"flex",alignItems:"center",gap:isMobile?4:8}}>
+          <WifiBtn props={wifiProps||[]} isMobile={isMobile}/>
           {onConfig&&<button onClick={onConfig} title="Configuración" style={{display:"flex",alignItems:"center",gap:6,background:configActive?C.black:"transparent",border:"1px solid "+(configActive?C.black:C.line),borderRadius:100,color:configActive?"#fff":C.earth,cursor:"pointer",padding:isMobile?"7px 9px":"7px 13px",fontSize:11.5,fontWeight:600,letterSpacing:".04em"}}><Icon name="settings" size={16} stroke={configActive?"#fff":C.earth}/>{!isMobile&&"Configuración"}</button>}
           <button onClick={onLogout} style={{background:"none",border:"none",color:C.earth,fontSize:isMobile?12:11.5,cursor:"pointer",fontWeight:500,letterSpacing:".04em",padding:"8px 4px"}}>Salir</button>
         </div>
@@ -8485,8 +8705,9 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   const [reabrir,  setReabrir]  = useState({});     /* días ya notificados que se van a rehacer */
   const [tocados,  setTocados]  = useState({});     /* días notificados que el admin ya cambió */
   const [herram,   setHerram]   = useState(false);  /* controles manuales — solo para emergencias */
-  const [vistaRuta,setVistaRuta]= useState("tec");  /* el mismo día visto por técnico o por apartamento */
-  const [zonasAb,  setZonasAb]  = useState({});     /* zonas abiertas en la vista por apartamento */
+  const [vistaRuta,setVistaRuta]= useState("apto"); /* el mismo día: apartamento (por defecto), técnico o zona */
+  const [ordApto,  setOrdApto]  = useState({col:"apto",dir:1}); /* orden de la tabla por apartamento */
+  const [zonasAb,  setZonasAb]  = useState({});     /* zonas abiertas en la vista por zona */
   const [abiertos, setAbiertos] = useState({});     /* técnicos con la ruta desplegada */
   const [filtroTec,setFiltroTec]= useState("todos");
   const [buscaTec, setBuscaTec] = useState("");
@@ -9348,7 +9569,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
               {farolActivo&&delDia.length>0&&<Farol estado={farol(delDia)} hechas={hechasDe(delDia)} total={delDia.length} size={14}/>}
             </div>
             <div style={{display:"flex",background:C.surfaceWarm,borderRadius:100,padding:3,gap:3,border:"1px solid "+C.line}}>
-              {[["tec","Por técnico"],["apto","Por apartamento"]].map(function(it){
+              {[["apto","Por apartamento"],["tec","Por técnico"],["zona","Por zona"]].map(function(it){
                 var sel=vistaRuta===it[0];
                 return <button key={it[0]} onClick={function(){setVistaRuta(it[0]);}} style={{padding:"7px 14px",minHeight:36,borderRadius:100,border:"none",background:sel?"#fff":"transparent",color:sel?C.black:C.taupe,fontSize:11,fontWeight:sel?700:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif",boxShadow:sel?"0 1px 4px rgba(62,63,63,.08)":"none"}}>{it[1]}</button>;
               })}
@@ -9500,10 +9721,74 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           </div>
           </>)}
 
-          {/* ─── El mismo día por apartamento: zona › edificio › unidad.
+          {/* ─── El mismo día por APARTAMENTO: dos columnas y nada más.
+               El nombre completo del apartamento y quién lo tiene. Se ordena por
+               cualquiera de las dos, porque a veces se busca "¿quién tiene el 404?"
+               y a veces "¿qué le toca a Ana?". */}
+          {vistaRuta==="apto"&&(function(){
+            var filas=delDia.map(function(s){
+              var em=emailVigente(s);
+              var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===em; });
+              return {s:s, apto:s.propiedad||"", tec:v?vendorDisplay(v):"", cz:cierres[s.id]||{}};
+            });
+            filas.sort(function(a,b){
+              var A=ordApto.col==="apto"?a.apto:(a.tec||"zzz"), B=ordApto.col==="apto"?b.apto:(b.tec||"zzz");
+              var c=String(A).localeCompare(String(B),"es",{numeric:true,sensitivity:"base"});
+              if(c===0&&ordApto.col==="tec") c=String(a.apto).localeCompare(String(b.apto),"es",{numeric:true,sensitivity:"base"});
+              return c*ordApto.dir;
+            });
+            function orden(col){
+              setOrdApto(function(p){ return p.col===col?{col:col,dir:-p.dir}:{col:col,dir:1}; });
+            }
+            function TH({col,label}){
+              var act=ordApto.col===col;
+              return (
+                <button onClick={function(){orden(col);}} style={{display:"flex",alignItems:"center",gap:5,background:"none",border:"none",padding:0,cursor:"pointer",fontFamily:"Montserrat,sans-serif",fontSize:9.5,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",color:act?C.black:C.taupe,textAlign:"left"}}>
+                  {label}<span style={{fontSize:8,opacity:act?1:.35}}>{act?(ordApto.dir>0?"▲":"▼"):"▲"}</span>
+                </button>
+              );
+            }
+            return (
+              <div style={{marginTop:11}}>
+                {filas.length===0&&<div style={{padding:"22px 0",textAlign:"center",fontSize:12,color:C.taupe}}>No hay limpiezas programadas este día.</div>}
+                {filas.length>0&&(
+                  <div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr auto 40%",gap:10,alignItems:"center",padding:"9px 2px",borderBottom:"1px solid "+C.gray}}>
+                      <TH col="apto" label="Apartamento"/>
+                      <span/>
+                      <TH col="tec" label="Técnico"/>
+                    </div>
+                    {filas.map(function(f){
+                      var cancelada=f.cz.estado==="cancelada";
+                      return (
+                        <div key={f.s.id} style={{display:"grid",gridTemplateColumns:"1fr auto 40%",gap:10,alignItems:"center",padding:"11px 2px",borderBottom:"1px solid "+C.line}}>
+                          <div style={{minWidth:0}}>
+                            <div style={{fontSize:12.5,fontWeight:600,color:cancelada?C.taupe:C.black,textDecoration:cancelada?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.apto}</div>
+                            <div style={{display:"flex",gap:6,marginTop:3,flexWrap:"wrap",alignItems:"center"}}>
+                              {SCHED.esProfunda(f.s.tipo)&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"2px 7px",borderRadius:100}}>Profunda</span>}
+                              {f.s.entradaHoy&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#B4553C"}}>Entrada</span>}
+                              {cancelada&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.red}}>Cancelada{f.cz.paga?" · media tarifa":""}</span>}
+                              {!cancelada&&farolActivo&&f.cz.estado==="hecha"&&<span style={{fontSize:9.5,color:C.green,fontWeight:600}}>✓ {f.cz.ajuste?"ajuste":"formulario"}{f.cz.hora?" "+f.cz.hora:""}</span>}
+                            </div>
+                          </div>
+                          {farolActivo
+                            ? <Farol estado={farol([f.s])} size={11}/>
+                            : <span/>}
+                          <div style={{fontSize:12,color:f.tec?C.black:C.orange,fontWeight:f.tec?500:700,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.tec||"sin técnico"}</div>
+                        </div>
+                      );
+                    })}
+                    <div style={{fontSize:10.5,color:C.taupe,marginTop:9}}>{filas.length} limpieza{filas.length===1?"":"s"} este día · toca los títulos para ordenar</div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* ─── El mismo día por ZONA: zona › edificio › unidad.
                Cada nivel lleva su farol, así "¿cómo va Centro Vivo?" se contesta
                sin abrir a nadie. */}
-          {vistaRuta==="apto"&&(
+          {vistaRuta==="zona"&&(
             <div style={{marginTop:11}}>
               {arbolZonas.length===0&&<div style={{padding:"22px 0",textAlign:"center",fontSize:12,color:C.taupe}}>No hay limpiezas programadas este día.</div>}
               {arbolZonas.map(function(z,zi){
