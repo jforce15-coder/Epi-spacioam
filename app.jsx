@@ -2179,7 +2179,7 @@ function MultiAptoPicker({options, value, onChange, baseStyle, activeStyle}){
    registró?, ¿se registró algo que nadie programó? Es informativo —no corrige por
    su cuenta— pero cuando encuentra un formulario huérfano deja resolverlo aquí
    mismo: cambiarle la fecha, reasignarlo o eliminarlo. */
-function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete}){
+function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete, scope}){
   const [abierto,setAbierto] = useState(false);
   const [dias,   setDias]    = useState(14);
   const [tab,    setTab]     = useState("A");
@@ -2188,22 +2188,40 @@ function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete}){
   const [tx,     setTx]      = useState("");
   const [busy,   setBusy]    = useState("");
 
+  /* Lo que el administrador ya eligió arriba manda: propiedad, técnico, vínculo y
+     rango de fechas se heredan del dashboard, para que este bloque hable del mismo
+     universo que la tabla. Los filtros de pago y de tipo de trabajo NO se heredan:
+     un formulario huérfano es huérfano aunque no esté pagado. */
+  var sc = scope||{};
   var hoy   = todayStr();
-  var desde = isoShift(hoy, -dias);
-  var ix    = cierresIndex(reps);
+  var rango = !!(sc.desde||sc.hasta);
+  var desde = sc.desde || isoShift(hoy, -dias);
+  var hasta = sc.hasta || hoy;
+  function enProp(nombre){ return sc.prop ? sc.prop({propiedad:nombre}) : true; }
+  /* El correo de la limpieza puede ser uno viejo: se resuelve al vigente por id. */
+  function schedEmail(s){
+    var v=(vendors||[]).find(function(x){ return s.vendorId && String(x.id)===String(s.vendorId); })
+       || (vendors||[]).find(function(x){ return vendorEmailSet(x).indexOf(String(s.vendorEmail||"").toLowerCase())>=0; });
+    return String((v&&v.email)||s.vendorEmail||"").toLowerCase();
+  }
+  function enTec(email){ return sc.tec ? sc.tec(email) : true; }
+  var reps0 = (reps||[]).filter(function(r){ return enProp(r.propiedad)&&enTec(r.reportadoPor); });
+  var ix    = cierresIndex(reps0);
 
   var activas=(schedules||[]).filter(function(s){
     var f=String(s.fecha||"").slice(0,10);
-    return f>=desde && f<=hoy && String(s.estado||"")!=="cancelada";
+    if(f<desde||f>hasta) return false;
+    if(String(s.estado||"")==="cancelada") return false;
+    return enProp(s.propiedad)&&enTec(schedEmail(s));
   });
   var progKey={};
   activas.forEach(function(s){ progKey[String(s.fecha).slice(0,10)+"|"+normalize(s.propiedad||"")]=s; });
 
   /* B) formularios de cierre sin ninguna limpieza programada ese día */
-  var huerfanos=(reps||[]).filter(function(r){
+  var huerfanos=reps0.filter(function(r){
     if(!r||!esCierre(r.categoria)) return false;
     var f=String(r.fecha||"").slice(0,10);
-    if(!f||f<desde||f>hoy) return false;
+    if(!f||f<desde||f>hasta) return false;
     return !progKey[f+"|"+normalize(r.propiedad||"")];
   }).sort(function(a,b){ return String(b.fecha).localeCompare(String(a.fecha)); });
 
@@ -2293,10 +2311,11 @@ function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete}){
       {abierto&&(
         <div style={{borderTop:"1px solid "+C.line,padding:"14px 18px 18px"}}>
           <div style={{fontSize:11.5,color:C.earth,lineHeight:1.7,marginBottom:12,textWrap:"pretty"}}>
-            Cruce de los últimos {dias} días entre lo programado y los formularios entregados (tradicional, profunda y ajuste). Es informativo: nada se corrige solo.
+            Cruce {rango?<>del <b style={{color:C.black}}>{fmtDate(desde)} al {fmtDate(hasta)}</b></>:<>de los últimos {dias} días</>} entre lo programado y los formularios entregados (tradicional, profunda y ajuste). Es informativo: nada se corrige solo.
+            {(sc.label||rango)&&<div style={{marginTop:7,fontSize:11,color:C.taupe}}>Sigue los filtros del dashboard{sc.label?": "+sc.label:""}. El estado de pago y el tipo de trabajo no se aplican aquí — un formulario huérfano lo es de todas formas.</div>}
           </div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14,alignItems:"center"}}>
-            {[7,14,30].map(function(d){
+            {!rango&&[7,14,30].map(function(d){
               var a=dias===d;
               return <button key={d} onClick={function(){setDias(d);}} style={{fontSize:11,fontWeight:a?700:600,padding:"6px 12px",borderRadius:100,border:"1px solid "+(a?C.black:C.gray),background:a?C.black:"#fff",color:a?"#fff":C.earth,cursor:"pointer"}}>{d} días</button>;
             })}
@@ -2549,7 +2568,29 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
     <div>
       <div style={{padding:"16px 22px 0"}}>
         <RatingDashCard reviews={reviews||[]} reps={reps} vendors={vendors} rvCasos={rvCasos||[]} soloGrupo={selGroup} rvIA={rvIA} propFilter={matchProp} propScope={[fZona,fEdif].filter(function(v){return v!=="Todas"&&v!=="Todos";}).concat(fAptos).join(" · ")}/>
-        <ControlProgFormularios schedules={schedules} reps={reps} vendors={vendors} onUpsert={onUpsert} onDelete={onDelete}/>
+        <ControlProgFormularios schedules={schedules} reps={reps} vendors={vendors} onUpsert={onUpsert} onDelete={onDelete}
+          scope={{
+            prop:  matchProp,
+            desde: fDesde, hasta: fHasta,
+            tec:   function(email){
+              if(fVend!=="Todos"&&selGroup) return repInGroup({reportadoPor:email}, selGroup);
+              if(fVinc!=="Todos"||fCatV!=="Todas"){
+                var v=vendorDeRep({reportadoPor:email});
+                if(!v) return false;
+                if(fVinc!=="Todos"&&(v.tipo||"externo")!==fVinc) return false;
+                if(fCatV!=="Todas"&&(v.categoria||"")!==fCatV)   return false;
+              }
+              return true;
+            },
+            label: [
+              fVend!=="Todos"?fVend:"",
+              fVinc!=="Todos"?fVinc:"",
+              fCatV!=="Todas"?fCatV:"",
+              fZona!=="Todas"?fZona:"",
+              fEdif!=="Todos"?fEdif:"",
+              fAptos.length?(fAptos.length===1?fAptos[0]:fAptos.length+" apartamentos"):""
+            ].filter(Boolean).join(" · ")
+          }}/>
       </div>
 
       {/* Stats bar */}
@@ -5575,6 +5616,12 @@ async function fetchOwnerRaw(){
   for(var r=1;r<rows.length;r++){ var nm=(rows[r][iName]||"").trim(); if(!nm) continue; var k=normNm(nm); if(seen[k])continue; seen[k]=1; out.push({name:nm,link:iLink>=0?(rows[r][iLink]||"").trim():""}); }
   return out;
 }
+/* "Z10 - Fiamene - 404" → "Fiamene 404": lo justo para caber en una línea. */
+function aptoCorto(n){
+  try{ var p=SCHED.partes(n||""); return [p.edificio,p.unidad].filter(Boolean).join(" ")||String(n||""); }
+  catch(_){ return String(n||""); }
+}
+
 /* ═══ WI-FI DE LAS PROPIEDADES ═══════════════════════════════════════════════
    La red y la contraseña de cada apartamento ya viven en la base del proyecto
    "Guest app" (hoja PropiedadesInfo). Aquí se leen igual que los enlaces del
@@ -5861,7 +5908,7 @@ function WifiAviso({propiedad, props, vendorEmail}){
           <div style={{pointerEvents:"auto",display:"flex",alignItems:"center",gap:10,maxWidth:440,width:"100%",background:"#3E3F3F",borderRadius:100,padding:"9px 10px 9px 15px",boxShadow:"0 14px 40px rgba(62,63,63,.28)"}}>
             <Icon name="wifi" size={15} stroke="rgba(255,255,255,.75)"/>
             <div style={{flex:1,minWidth:0,fontSize:11.5,color:"#fff",lineHeight:1.4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-              Wi-Fi de {propCorta(p)} disponible
+              Wi-Fi de {aptoCorto(p)} disponible
             </div>
             <button onClick={function(){setAbierto(true);}} style={{flexShrink:0,padding:"7px 13px",minHeight:34,borderRadius:100,border:"none",background:"#fff",color:C.black,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Conectarme</button>
             <button onClick={function(){setOculto(true);}} title="Cerrar" style={{flexShrink:0,width:30,height:30,borderRadius:"50%",border:"none",background:"transparent",color:"rgba(255,255,255,.6)",fontSize:13,cursor:"pointer",lineHeight:1}}>✕</button>
