@@ -816,7 +816,12 @@
       var notificadasDia = (o.existentes || []).filter(function (s) {
         return s && s.notificadoEn && s.origen !== "manual" && String(s.fecha).slice(0, 10) === f;
       });
-      var fijosDia = manualesDia.concat(notificadasDia);
+      /* Una limpieza cancelada por el administrador ocupa su lugar: el motor no la
+         puede resucitar en la siguiente corrida. */
+      var canceladasDia = (o.existentes || []).filter(function (s) {
+        return s && String(s.estado || "") === "cancelada" && String(s.fecha).slice(0, 10) === f;
+      });
+      var fijosDia = manualesDia.concat(notificadasDia).concat(canceladasDia);
       var yaCubiertas = {};
       for (var m = 0; m < fijosDia.length; m++) yaCubiertas[norm(fijosDia[m].propiedad) + "|" + fijosDia[m].tipo] = 1;
       delDia = delDia.filter(function (x) { return !yaCubiertas[norm(x.propiedad) + "|" + x.tipo]; });

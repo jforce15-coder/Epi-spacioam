@@ -29,6 +29,7 @@ const BADGE = {
   "Ajuste":             {bg:"#EDEAE3",tx:"#7a7050"},
   "Reporte de Daños":   {bg:"#EDE4E4",tx:"#9b3a3a"},
   "Supervisión":        {bg:"#E9E4ED",tx:"#5a4a7a"},
+  "Cancelación":        {bg:"#F1E5E3",tx:"#8a4a44"},
 };
 const ALT = {
   red:    {label:"Trabajo de hace 3+ semanas", clr:"#9b3a3a", bg:"#EDE4E4"},
@@ -510,6 +511,91 @@ function vendorTipo(v) {
 
 const MOTIVOS_AJUSTE = ["Tokens de lavado","Transporte","Limpieza pendiente","Día doble","Servicio adicional","Compras adicionales","Otro"];
 
+/* ═══ AJUSTES · TRABAJO REALIZADO ═══════════════════════════════════════════
+   Antes era texto libre, y el mismo concepto entraba escrito de seis maneras: las
+   limpiezas que el técnico no pudo registrar el día correcto quedaban perdidas
+   entre tokens y compras. Ahora es una lista cerrada —consolidada a partir de lo
+   que el equipo ya venía escribiendo— y "Otro" es la única salida libre, etiquetada
+   para poder estandarizarla después. */
+var AJUSTE_TRABAJOS = [
+  {g:"Limpieza fuera de programación", items:[
+    "Limpieza de un día anterior (no se pudo llenar el formulario)",
+    "Limpieza pendiente que quedó sin hacer",
+    "Segunda limpieza del mismo día (día doble)",
+    "Reingreso a corregir una limpieza",
+    "Revisión rápida sin huésped",
+  ]},
+  {g:"Lavandería y blancos", items:[
+    "Tokens de lavado",
+    "Lavandería externa",
+    "Cambio o traslado de blancos",
+  ]},
+  {g:"Compras e insumos", items:[
+    "Compra de insumos de limpieza",
+    "Compra de amenidades",
+    "Compra para la propiedad (ferretería, misceláneos)",
+  ]},
+  {g:"Traslados y tiempos", items:[
+    "Transporte / pasajes",
+    "Espera en la propiedad",
+    "Traslado de llaves o tarjetas de acceso",
+    "Apoyo a otro técnico",
+  ]},
+  {g:"Otros trabajos", items:[
+    "Trabajo adicional solicitado por el administrador",
+    "Recepción de proveedor o entrega",
+    "Inventario o revisión de bodega",
+  ]},
+];
+var AJUSTE_TRABAJO_LISTA = AJUSTE_TRABAJOS.reduce(function(a,g){ return a.concat(g.items); },[]);
+var AJUSTE_OTRO = "Otro (especificar)";
+/* Consolidación: lo ya escrito en el histórico se resuelve al concepto estándar por
+   palabras clave. Así el catálogo nace de los datos reales, no de una suposición. */
+var AJUSTE_SINON = [
+  [/token|lavado|lavander/i,                          "Tokens de lavado"],
+  [/pasaje|transporte|taxi|uber|combustible|gasolina/i,"Transporte / pasajes"],
+  [/no se pudo|otro d[ií]a|d[ií]a anterior|atrasad/i, "Limpieza de un día anterior (no se pudo llenar el formulario)"],
+  [/pendiente/i,                                      "Limpieza pendiente que quedó sin hacer"],
+  [/d[ií]a doble|doble turno|segunda limpieza/i,       "Segunda limpieza del mismo día (día doble)"],
+  [/amenidad/i,                                       "Compra de amenidades"],
+  [/ferreter|miscel/i,                                "Compra para la propiedad (ferretería, misceláneos)"],
+  [/compra|super|insumo/i,                            "Compra de insumos de limpieza"],
+  [/espera/i,                                         "Espera en la propiedad"],
+  [/llave|tarjeta|acceso/i,                           "Traslado de llaves o tarjetas de acceso"],
+  [/blanco|s[áa]bana|toalla/i,                        "Cambio o traslado de blancos"],
+  [/apoyo|ayud/i,                                     "Apoyo a otro técnico"],
+  [/correc/i,                                         "Reingreso a corregir una limpieza"],
+  [/adicional|extra/i,                                "Trabajo adicional solicitado por el administrador"],
+  [/inventario|bodega/i,                              "Inventario o revisión de bodega"],
+  [/proveedor|entrega|recepci/i,                      "Recepción de proveedor o entrega"],
+];
+function ajusteEstandar(txt){
+  var t=String(txt||"").trim(); if(!t) return "";
+  if(AJUSTE_TRABAJO_LISTA.indexOf(t)>=0) return t;
+  for(var i=0;i<AJUSTE_SINON.length;i++) if(AJUSTE_SINON[i][0].test(t)) return AJUSTE_SINON[i][1];
+  return "";
+}
+/* El trabajo de un ajuste, ya normalizado, para leerlo en el dashboard. */
+function ajusteTrabajoDe(r){
+  if(!r) return "";
+  if(r.ajusteTrabajo) return r.ajusteTrabajo;
+  return ajusteEstandar(r.descripcion||r.comentarios||"");
+}
+/* Ajustes que no calzan en el catálogo: se etiquetan para unificarlos más adelante. */
+function esAjusteSinEstandarizar(r){
+  if(!r||r.categoria!=="Ajuste") return false;
+  if(r.ajusteOtro) return true;
+  if(r.ajusteTrabajo) return AJUSTE_TRABAJO_LISTA.indexOf(r.ajusteTrabajo)<0;
+  return !ajusteEstandar(r.descripcion||r.comentarios||"");
+}
+/* Antes de las 9:00 am una cancelación no genera pago; después, se paga media tarifa. */
+var CANCEL_HORA_LIMITE = 9;
+function horaTxtGT(){
+  var n=new Date(), gt=new Date(n.getTime()+(n.getTimezoneOffset()-360)*60000);
+  var h=gt.getHours(), m=gt.getMinutes();
+  return ((h%12)||12)+":"+(m<10?"0":"")+m+" "+(h<12?"am":"pm");
+}
+
 const GEO = {
   Guatemala: ["Ciudad de Guatemala","Antigua Guatemala","Puerto San José","Quetzaltenango"],
   Perú:      ["Lima","Cusco","Arequipa","Miraflores"],
@@ -846,6 +932,32 @@ function ls_saveConfig(key,value){var km={vendors:"c:v",props:"c:p",adminpin:"c:
    seguido de basura (p.ej. una restauración que dejó '...]" por "[...]'), extrae el
    PRIMER arreglo [...] balanceado y lo parsea. Así la app se auto-repara y muestra
    los usuarios reales aunque la celda tenga texto extra pegado al final. */
+/* ─── Borrador universal de formularios.
+   El técnico pierde la conexión a media captura más seguido de lo aceptable. Cada
+   formulario guarda su avance solo, y al volver a abrirlo se le ofrece continuar
+   en lugar de empezar de nuevo. `snapshot` es el estado completo; `restore` lo
+   vuelve a poner; `vivo` dice si ya hay algo que valga la pena guardar. */
+function useDraft(key, snapshot, restore, done, vivo, deps){
+  const [pend,  setPend]  = useState(null);
+  const [listo, setListo] = useState(false);
+  useEffect(function(){
+    var alive=true;
+    draftLoad(key).then(function(d){ if(!alive) return; if(d&&d.form) setPend(d); setListo(true); });
+    return function(){ alive=false; };
+  },[]);
+  useEffect(function(){
+    if(!listo||done||pend||!vivo) return;
+    var t=setTimeout(function(){ draftSave(key,{form:snapshot,ts:Date.now()}); },600);
+    return function(){ clearTimeout(t); };
+  },(deps||[]).concat([listo,done,!!pend,!!vivo]));
+  useEffect(function(){ if(done) draftDel(key); },[done]);
+  return {
+    pend: pend,
+    resume: function(){ if(pend&&pend.form) restore(pend.form); setPend(null); },
+    fresh:  function(){ draftDel(key); setPend(null); }
+  };
+}
+
 function salvageArray(v){
   if (Array.isArray(v)) return v;
   if (typeof v !== "string") return null;
@@ -1968,12 +2080,12 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
         role="Admin"
       />
 
-      <div style={{display:tab==="dash"?"block":"none"}}><DashView props={props} nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} meEmails={adminVendor?vendorEmailSet(adminVendor):[]} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh}/></div>
+      <div style={{display:tab==="dash"?"block":"none"}}><DashView props={props} nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} meEmails={adminVendor?vendorEmailSet(adminVendor):[]} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh} schedules={schedules||[]} onSvSchedules={onSvSchedules} onUpsert={onUpsert} onDelete={onDelete}/></div>
       <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
       <div style={{display:tab==="sched"?"block":"none"}}>
         <ProgramacionAdmin schedules={schedules||[]} onSvSchedules={onSvSchedules} vendors={vendors||[]} props={props||[]}
           reservas={reservas||[]} onSvReservas={onSvReservas} ausencias={ausencias||[]} onSvAusencias={onSvAusencias}
-          reps={reps} reviews={reviews} rvCasos={rvCasos} onSvP={onSvP} onSvV={onSvV} canNom={canNotif} codigos={codigos||{}} schedErr={schedErr}/>
+          reps={reps} reviews={reviews} rvCasos={rvCasos} onSvP={onSvP} onSvV={onSvV} canNom={canNotif} codigos={codigos||{}} schedErr={schedErr} onUpsert={onUpsert}/>
       </div>
       <div style={{display:tab==="qa"?"block":"none"}}>
         <AdminQAPanel reps={reps} vendors={vendors} reviews={reviews} onSvReviews={onSvReviews} rvCasos={rvCasos} onSvRvCasos={onSvRvCasos} rvIA={rvIA} onSvRvIA={onSvRvIA} onQA={qaUpdate} onSelect={setDetail} onUpdate={onUpsert} isAdmin={true} me={adminVendor}/>
@@ -1997,7 +2109,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
 }
 
 /* ─── Dashboard container */
-function DashView({props,nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews,rvCasos,rvIA,reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
+function DashView({props,nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews,rvCasos,rvIA,reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh,schedules,onSvSchedules,onUpsert,onDelete}) {
   const [sub,setSub] = useState("ops");
   return (
     <div>
@@ -2007,7 +2119,7 @@ function DashView({props,nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews
           <button key={k} onClick={function(){setSub(k);}} style={{padding:"14px 16px",border:"none",borderBottom:"1.5px solid "+(sub===k?C.black:"transparent"),background:"none",fontSize:13,fontWeight:600,cursor:"pointer",color:sub===k?C.black:C.taupe,transition:"all .2s"}}>{l}</button>
         ); })}
       </div>
-      <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} props={props} vendors={vendors} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} adelantos={adelantos} onMarkPaidBatch={onMarkPaidBatch} onSelect={onSelect} onMarkPaid={onMarkPaid} onRefresh={onRefresh}/></div>
+      <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} props={props} vendors={vendors} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} adelantos={adelantos} onMarkPaidBatch={onMarkPaidBatch} onSelect={onSelect} onMarkPaid={onMarkPaid} onRefresh={onRefresh} schedules={schedules||[]} onSvSchedules={onSvSchedules} onUpsert={onUpsert} onDelete={onDelete}/></div>
       <div style={{display:sub==="exec"?"block":"none"}}><ExecDash reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos}/></div>
       {/* Historial de pagos: el admin principal ve todos los comprobantes; un admin
           secundario solo los suyos, igual que un técnico. */}
@@ -2017,8 +2129,248 @@ function DashView({props,nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews
   );
 }
 
+/* Apartamentos: se comparan varios a la vez, y por su nombre completo
+   ("Z10 - Fiamene - 404"), que es como los nombra el equipo. */
+function MultiAptoPicker({options, value, onChange, baseStyle, activeStyle}){
+  const [open,setOpen] = useState(false);
+  const [q,setQ]       = useState("");
+  var sel=value||[];
+  var lista=options.filter(function(n){ return !q||normalize(n).indexOf(normalize(q))>=0; });
+  var label = sel.length===0 ? "Todos" : sel.length===1 ? sel[0] : sel.length+" apartamentos";
+  function toggle(n){
+    onChange(sel.indexOf(n)>=0 ? sel.filter(function(x){return x!==n;}) : sel.concat([n]));
+  }
+  return (
+    <div style={{position:"relative"}}>
+      <button onClick={function(){setOpen(!open);}} style={Object.assign({},sel.length?activeStyle:baseStyle,{textAlign:"left",display:"flex",alignItems:"center",justifyContent:"space-between",gap:6,minHeight:34})}>
+        <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{label}</span>
+        <span style={{color:C.taupe,fontSize:10,flexShrink:0}}>▾</span>
+      </button>
+      {open&&(
+        <>
+          <div onClick={function(){setOpen(false);}} style={{position:"fixed",inset:0,zIndex:60}}/>
+          <div style={{position:"absolute",top:"calc(100% + 5px)",left:0,zIndex:61,width:280,maxWidth:"80vw",background:"#fff",border:"1px solid "+C.gray,borderRadius:12,boxShadow:"0 18px 50px rgba(62,63,63,.16)",padding:10}}>
+            <input autoFocus placeholder="Buscar apartamento…" value={q} onChange={function(e){setQ(e.target.value);}} style={{width:"100%",boxSizing:"border-box",border:"1px solid "+C.gray,borderRadius:8,padding:"7px 9px",fontSize:12,fontFamily:"Montserrat,sans-serif",outline:"none",marginBottom:8,color:C.black}}/>
+            <div style={{maxHeight:250,overflowY:"auto",display:"flex",flexDirection:"column",gap:1}}>
+              {lista.length===0&&<div style={{fontSize:11.5,color:C.taupe,padding:"8px 4px"}}>Sin coincidencias.</div>}
+              {lista.map(function(n){
+                var on=sel.indexOf(n)>=0;
+                return (
+                  <button key={n} onClick={function(){toggle(n);}} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 8px",border:"none",borderRadius:7,background:on?C.beige:"transparent",cursor:"pointer",textAlign:"left",fontFamily:"Montserrat,sans-serif",minHeight:34}}>
+                    <span style={{width:15,height:15,flexShrink:0,borderRadius:4,border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",color:"#fff",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>{on?"✓":""}</span>
+                    <span style={{fontSize:12,color:C.black,fontWeight:on?600:400}}>{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {sel.length>0&&<button onClick={function(){onChange([]);}} style={{marginTop:8,width:"100%",padding:"7px",borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Quitar los {sel.length} seleccionados</button>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ═══ CONTROL · PROGRAMACIÓN vs. FORMULARIOS ════════════════════════════════
+   Dos preguntas que hasta ahora se contestaban a mano: ¿se programó algo que nadie
+   registró?, ¿se registró algo que nadie programó? Es informativo —no corrige por
+   su cuenta— pero cuando encuentra un formulario huérfano deja resolverlo aquí
+   mismo: cambiarle la fecha, reasignarlo o eliminarlo. */
+function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete}){
+  const [abierto,setAbierto] = useState(false);
+  const [dias,   setDias]    = useState(14);
+  const [tab,    setTab]     = useState("A");
+  const [edit,   setEdit]    = useState(null);
+  const [fx,     setFx]      = useState("");
+  const [tx,     setTx]      = useState("");
+  const [busy,   setBusy]    = useState("");
+
+  var hoy   = todayStr();
+  var desde = isoShift(hoy, -dias);
+  var ix    = cierresIndex(reps);
+
+  var activas=(schedules||[]).filter(function(s){
+    var f=String(s.fecha||"").slice(0,10);
+    return f>=desde && f<=hoy && String(s.estado||"")!=="cancelada";
+  });
+  var progKey={};
+  activas.forEach(function(s){ progKey[String(s.fecha).slice(0,10)+"|"+normalize(s.propiedad||"")]=s; });
+
+  /* B) formularios de cierre sin ninguna limpieza programada ese día */
+  var huerfanos=(reps||[]).filter(function(r){
+    if(!r||!esCierre(r.categoria)) return false;
+    var f=String(r.fecha||"").slice(0,10);
+    if(!f||f<desde||f>hoy) return false;
+    return !progKey[f+"|"+normalize(r.propiedad||"")];
+  }).sort(function(a,b){ return String(b.fecha).localeCompare(String(a.fecha)); });
+
+  /* A) programadas sin formulario · con el huérfano de esa propiedad en los 5 días siguientes */
+  var sinForm=activas.map(function(s){
+    var cz=cierreDe(s, ix, hoy);
+    if(cz.estado!=="faltante"&&cz.estado!=="atrasada") return null;
+    var f=String(s.fecha).slice(0,10), tope=isoShift(f,5);
+    var cand=huerfanos.filter(function(r){
+      var rf=String(r.fecha).slice(0,10);
+      return normalize(r.propiedad||"")===normalize(s.propiedad||"") && rf>f && rf<=tope;
+    });
+    return {s:s, f:f, cand:cand};
+  }).filter(Boolean).sort(function(a,b){ return b.f.localeCompare(a.f); });
+
+  var total=sinForm.length+huerfanos.length;
+  function tecOf(r){
+    var em=String(r.reportadoPor||"").toLowerCase().trim();
+    var v=(vendors||[]).find(function(x){ return vendorEmailSet(x).indexOf(em)>=0; });
+    return v?vendorDisplay(v):(em||"—");
+  }
+  var tecs=(vendors||[]).filter(function(v){ return v.active!==false&&v.email; })
+    .sort(function(a,b){ return vendorDisplay(a).localeCompare(vendorDisplay(b)); });
+
+  function moverFecha(r, f){
+    if(!f||!onUpsert) return;
+    setBusy(r.id); onUpsert(Object.assign({},r,{fecha:f, ajustadoPorAdmin:true}));
+    setEdit(null); setFx(""); setTimeout(function(){setBusy("");},400);
+  }
+  function reasignar(r, email){
+    if(!email||!onUpsert) return;
+    var v=(vendors||[]).find(function(x){ return String(x.email||"").toLowerCase()===String(email).toLowerCase(); });
+    setBusy(r.id);
+    onUpsert(Object.assign({},r,{reportadoPor:email, vendorId:(v&&v.id)||"", total:(r.total||autoTarifa(email,vendors).tarifa||""), ajustadoPorAdmin:true}));
+    setEdit(null); setTx(""); setTimeout(function(){setBusy("");},400);
+  }
+  function eliminar(r){
+    if(!onDelete) return;
+    if(!window.confirm("¿Eliminar el formulario de "+r.propiedad+" del "+fmtDate(r.fecha)+"?\n\nNo se puede recuperar.")) return;
+    onDelete(r.id); setEdit(null);
+  }
+
+  var BTN={fontSize:11,fontWeight:600,padding:"6px 11px",minHeight:32,borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",fontFamily:"Montserrat,sans-serif"};
+
+  function AccionesForm({r}){
+    var ab=edit===r.id;
+    return (
+      <div style={{marginTop:8}}>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+          <button onClick={function(){ setEdit(ab?null:r.id); setFx(String(r.fecha).slice(0,10)); setTx(String(r.reportadoPor||"")); }} style={Object.assign({},BTN,{border:"1px solid "+(ab?C.black:C.gray),color:ab?C.black:C.earth,fontWeight:700})}>{ab?"Cerrar":"Resolver"}</button>
+          {busy===r.id&&<span style={{fontSize:10.5,color:C.green,fontWeight:700}}>Guardado ✓</span>}
+        </div>
+        {ab&&(
+          <div style={{marginTop:8,background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"11px 12px",display:"flex",flexDirection:"column",gap:9}}>
+            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+              <span style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".12em",textTransform:"uppercase",width:74}}>Fecha</span>
+              <input type="date" value={fx} onChange={function(e){setFx(e.target.value);}} style={{fontSize:12,padding:"6px 9px",minHeight:34,borderRadius:8,border:"1px solid "+C.gray,fontFamily:"Montserrat,sans-serif",color:C.black}}/>
+              <button onClick={function(){moverFecha(r,fx);}} style={Object.assign({},BTN,{background:C.black,color:"#fff",border:"none",fontWeight:700})}>Cambiar fecha</button>
+            </div>
+            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+              <span style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".12em",textTransform:"uppercase",width:74}}>Técnico</span>
+              <select value={tx} onChange={function(e){setTx(e.target.value);}} style={{fontSize:12,padding:"6px 9px",minHeight:34,borderRadius:8,border:"1px solid "+C.gray,fontFamily:"Montserrat,sans-serif",background:"#fff",color:C.black,maxWidth:200}}>
+                <option value="">Seleccionar…</option>
+                {tecs.map(function(v){ return <option key={v.id} value={v.email}>{vendorDisplay(v)}</option>; })}
+              </select>
+              <button onClick={function(){reasignar(r,tx);}} style={Object.assign({},BTN,{background:C.black,color:"#fff",border:"none",fontWeight:700})}>Reasignar</button>
+            </div>
+            <button onClick={function(){eliminar(r);}} style={Object.assign({},BTN,{alignSelf:"flex-start",color:C.red,border:"1px solid #DBC8C4",background:"#F5EDEC",fontWeight:700})}>Eliminar formulario</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:16,boxShadow:"0 4px 16px rgba(62,63,63,.05)",overflow:"hidden",marginBottom:14}}>
+      <button onClick={function(){setAbierto(!abierto);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"15px 18px",background:"none",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"Montserrat,sans-serif"}}>
+        <span style={{minWidth:0}}>
+          <span style={{display:"block",fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Control</span>
+          <span style={{display:"block",fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:19,color:C.black,marginTop:4}}>Programación vs. formularios</span>
+        </span>
+        <span style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+          <span style={{fontSize:22,fontWeight:600,color:total?C.red:C.green,fontVariantNumeric:"tabular-nums"}}>{total}</span>
+          <span style={{fontSize:11,color:C.taupe}}>{abierto?"▴":"▾"}</span>
+        </span>
+      </button>
+      {abierto&&(
+        <div style={{borderTop:"1px solid "+C.line,padding:"14px 18px 18px"}}>
+          <div style={{fontSize:11.5,color:C.earth,lineHeight:1.7,marginBottom:12,textWrap:"pretty"}}>
+            Cruce de los últimos {dias} días entre lo programado y los formularios entregados (tradicional, profunda y ajuste). Es informativo: nada se corrige solo.
+          </div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14,alignItems:"center"}}>
+            {[7,14,30].map(function(d){
+              var a=dias===d;
+              return <button key={d} onClick={function(){setDias(d);}} style={{fontSize:11,fontWeight:a?700:600,padding:"6px 12px",borderRadius:100,border:"1px solid "+(a?C.black:C.gray),background:a?C.black:"#fff",color:a?"#fff":C.earth,cursor:"pointer"}}>{d} días</button>;
+            })}
+            <span style={{marginLeft:"auto",display:"flex",gap:6}}>
+              {[["A","Sin formulario · "+sinForm.length],["B","Sin programación · "+huerfanos.length]].map(function(it){
+                var a=tab===it[0];
+                return <button key={it[0]} onClick={function(){setTab(it[0]);}} style={{fontSize:11,fontWeight:a?700:600,padding:"6px 12px",borderRadius:100,border:"1px solid "+(a?C.black:C.gray),background:a?C.beige:"#fff",color:a?C.black:C.earth,cursor:"pointer"}}>{it[1]}</button>;
+              })}
+            </span>
+          </div>
+
+          {tab==="A"&&(sinForm.length===0
+            ? <div style={{padding:"14px",borderRadius:10,background:"#EDF5EF",fontSize:12.5,color:C.green,fontWeight:600}}>✓ Toda limpieza programada tiene su formulario.</div>
+            : <div style={{display:"flex",flexDirection:"column",gap:9}}>
+                {sinForm.map(function(x){
+                  var em=String(x.s.vendorEmail||"").toLowerCase();
+                  var v=(vendors||[]).find(function(y){ return vendorEmailSet(y).indexOf(em)>=0; });
+                  return (
+                    <div key={x.s.id} style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"12px 14px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+                        <div style={{minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:700,color:C.black}}>{x.s.propiedad}</div>
+                          <div style={{fontSize:11,color:C.earth,marginTop:3}}>{fmtDate(x.f)} · {v?vendorDisplay(v):em||"sin técnico"} · {x.s.tipo||"Limpieza"}</div>
+                        </div>
+                        <span style={{fontSize:9.5,fontWeight:700,color:C.red,letterSpacing:".08em",textTransform:"uppercase",whiteSpace:"nowrap"}}>Sin formulario</span>
+                      </div>
+                      {x.cand.length>0&&(
+                        <div style={{marginTop:10,borderTop:"1px dashed "+C.gray,paddingTop:10}}>
+                          <div style={{fontSize:11,color:C.black,fontWeight:700,marginBottom:7}}>Puede ser este formulario, entregado después:</div>
+                          {x.cand.map(function(r){
+                            return (
+                              <div key={r.id} style={{background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"10px 12px",marginBottom:7}}>
+                                <div style={{fontSize:12,color:C.black,fontWeight:600}}>{r.categoria} · {fmtDate(r.fecha)}</div>
+                                <div style={{fontSize:11,color:C.earth,marginTop:2}}>{tecOf(r)}{r.categoria==="Ajuste"&&ajusteTrabajoDe(r)?" · "+ajusteTrabajoDe(r):""}</div>
+                                <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+                                  <button onClick={function(){moverFecha(r,x.f);}} style={Object.assign({},BTN,{background:C.black,color:"#fff",border:"none",fontWeight:700})}>Moverlo al {fmtDate(x.f)}</button>
+                                </div>
+                                <AccionesForm r={r}/>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+          )}
+
+          {tab==="B"&&(huerfanos.length===0
+            ? <div style={{padding:"14px",borderRadius:10,background:"#EDF5EF",fontSize:12.5,color:C.green,fontWeight:600}}>✓ Todo formulario entregado tiene su limpieza programada.</div>
+            : <div style={{display:"flex",flexDirection:"column",gap:9}}>
+                {huerfanos.map(function(r){
+                  return (
+                    <div key={r.id} style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"12px 14px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+                        <div style={{minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:700,color:C.black}}>{r.propiedad}</div>
+                          <div style={{fontSize:11,color:C.earth,marginTop:3}}>{fmtDate(r.fecha)} · {tecOf(r)} · {r.categoria}{r.categoria==="Ajuste"&&ajusteTrabajoDe(r)?" · "+ajusteTrabajoDe(r):""}</div>
+                        </div>
+                        <span style={{fontSize:9.5,fontWeight:700,color:C.orange,letterSpacing:".08em",textTransform:"uppercase",whiteSpace:"nowrap"}}>Sin programación</span>
+                      </div>
+                      {esAjusteSinEstandarizar(r)&&<div style={{marginTop:7,display:"inline-block",fontSize:9.5,fontWeight:700,color:"#8a6b2f",background:"#F7EFE2",border:"1px solid #E3D5B8",borderRadius:100,padding:"3px 9px",letterSpacing:".06em",textTransform:"uppercase"}}>Ajuste sin estandarizar</div>}
+                      <AccionesForm r={r}/>
+                    </div>
+                  );
+                })}
+              </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Operational Dashboard */
-function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh}) {
+function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh,schedules,onSvSchedules,onUpsert,onDelete}) {
   const [view,     setView]     = useState("table");
   const [fVend,    setFVend]    = useState("Todos");
   /* Interno y externo se pagan y se miden distinto: verlos por separado — y
@@ -2030,16 +2382,18 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
   const [fPagador, setFPagador] = useState("Todos");
   const [fZona,    setFZona]    = useState("Todas");
   const [fEdif,    setFEdif]    = useState("Todos");
-  const [fUnidad,  setFUnidad]  = useState("Todas");
+  const [fAptos,   setFAptos]   = useState([]);   /* varios apartamentos a la vez */
+  const [fAjOtro,  setFAjOtro]  = useState(false);/* ajustes sin concepto estándar */
   const [fDesde,   setFDesde]   = useState("");
   const [fHasta,   setFHasta]   = useState("");
+  const [avanz,    setAvanz]    = useState(false);
   const [showAll,  setShowAll]  = useState(false);
 
   function applyPreset(val) {
     var r = presetRange(val); setFDesde(r.from); setFHasta(r.to);
   }
 
-  function reset() { setFVend("Todos"); setFVinc("Todos"); setFCatV("Todas"); setFStatus("Todos"); setFCat("Todos"); setFPagador("Todos"); setFZona("Todas"); setFEdif("Todos"); setFUnidad("Todas"); setFDesde(""); setFHasta(""); setShowAll(false); }
+  function reset() { setFVend("Todos"); setFVinc("Todos"); setFCatV("Todas"); setFStatus("Todos"); setFCat("Todos"); setFPagador("Todos"); setFZona("Todas"); setFEdif("Todos"); setFAptos([]); setFAjOtro(false); setFDesde(""); setFHasta(""); setShowAll(false); }
 
   /* Zona › edificio › apartamento salen del propio nombre de la propiedad
      ("Z10 - Fiamene - 404"). El universo es el PORTAFOLIO — así aparecen también
@@ -2074,23 +2428,14 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
     list.forEach(function(v){ var k=rvPropKey(v); if(!k||seen[k]) return; seen[k]=1; out.push(v); });
     return out.sort(function(a,b){ return a.localeCompare(b,"es",{sensitivity:"base"}); });
   }
-  var zonaOpts = dedupSort(allProps.map(propZona).filter(Boolean));
-  var edifOpts = dedupSort(allProps.filter(function(n){return fZona==="Todas"||rvPropKey(propZona(n))===rvPropKey(fZona);})
-                              .map(propEdificio).filter(Boolean));
-  var unidOpts = dedupSort(allProps.filter(function(n){
-                                var p=propParts(n);
-                                return (fZona==="Todas"||rvPropKey(p.zona)===rvPropKey(fZona))&&(fEdif==="Todos"||edifKey(n)===rvPropKey(fEdif));
-                              }).map(unidadDe).filter(Boolean));
+  var aptoSet={}; fAptos.forEach(function(n){ aptoSet[rvPropKey(n)]=1; });
   function matchProp(r){
     var p=propParts(r.propiedad);
-    if(fZona!=="Todas"   && rvPropKey(p.zona)!==rvPropKey(fZona))         return false;
-    if(fEdif!=="Todos"   && rvPropKey(p.edificio)!==rvPropKey(fEdif))     return false;
-    if(fUnidad!=="Todas" && rvPropKey(unidadDe(r.propiedad))!==rvPropKey(fUnidad)) return false;
+    if(fZona!=="Todas" && rvPropKey(p.zona)!==rvPropKey(fZona))     return false;
+    if(fEdif!=="Todos" && rvPropKey(p.edificio)!==rvPropKey(fEdif)) return false;
+    if(fAptos.length  && aptoSet[rvPropKey(r.propiedad)]!==1)       return false;
     return true;
   }
-
-  var techOpts = techFilterGroups(reps, vendors, null, true);
-  var selGroup = (fVend!=="Todos") ? techOpts.find(function(o){return o.value===fVend;}) : null;
 
   /* Quién firmó el reporte, reconociendo también sus correos anteriores. */
   function vendorDeRep(r){
@@ -2100,29 +2445,73 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
       return vendorEmailSet(v).map(function(x){return String(x||"").toLowerCase().trim();}).indexOf(em)>=0;
     })||null;
   }
-  /* El desglose sale de la gente que existe, no de un catálogo fijo. */
-  var catsVinc=uniq((vendors||[]).filter(function(v){ return fVinc==="Todos"||(v.tipo||"externo")===fVinc; })
-    .map(function(v){ return v.categoria||""; }).filter(Boolean)).sort();
-  var fReps = reps.filter(function(r) {
-    if (!matchProp(r)) return false;
-    if (fVinc!=="Todos"||fCatV!=="Todas") {
-      var vr=vendorDeRep(r);
-      if(!vr) return false;
-      if(fVinc!=="Todos"&&(vr.tipo||"externo")!==fVinc) return false;
-      if(fCatV!=="Todas"&&(vr.categoria||"")!==fCatV) return false;
+  /* Filtros excluyentes: ninguna lista ofrece opciones que no existan bajo lo ya
+     elegido. Cada opción se calcula sobre los reportes que pasan TODOS los demás
+     filtros — el que se está dibujando queda fuera del cálculo. */
+  function pasa(r, salvo){
+    salvo=salvo||{};
+    if(!salvo.prop && !matchProp(r)) return false;
+    if(!salvo.vinc && fVinc!=="Todos"){ var v1=vendorDeRep(r); if(!v1||(v1.tipo||"externo")!==fVinc) return false; }
+    if(!salvo.catv && fCatV!=="Todas"){ var v2=vendorDeRep(r); if(!v2||(v2.categoria||"")!==fCatV) return false; }
+    if(!salvo.vend && fVend!=="Todos"){ if(!selGroup||!repInGroup(r,selGroup)) return false; }
+    if(!salvo.status){
+      if(fStatus==="✓ Pagado"&&!(r.paid&&r.total)) return false;
+      if(fStatus==="● Pendiente"&&(r.paid||!r.total)) return false;
     }
-    if (fVend!=="Todos") {
-      if (selGroup) { if(!repInGroup(r, selGroup)) return false; }
-      else return false;
+    if(!salvo.cat     && fCat!=="Todos"    && r.categoria!==fCat)        return false;
+    if(!salvo.pagador && fPagador!=="Todos"&& (r.pagadoPor||"")!==fPagador) return false;
+    if(!salvo.ajotro  && fAjOtro           && !esAjusteSinEstandarizar(r)) return false;
+    if(!salvo.fecha){
+      if(fDesde&&r.fecha<fDesde) return false;
+      if(fHasta&&r.fecha>fHasta) return false;
     }
-    if (fStatus==="✓ Pagado"&&!(r.paid&&r.total)) return false;
-    if (fStatus==="● Pendiente"&&(r.paid||!r.total)) return false;
-    if (fCat!=="Todos"&&r.categoria!==fCat) return false;
-    if (fPagador!=="Todos"&&(r.pagadoPor||"")!==fPagador) return false;
-    if (fDesde&&r.fecha<fDesde) return false;
-    if (fHasta&&r.fecha>fHasta) return false;
     return true;
+  }
+
+  /* Técnicos: solo los que tienen trabajos bajo los demás filtros. El elegido nunca
+     desaparece de la lista, aunque el cruce lo deje en cero. */
+  var techOpts = techFilterGroups(reps.filter(function(r){ return pasa(r,{vend:1}); }), vendors, null, false);
+  if(fVend!=="Todos" && !techOpts.some(function(o){return o.value===fVend;})){
+    var todosT=techFilterGroups(reps, vendors, null, true).filter(function(o){return o.value===fVend;});
+    techOpts = techOpts.concat(todosT);
+  }
+  var selGroup = (fVend!=="Todos") ? techOpts.find(function(o){return o.value===fVend;}) : null;
+
+  var vincOpts = uniq(reps.filter(function(r){ return pasa(r,{vinc:1,catv:1,vend:1}); })
+    .map(function(r){ var v=vendorDeRep(r); return v?(v.tipo||"externo"):""; }).filter(Boolean));
+  /* El desglose sale de la gente que existe, no de un catálogo fijo. */
+  var catsVinc = uniq(reps.filter(function(r){ return pasa(r,{catv:1,vend:1}); })
+    .map(function(r){ var v=vendorDeRep(r); return v?(v.categoria||""):""; }).filter(Boolean)).sort();
+  if(fCatV!=="Todas"&&catsVinc.indexOf(fCatV)<0) catsVinc=catsVinc.concat([fCatV]);
+
+  var catsPresentes = uniq(reps.filter(function(r){ return pasa(r,{cat:1}); }).map(function(r){return r.categoria;}).filter(Boolean));
+  var ordenCats = CATS.concat(["Supervisión","Cancelación"]);
+  var catOpts = ordenCats.filter(function(c){ return catsPresentes.indexOf(c)>=0; })
+    .concat(catsPresentes.filter(function(c){ return ordenCats.indexOf(c)<0; }).sort());
+  if(fCat!=="Todos"&&catOpts.indexOf(fCat)<0) catOpts=catOpts.concat([fCat]);
+
+  var pagOpts = PAGADORES.filter(function(p){
+    return reps.some(function(r){ return (r.pagadoPor||"")===p && pasa(r,{pagador:1}); });
   });
+  if(fPagador!=="Todos"&&pagOpts.indexOf(fPagador)<0) pagOpts=pagOpts.concat([fPagador]);
+
+  /* Propiedades: bajo los demás filtros. Sin ningún otro filtro puesto, el universo
+     es el portafolio completo (así aparecen las que aún no tienen trabajos). */
+  var hayOtroFiltro = fVinc!=="Todos"||fCatV!=="Todas"||fVend!=="Todos"||fStatus!=="Todos"||fCat!=="Todos"||fPagador!=="Todos"||fAjOtro||!!fDesde||!!fHasta;
+  var propUniverso = hayOtroFiltro
+    ? dedupSort(uniq(reps.filter(function(r){ return pasa(r,{prop:1}); }).map(function(r){return r.propiedad;}).filter(Boolean))
+        .map(function(n){ return canon[rvPropKey(n)]||n; }))
+    : dedupSort(allProps);
+  var zonaOpts = dedupSort(propUniverso.map(propZona).filter(Boolean));
+  var edifOpts = dedupSort(propUniverso.filter(function(n){return fZona==="Todas"||rvPropKey(propZona(n))===rvPropKey(fZona);})
+                              .map(propEdificio).filter(Boolean));
+  /* Nombre completo — "Z10 - Fiamene - 404" — no solo el número de unidad. */
+  var aptoOpts = dedupSort(propUniverso.filter(function(n){
+    var p=propParts(n);
+    return (fZona==="Todas"||rvPropKey(p.zona)===rvPropKey(fZona))&&(fEdif==="Todos"||edifKey(n)===rvPropKey(fEdif));
+  }));
+
+  var fReps = reps.filter(function(r){ return pasa(r); });
   var shown  = showAll ? fReps : fReps.slice(0,10);
   /* Use auto-tariff as fallback when r.total is not yet saved */
   function effT(r){
@@ -2146,7 +2535,8 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
   (vendors||[]).forEach(function(v){if(v.email)vMap[v.email]=vendorDisplay(v);});
   /* Opciones del filtro Técnico: UNA entrada por técnico, mostrada solo con su nombre y
      apellido, unificando todos sus correos (actuales y anteriores). */
-  var actF   = [fVend!=="Todos",fVinc!=="Todos",fCatV!=="Todas",fStatus!=="Todos",fCat!=="Todos",fPagador!=="Todos",!!fDesde,!!fHasta].filter(Boolean).length;
+  var actF   = [fVend!=="Todos",fVinc!=="Todos",fCatV!=="Todas",fStatus!=="Todos",fCat!=="Todos",fPagador!=="Todos",fZona!=="Todas",fEdif!=="Todos",fAptos.length>0,fAjOtro,!!fDesde,!!fHasta].filter(Boolean).length;
+  var actAvanz = [fCatV!=="Todas",fPagador!=="Todos",fZona!=="Todas",fEdif!=="Todos",fAptos.length>0,fAjOtro].filter(Boolean).length;
 
   var IS = {width:"100%",maxWidth:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"7px 10px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",color:C.black,cursor:"pointer",transition:"all .2s"};
   var IS_A = Object.assign({},IS,{border:"1.5px solid "+C.black,fontWeight:600});
@@ -2154,7 +2544,10 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
 
   return (
     <div>
-      <div style={{padding:"16px 22px 0"}}><RatingDashCard reviews={reviews||[]} reps={reps} vendors={vendors} rvCasos={rvCasos||[]} soloGrupo={selGroup} rvIA={rvIA} propFilter={matchProp} propScope={[fZona,fEdif,fUnidad].filter(function(v){return v!=="Todas"&&v!=="Todos";}).join(" · ")}/></div>
+      <div style={{padding:"16px 22px 0"}}>
+        <RatingDashCard reviews={reviews||[]} reps={reps} vendors={vendors} rvCasos={rvCasos||[]} soloGrupo={selGroup} rvIA={rvIA} propFilter={matchProp} propScope={[fZona,fEdif].filter(function(v){return v!=="Todas"&&v!=="Todos";}).concat(fAptos).join(" · ")}/>
+        <ControlProgFormularios schedules={schedules} reps={reps} vendors={vendors} onUpsert={onUpsert} onDelete={onDelete}/>
+      </div>
 
       {/* Stats bar */}
       <StatsSummary
@@ -2171,10 +2564,9 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
         ]}
       />
 
-      {/* Filter panel */}
+      {/* Filter panel — lo básico a la vista; el resto detrás de "Filtros avanzados" */}
       <div style={{background:"#fff",borderBottom:"1px solid "+C.gray,padding:"14px 20px"}}>
-        {/* Row 1: dropdowns */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:10,marginBottom:12}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10}}>
           <div>
             <span style={LBL}>Técnico</span>
             <select value={fVend} onChange={function(e){setFVend(e.target.value);setShowAll(false);}} style={fVend!=="Todos"?IS_A:IS}>
@@ -2184,25 +2576,17 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
           </div>
           <div>
             <span style={LBL}>Vínculo</span>
-            <select value={fVinc} onChange={function(e){setFVinc(e.target.value);setFCatV("Todas");setShowAll(false);}} style={fVinc!=="Todos"?IS_A:IS}>
+            <select value={fVinc} onChange={function(e){setFVinc(e.target.value);setFCatV("Todas");setFVend("Todos");setShowAll(false);}} style={fVinc!=="Todos"?IS_A:IS}>
               <option value="Todos">Todos</option>
-              <option value="interno">Internos</option>
-              <option value="externo">Externos</option>
+              {vincOpts.indexOf("interno")>=0&&<option value="interno">Internos</option>}
+              {vincOpts.indexOf("externo")>=0&&<option value="externo">Externos</option>}
             </select>
           </div>
-          {catsVinc.length>1&&(
-            <div>
-              <span style={LBL}>{fVinc==="externo"?"Servicio externo":fVinc==="interno"?"Equipo interno":"Categoría del proveedor"}</span>
-              <select value={fCatV} onChange={function(e){setFCatV(e.target.value);setShowAll(false);}} style={fCatV!=="Todas"?IS_A:IS}>
-                <option value="Todas">Todas</option>
-                {catsVinc.map(function(c){return <option key={c} value={c} title={c}>{c.length>30?c.slice(0,29).trim()+"…":c}</option>;})}
-              </select>
-            </div>
-          )}
           <div>
             <span style={LBL}>Tipo de trabajo</span>
             <select value={fCat} onChange={function(e){setFCat(e.target.value);setShowAll(false);}} style={fCat!=="Todos"?IS_A:IS}>
-              {["Todos"].concat(CATS).concat(["Supervisión"]).map(function(c){return <option key={c}>{c}</option>;})}
+              <option value="Todos">Todos</option>
+              {catOpts.map(function(c){return <option key={c}>{c}</option>;})}
             </select>
           </div>
           <div>
@@ -2214,37 +2598,96 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
             </select>
           </div>
           <div>
-            <span style={LBL}>Pagador</span>
-            <select value={fPagador} onChange={function(e){setFPagador(e.target.value);setShowAll(false);}} style={fPagador!=="Todos"?IS_A:IS}>
-              <option>Todos</option>
-              <option>Spacio AM</option>
-              <option>Dueño</option>
+            <span style={LBL}>Período rápido</span>
+            <select onChange={function(e){applyPreset(e.target.value);e.target.value="";}} style={IS} defaultValue="">
+              <option value="" disabled>Seleccionar…</option>
+              <option value="hoy">Hoy</option>
+              <option value="semana">Semana en curso</option>
+              <option value="semana_ant">Semana anterior</option>
+              <option value="mes">Este mes</option>
+              <option value="semanas_ant">Semanas anteriores</option>
+              <option value="todo">Todo</option>
             </select>
           </div>
           <div>
-            <span style={LBL}>Zona</span>
-            <select value={fZona} onChange={function(e){setFZona(e.target.value);setFEdif("Todos");setFUnidad("Todas");setShowAll(false);}} style={fZona!=="Todas"?IS_A:IS}>
-              <option value="Todas">Todas</option>
-              {zonaOpts.map(function(z){return <option key={z} value={z}>{z}</option>;})}
-            </select>
-          </div>
-          <div>
-            <span style={LBL}>Edificio</span>
-            <select value={fEdif} onChange={function(e){setFEdif(e.target.value);setFUnidad("Todas");setShowAll(false);}} style={fEdif!=="Todos"?IS_A:IS}>
-              <option value="Todos">Todos</option>
-              {edifOpts.map(function(b){return <option key={b} value={b}>{b}</option>;})}
-            </select>
-          </div>
-          <div>
-            <span style={LBL}>Apartamento</span>
-            <select value={fUnidad} onChange={function(e){setFUnidad(e.target.value);setShowAll(false);}} style={fUnidad!=="Todas"?IS_A:IS}>
-              <option value="Todas">Todos</option>
-              {unidOpts.map(function(u){return <option key={u} value={u}>{u}</option>;})}
-            </select>
+            <span style={LBL}>Rango de fechas</span>
+            <DateRangePicker from={fDesde} to={fHasta} baseStyle={IS} activeStyle={IS_A} onChange={function(x,y){setFDesde(x);setFHasta(y);setShowAll(false);}}/>
           </div>
         </div>
 
-        {/* Row 2: date range + presets + actions */}
+        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",marginTop:12}}>
+          <button onClick={function(){setAvanz(!avanz);}} style={{background:"none",border:"none",padding:0,fontSize:11.5,fontWeight:600,color:C.earth,cursor:"pointer",fontFamily:"Montserrat,sans-serif",display:"flex",alignItems:"center",gap:6,borderBottom:"1px solid "+C.gray}}>
+            {avanz?"Ocultar filtros avanzados":"Filtros avanzados"}
+            {actAvanz>0&&<span style={{background:C.peach,color:"#fff",borderRadius:"50%",width:16,height:16,fontSize:9.5,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>{actAvanz}</span>}
+            <span style={{fontSize:9,color:C.taupe}}>{avanz?"▴":"▾"}</span>
+          </button>
+          <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
+            {actF>0&&(
+              <button onClick={reset} style={{padding:"7px 14px",borderRadius:9,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+                ✕ Limpiar
+                <span style={{background:C.peach,color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>{actF}</span>
+              </button>
+            )}
+            <button onClick={onRefresh} title="Actualizar" style={{padding:"7px 11px",borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:15,cursor:"pointer",fontWeight:600,lineHeight:1}}>↻</button>
+            <div style={{display:"flex",background:C.surfaceWarm,borderRadius:100,overflow:"hidden",border:"1px solid "+C.line,padding:2,gap:2}}>
+              {[["table","Lista","list"],["cal","Cal","calendar"]].map(function(it){ var k=it[0],l=it[1],ic=it[2]; return <button key={k} onClick={function(){setView(k);}} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 13px",borderRadius:100,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:view===k?C.black:"transparent",color:view===k?"#fff":C.earth,transition:"all .2s",whiteSpace:"nowrap"}}><Icon name={ic} size={14} stroke={view===k?"#fff":C.earth}/>{l}</button>; })}
+            </div>
+          </div>
+        </div>
+
+        {avanz&&(
+          <div style={{marginTop:13,paddingTop:13,borderTop:"1px solid "+C.line}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10}}>
+              {catsVinc.length>0&&(
+                <div>
+                  <span style={LBL}>{fVinc==="externo"?"Servicio externo":fVinc==="interno"?"Equipo interno":"Categoría del proveedor"}</span>
+                  <select value={fCatV} onChange={function(e){setFCatV(e.target.value);setShowAll(false);}} style={fCatV!=="Todas"?IS_A:IS}>
+                    <option value="Todas">Todas</option>
+                    {catsVinc.map(function(c){return <option key={c} value={c} title={c}>{c.length>30?c.slice(0,29).trim()+"…":c}</option>;})}
+                  </select>
+                </div>
+              )}
+              <div>
+                <span style={LBL}>Pagador</span>
+                <select value={fPagador} onChange={function(e){setFPagador(e.target.value);setShowAll(false);}} style={fPagador!=="Todos"?IS_A:IS}>
+                  <option value="Todos">Todos</option>
+                  {pagOpts.map(function(p){return <option key={p}>{p}</option>;})}
+                </select>
+              </div>
+              <div>
+                <span style={LBL}>Zona</span>
+                <select value={fZona} onChange={function(e){setFZona(e.target.value);setFEdif("Todos");setFAptos([]);setShowAll(false);}} style={fZona!=="Todas"?IS_A:IS}>
+                  <option value="Todas">Todas</option>
+                  {zonaOpts.map(function(z){return <option key={z} value={z}>{z}</option>;})}
+                </select>
+              </div>
+              <div>
+                <span style={LBL}>Edificio</span>
+                <select value={fEdif} onChange={function(e){setFEdif(e.target.value);setFAptos([]);setShowAll(false);}} style={fEdif!=="Todos"?IS_A:IS}>
+                  <option value="Todos">Todos</option>
+                  {edifOpts.map(function(b2){return <option key={b2} value={b2}>{b2}</option>;})}
+                </select>
+              </div>
+              <div>
+                <span style={LBL}>Apartamento{fAptos.length>1?" · "+fAptos.length:""}</span>
+                <MultiAptoPicker options={aptoOpts} value={fAptos} baseStyle={IS} activeStyle={IS_A} onChange={function(v){setFAptos(v);setShowAll(false);}}/>
+              </div>
+              <div>
+                <span style={LBL}>Ajustes</span>
+                <button onClick={function(){setFAjOtro(!fAjOtro);setShowAll(false);}} style={Object.assign({},fAjOtro?IS_A:IS,{textAlign:"left",minHeight:34})}>{fAjOtro?"✓ Sin estandarizar":"Todos los ajustes"}</button>
+              </div>
+            </div>
+            {fAptos.length>1&&(
+              <div style={{marginTop:10,display:"flex",gap:6,flexWrap:"wrap"}}>
+                {fAptos.map(function(n){
+                  return <span key={n} style={{display:"inline-flex",alignItems:"center",gap:6,background:C.beige,border:"1px solid "+C.gray,borderRadius:100,padding:"4px 10px",fontSize:11,color:C.black,fontWeight:600}}>{n}<button onClick={function(){setFAptos(fAptos.filter(function(x){return x!==n;}));}} style={{background:"none",border:"none",color:C.earth,cursor:"pointer",fontSize:13,lineHeight:1,padding:0}}>×</button></span>;
+                })}
+              </div>
+            )}
+            {fAjOtro&&<div style={{marginTop:10,fontSize:11.5,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>Ajustes cuyo trabajo se escribió a mano (“Otro”) y todavía no tiene un concepto estándar. Sirve para unificarlos.</div>}
+          </div>
+        )}
+
         {/* Bulk paid action — only shows when there are pending reps */}
         {fReps.filter(function(r){return !r.paid&&isPayable(r,vendors);}).length>0&&(
           <div style={{background:"#EDF5EF",borderRadius:8,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
@@ -2259,36 +2702,6 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
             </button>
           </div>
         )}
-        <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
-          <div>
-            <span style={LBL}>Período rápido</span>
-            <select onChange={function(e){applyPreset(e.target.value);e.target.value="";}} style={IS} defaultValue="">
-              <option value="" disabled>Seleccionar…</option>
-              <option value="hoy">Hoy</option>
-              <option value="semana">Semana en curso</option>
-              <option value="semana_ant">Semana anterior</option>
-              <option value="mes">Este mes</option>
-              <option value="semanas_ant">Semanas anteriores</option>
-              <option value="todo">Todo</option>
-            </select>
-          </div>
-          <div>
-            <span style={LBL}>Período</span>
-            <DateRangePicker from={fDesde} to={fHasta} baseStyle={IS} activeStyle={IS_A} onChange={function(a,b){setFDesde(a);setFHasta(b);setShowAll(false);}}/>
-          </div>
-          <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
-            {actF>0&&(
-              <button onClick={reset} style={{padding:"7px 14px",borderRadius:9,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
-                ✕ Limpiar
-                <span style={{background:C.peach,color:"#fff",borderRadius:"50%",width:17,height:17,fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>{actF}</span>
-              </button>
-            )}
-            <button onClick={onRefresh} title="Actualizar" style={{padding:"7px 11px",borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:15,cursor:"pointer",fontWeight:600,lineHeight:1}}>↻</button>
-            <div style={{display:"flex",background:C.surfaceWarm,borderRadius:100,overflow:"hidden",border:"1px solid "+C.line,padding:2,gap:2}}>
-              {[["table","Lista","list"],["cal","Cal","calendar"]].map(function(it){ var k=it[0],l=it[1],ic=it[2]; return <button key={k} onClick={function(){setView(k);}} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 13px",borderRadius:100,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:view===k?C.black:"transparent",color:view===k?"#fff":C.earth,transition:"all .2s",whiteSpace:"nowrap"}}><Icon name={ic} size={14} stroke={view===k?"#fff":C.earth}/>{l}</button>; })}
-            </div>
-          </div>
-        </div>
       </div>
 
       {fReps.length===0&&<div style={{textAlign:"center",padding:"52px 20px",color:C.earth,fontSize:14}}>No hay trabajos con estos filtros.<br/><button onClick={reset} style={{marginTop:14,padding:"9px 22px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:13,fontWeight:600,cursor:"pointer"}}>Limpiar filtros</button></div>}
@@ -2702,7 +3115,7 @@ function RepForm({vendors,props,company,onSubmit,defaultVendor,onSaveFeedback,my
   /* Start with null (selector screen) so user always picks category first */
   const [cat,setCat] = useState(null);
   function goBack(){setCat(null);}
-  var shared = {vendors:vendors,props:props,company:company,onSubmit:onSubmit,defaultVendor:defaultVendor,onBack:goBack,onSaveFeedback:onSaveFeedback};
+  var shared = {vendors:vendors,props:props,company:company,onSubmit:onSubmit,defaultVendor:defaultVendor,onBack:goBack,onSaveFeedback:onSaveFeedback,myReps:myReps||[]};
   if (cat==="Limpieza tradicional") return <LimpiezaTradForm {...shared}/>;
   if (cat==="Limpieza profunda")    return <LimpiezaProfForm  {...shared}/>;
   if (cat==="Ajuste")               return <AjusteForm           {...shared}/>;
@@ -2766,6 +3179,9 @@ function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendo
   const [form,setForm] = useState(blank);
   const [busy,setBusy] = useState(false);
   const [done,setDone] = useState(false);
+  /* Borrador: si se cae la conexión a media captura, el avance no se pierde. */
+  var dr = useDraft("std:"+(cat||"gen")+":"+(defaultVendor||"anon"), form, setForm, done,
+    !!(form.propiedad||form.descripcion||form.comentarios||(form.fotoAntes||[]).length||(form.fotoDespues||[]).length||form.factura), [form]);
 
   async function addPics(files,field,max){var c=await Promise.all(Array.from(files).map(function(f){return compress(f);}));setForm(function(p){var merged=p[field].concat(c).slice(0,max);var u=Object.assign({},p);u[field]=merged;return u;});}
   function rmPic(field,idx){setForm(function(p){var u=Object.assign({},p);u[field]=p[field].filter(function(_,j){return j!==idx;});return u;});}
@@ -2790,6 +3206,7 @@ function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendo
 
   return (
     <div style={{width:"100%",maxWidth:560,margin:"0 auto",padding:"24px 16px 90px",fontFamily:"Montserrat,sans-serif"}}>
+      <ResumeDraftModal data={dr.pend} stepCaption="Formulario" stepLabel={cat||"Reporte"} onResume={dr.resume} onFresh={dr.fresh}/>
       <div style={{marginBottom:24}}>
         <div style={{fontSize:9.5,fontWeight:600,color:C.earth,letterSpacing:".28em",textTransform:"uppercase",marginBottom:8}}>Nuevo reporte</div>
         <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:28,fontWeight:400,color:C.black,letterSpacing:".04em"}}>¿Qué trabajo se realizó?</div>
@@ -2858,6 +3275,11 @@ function NuevoProductoForm({vendors,props,onSubmit,defaultVendor,onBack}) {
   const [busy,    setBusy]    = useState(false);
   const [done,    setDone]    = useState(false);
   const facRef = useRef(null);
+  var snap = {nombre:nombre,desc:desc,precio:precio,prop:prop,fecha:fecha,establec:establec,fotos:fotos,factura:factura};
+  var dr = useDraft("prod:"+(defaultVendor||"anon"), snap, function(d){
+    setNombre(d.nombre||""); setDesc(d.desc||""); setPrecio(d.precio||""); setProp(d.prop||"");
+    setFecha(d.fecha||todayStr()); setEstablec(d.establec||""); setFotos(d.fotos||[]); setFactura(d.factura||null);
+  }, done, !!(nombre||desc||precio||prop||establec||fotos.length||factura), [nombre,desc,precio,prop,fecha,establec,fotos,factura]);
 
   async function addFotos(files) {
     var c = await Promise.all(Array.from(files).slice(0,4-fotos.length).map(function(f){return compress(f);}));
@@ -2891,6 +3313,7 @@ function NuevoProductoForm({vendors,props,onSubmit,defaultVendor,onBack}) {
 
   return (
     <div style={{maxWidth:520,margin:"0 auto",padding:"24px 16px 90px",fontFamily:"Montserrat,sans-serif"}}>
+      <ResumeDraftModal data={dr.pend} stepCaption="Formulario" stepLabel="Nuevo producto" onResume={dr.resume} onFresh={dr.fresh}/>
       <div style={{marginBottom:10}}><button onClick={onBack} style={{background:"none",border:"none",color:C.earth,fontSize:12.5,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>← Cambiar tipo</button></div>
       <div style={{marginBottom:24}}>
         <div style={{fontSize:11,color:C.peach,fontWeight:700,letterSpacing:".18em",textTransform:"uppercase",marginBottom:6}}>Nuevo Producto</div>
@@ -2975,9 +3398,12 @@ function NuevoProductoForm({vendors,props,onSubmit,defaultVendor,onBack}) {
   );
 }
 
-/* ─── Ajuste Form (simplified, no photos) */
-function AjusteForm({vendors,props,onSubmit,defaultVendor,onBack}) {
-  const [motivo,  setMotivo]  = useState("");
+/* ─── Ajuste Form — el trabajo realizado se elige de una lista cerrada.
+   El texto libre confundía: en "ajuste" cabía una compra, un token y una limpieza
+   registrada tarde, todo con la misma etiqueta. */
+function AjusteForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) {
+  const [trabajo, setTrabajo] = useState("");
+  const [otroTxt, setOtroTxt] = useState("");
   const [prop,    setProp]    = useState("");
   const [fecha,   setFecha]   = useState(todayStr());
   const [monto,   setMonto]   = useState("");
@@ -2985,27 +3411,75 @@ function AjusteForm({vendors,props,onSubmit,defaultVendor,onBack}) {
   const [busy,    setBusy]    = useState(false);
   const [done,    setDone]    = useState(false);
 
+  var esOtro = trabajo===AJUSTE_OTRO;
+  var snap = {trabajo:trabajo,otroTxt:otroTxt,prop:prop,fecha:fecha,monto:monto,coment:coment};
+  var dr = useDraft("ajuste:"+(defaultVendor||"anon"), snap, function(d){
+    setTrabajo(d.trabajo||""); setOtroTxt(d.otroTxt||""); setProp(d.prop||"");
+    setFecha(d.fecha||todayStr()); setMonto(d.monto||""); setComent(d.coment||"");
+  }, done, !!(trabajo||prop||monto||coment), [trabajo,otroTxt,prop,fecha,monto,coment]);
+
+  /* Conceptos que este técnico ya usó y que el catálogo no cubre: siguen a mano,
+     pero marcados, para no obligarlo a escribirlos otra vez. */
+  var propios = (function(){
+    var cnt={};
+    (myReps||[]).forEach(function(r){
+      if(!r||r.categoria!=="Ajuste") return;
+      var t=String(r.ajusteTrabajo||"").trim();
+      if(!t||AJUSTE_TRABAJO_LISTA.indexOf(t)>=0) return;
+      cnt[t]=(cnt[t]||0)+1;
+    });
+    return Object.keys(cnt).sort(function(a,b){return cnt[b]-cnt[a];}).slice(0,8);
+  })();
+
   async function sub() {
-    if(!motivo||!prop)return;
+    if(!trabajo||!prop) return;
+    if(esOtro&&!otroTxt.trim()) return;
+    var titulo = esOtro ? otroTxt.trim() : trabajo;
     setBusy(true);
-    await onSubmit({id:Date.now(),createdAt:Date.now(),categoria:"Ajuste",propiedad:prop,fecha:fecha,reportadoPor:defaultVendor||"",descripcion:coment?motivo+" — "+coment:motivo,comentarios:coment,total:monto,paid:false,pagadoPor:"",fotoAntes:[],fotoDespues:[],factura:null});
-    setBusy(false);setDone(true);
+    await onSubmit({
+      id:Date.now(), createdAt:Date.now(), categoria:"Ajuste",
+      propiedad:prop, fecha:fecha, reportadoPor:defaultVendor||"",
+      descripcion: coment ? titulo+" — "+coment : titulo,
+      ajusteTrabajo: titulo, ajusteOtro: esOtro,
+      comentarios:coment, total:monto, paid:false, pagadoPor:"",
+      fotoAntes:[], fotoDespues:[], factura:null
+    });
+    setBusy(false); setDone(true);
   }
 
   if(done) return <SuccessScreen msg="¡Ajuste registrado!" sub="El ajuste quedó registrado correctamente."/>;
 
+  var SEL = {width:"100%",boxSizing:"border-box",border:"1.5px solid "+(trabajo?C.black:C.gray),borderRadius:10,padding:"11px 12px",fontSize:13,fontFamily:"Montserrat,sans-serif",background:"#fff",color:C.black,outline:"none",fontWeight:trabajo?600:400,minHeight:44};
+
   return (
     <div style={{maxWidth:480,margin:"0 auto",padding:"24px 16px 90px",fontFamily:"Montserrat,sans-serif"}}>
+      <ResumeDraftModal data={dr.pend} stepCaption="Formulario" stepLabel="Ajuste" onResume={dr.resume} onFresh={dr.fresh}/>
       <div style={{marginBottom:10}}><button onClick={onBack} style={{background:"none",border:"none",color:C.earth,fontSize:12.5,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>← Cambiar tipo</button></div>
       <div style={{marginBottom:24}}>
         <div style={{fontSize:9.5,fontWeight:600,color:C.earth,letterSpacing:".28em",textTransform:"uppercase",marginBottom:8}}>Ajuste</div>
         <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:28,fontWeight:400,color:C.black}}>Nuevo registro de ajuste</div>
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
-        <Card title="Motivo del ajuste">
-          <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-            {MOTIVOS_AJUSTE.map(function(m){var s=motivo===m;return <button key={m} onClick={function(){setMotivo(s?"":m);}} style={{padding:"8px 14px",borderRadius:100,cursor:"pointer",border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:12.5,fontWeight:600,transition:"all .18s"}}>{s?"✓ ":""}{m}</button>;})}
-          </div>
+        <Card title="Trabajo realizado">
+          <select value={trabajo} onChange={function(e){setTrabajo(e.target.value);}} style={SEL}>
+            <option value="">Seleccionar el trabajo…</option>
+            {AJUSTE_TRABAJOS.map(function(g){
+              return <optgroup key={g.g} label={g.g}>{g.items.map(function(it){return <option key={it} value={it}>{it}</option>;})}</optgroup>;
+            })}
+            {propios.length>0&&<optgroup label="Ya usados por ti">{propios.map(function(it){return <option key={it} value={it}>{it}</option>;})}</optgroup>}
+            <option value={AJUSTE_OTRO}>{AJUSTE_OTRO}</option>
+          </select>
+          {esOtro&&(
+            <div style={{marginTop:12}}>
+              <F label="¿Qué trabajo fue?"><input placeholder="Descríbelo en pocas palabras" value={otroTxt} onChange={function(e){setOtroTxt(e.target.value);}}/></F>
+              <div style={{marginTop:8,fontSize:11,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>Queda marcado como <b>sin estandarizar</b> para que la administración lo agregue a la lista si se repite.</div>
+            </div>
+          )}
+          {trabajo&&!esOtro&&/limpieza/i.test(trabajo)&&(
+            <div style={{marginTop:12,background:"#F7EFE2",border:"1px solid #E3D5B8",borderRadius:9,padding:"10px 13px",fontSize:11.5,color:"#9a6b2f",lineHeight:1.6,textWrap:"pretty"}}>
+              Si es una limpieza que no pudiste registrar el día correcto, pon en <b>Fecha</b> el día en que la hiciste: así se cruza con la programación de ese día.
+            </div>
+          )}
         </Card>
         <Card title="Detalles">
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
@@ -3017,7 +3491,7 @@ function AjusteForm({vendors,props,onSubmit,defaultVendor,onBack}) {
         <Card title="Comentarios">
           <F label="Notas adicionales"><textarea rows={3} placeholder="Detalles del ajuste, razón, observaciones…" value={coment} onChange={function(e){setComent(e.target.value);}}/></F>
         </Card>
-        <BigBtn onClick={sub} dis={busy||!motivo||!prop}>{busy?"Guardando…":"Registrar ajuste →"}</BigBtn>
+        <BigBtn onClick={sub} dis={busy||!trabajo||!prop||(esOtro&&!otroTxt.trim())}>{busy?"Guardando…":"Registrar ajuste →"}</BigBtn>
       </div>
     </div>
   );
@@ -3031,6 +3505,11 @@ function DanosFormSolo({vendors,props,onSubmit,defaultVendor,onBack}) {
   const [danios,  setDanios]  = useState([{desc:"",fotos:[],origen:"",reparacion:"",comentarios:"",fotos2:[],cobrado:false,quienPaga:""}]);
   const [busy,    setBusy]    = useState(false);
   const [done,    setDone]    = useState(false);
+  var snapD = {prop:prop,fecha:fecha,resp:resp,danios:danios};
+  var dr = useDraft("danos:"+(defaultVendor||"anon"), snapD, function(d){
+    setProp(d.prop||""); setFecha(d.fecha||todayStr()); setResp(d.resp||defaultVendor||"");
+    setDanios(d.danios&&d.danios.length?d.danios:[{desc:"",fotos:[],origen:"",reparacion:"",comentarios:"",fotos2:[],cobrado:false,quienPaga:""}]);
+  }, done, !!(prop||(danios[0]&&(danios[0].desc||danios[0].fotos.length))), [prop,fecha,resp,danios]);
 
   function addDanio(){setDanios(function(p){return p.concat([{desc:"",fotos:[],origen:"",reparacion:"",comentarios:"",fotos2:[],cobrado:false,quienPaga:""}]);});}
   function rmDanio(idx){setDanios(function(p){return p.filter(function(_,j){return j!==idx;});});}
@@ -3051,6 +3530,7 @@ function DanosFormSolo({vendors,props,onSubmit,defaultVendor,onBack}) {
 
   return (
     <div style={{maxWidth:580,margin:"0 auto",padding:"24px 16px 90px",fontFamily:"Montserrat,sans-serif"}}>
+      <ResumeDraftModal data={dr.pend} stepCaption="Formulario" stepLabel="Reporte de daños" onResume={dr.resume} onFresh={dr.fresh}/>
       <div style={{marginBottom:10}}><button onClick={onBack} style={{background:"none",border:"none",color:C.earth,fontSize:12.5,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>← Cambiar tipo</button></div>
       <div style={{marginBottom:24}}>
         <div style={{fontSize:11,color:C.red,fontWeight:700,letterSpacing:".18em",textTransform:"uppercase",marginBottom:6}}>Reporte de Daños</div>
@@ -3203,11 +3683,11 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
   const [draftReady,setDraftReady] = useState(false);
   useEffect(function(){
     var alive=true;
-    draftLoad(draftKey).then(function(d){ if(!alive) return; if(d&&d.form&&d.step>0) setResumeData(d); setDraftReady(true); });
+    draftLoad(draftKey).then(function(d){ if(!alive) return; if(d&&d.form&&(d.step>0||d.form.propiedad)) setResumeData(d); setDraftReady(true); });
     return function(){alive=false;};
   },[]);
   useEffect(function(){
-    if(!draftReady||done||resumeData||step===0) return;
+    if(!draftReady||done||resumeData||(step===0&&!form.propiedad)) return;
     var t=setTimeout(function(){ draftSave(draftKey,{form:form,step:step,ts:Date.now()}); },600);
     return function(){clearTimeout(t);};
   },[form,step,done,draftReady,resumeData]);
@@ -3770,11 +4250,11 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack}) {
   const [draftReadyP,setDraftReadyP] = useState(false);
   useEffect(function(){
     var alive=true;
-    draftLoad(draftKeyP).then(function(d){ if(!alive) return; if(d&&d.form&&d.step>0) setResumeDataP(d); setDraftReadyP(true); });
+    draftLoad(draftKeyP).then(function(d){ if(!alive) return; if(d&&d.form&&(d.step>0||d.form.propiedad)) setResumeDataP(d); setDraftReadyP(true); });
     return function(){alive=false;};
   },[]);
   useEffect(function(){
-    if(!draftReadyP||done||resumeDataP||step===0) return;
+    if(!draftReadyP||done||resumeDataP||(step===0&&!form.propiedad)) return;
     var t=setTimeout(function(){ draftSave(draftKeyP,{form:form,step:step,ts:Date.now()}); },600);
     return function(){clearTimeout(t);};
   },[form,step,done,draftReadyP,resumeDataP]);
@@ -4020,12 +4500,12 @@ function SuccessScreen({msg,sub}) {
 }
 
 /* Modal de reanudar borrador — aparece si hay un formulario guardado a medias */
-function ResumeDraftModal({data, stepLabel, accent, onResume, onFresh}) {
+function ResumeDraftModal({data, stepLabel, stepCaption, accent, onResume, onFresh}) {
   if(!data) return null;
   var f=data.form||{};
   var ac=accent||C.peach;
   var when=data.ts?new Date(data.ts):null;
-  var rows=[["Propiedad",f.propiedad||"—"],["Vas en",stepLabel||"—"]];
+  var rows=[["Propiedad",f.propiedad||f.prop||"—"],[stepCaption||"Vas en",stepLabel||"—"]];
   if(when) rows.push(["Guardado",when.toLocaleDateString("es-GT",{day:"numeric",month:"short"})+" · "+when.toLocaleTimeString("es-GT",{hour:"2-digit",minute:"2-digit"})]);
   return (
     <div style={{position:"fixed",inset:0,zIndex:9200,background:"rgba(62,63,63,.55)",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",padding:18,fontFamily:"Montserrat,sans-serif"}}>
@@ -7762,6 +8242,9 @@ function cierresIndex(reps){
    pasado sin formulario) · futura (todavía no toca). */
 function cierreDe(s, ix, hoy){
   var f=String(s.fecha).slice(0,10);
+  /* Una limpieza cancelada por el administrador no espera formulario: no se hizo. */
+  if(String(s.estado||"")==="cancelada")
+    return {estado:"cancelada", hora:s.canceladaHora||"", paga:!!s.cancelPaga, monto:s.cancelMonto||0};
   var lista=ix[f+"|"+normalize(s.propiedad||"")]||[];
   if(lista.length){
     var mio=lista.filter(function(r){ return String(r.reportadoPor||"").toLowerCase()===String(s.vendorEmail||"").toLowerCase(); })[0];
@@ -7935,7 +8418,8 @@ function DiagProgramacion({props, reservas, schedules, vendors, ausencias, reps,
 var FAROL_COLOR = {verde:"#3d6b52", amarillo:"#D9A441", rojo:"#9B3A3A", gris:"#D8D4CE"};
 var FAROL_TXT   = {verde:"Ruta completa", amarillo:"En curso — le falta", rojo:"Sin empezar", gris:"Todavía no toca"};
 function farolDe(lista, cierres, activo){
-  var n=(lista||[]).length;
+  lista=(lista||[]).filter(function(s){ return (cierres[s.id]||{}).estado!=="cancelada"; });
+  var n=lista.length;
   if(!n) return "gris";
   if(!activo) return "gris";
   var hechas=lista.filter(function(s){ return (cierres[s.id]||{}).estado==="hecha"; }).length;
@@ -7953,7 +8437,40 @@ function Farol({estado, hechas, total, size}){
   );
 }
 
-function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, schedErr}) {
+/* Cancelar una limpieza: el administrador ve, antes de confirmar, exactamente qué
+   implica —hora, pago y correo— porque de eso depende la planilla del técnico. */
+function CancelarModal({sched, tecnico, paga, tarifa, monto, onClose, onConfirm}){
+  const [motivo,setMotivo] = useState("");
+  var hora=horaTxtGT();
+  return (
+    <Overlay>
+      <div style={{width:"100%",maxWidth:430,background:"#fff",borderRadius:22,padding:"28px 26px",fontFamily:"Montserrat,sans-serif",boxShadow:"0 28px 80px rgba(62,63,63,.22)"}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:C.red,letterSpacing:".24em",textTransform:"uppercase",marginBottom:8}}>Cancelar limpieza</div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:24,color:C.black,lineHeight:1.2,marginBottom:6}}>{sched.propiedad}</div>
+        <div style={{fontSize:12.5,color:C.earth,lineHeight:1.6,marginBottom:16}}>{schedDiaNombre(String(sched.fecha).slice(0,10))} {fmtDate(sched.fecha)} · {tecnico}</div>
+        <div style={{background:paga?"#F5EDEC":C.beige,border:"1px solid "+(paga?"#DBC8C4":C.gray),borderRadius:12,padding:"14px 16px",marginBottom:16}}>
+          {[["Hora de la cancelación",hora],
+            ["Tarifa del técnico",tarifa?("Q"+tarifa.toLocaleString()):"sin tarifa registrada"],
+            ["Pago por cancelación",paga?("Q"+monto.toLocaleString()+" · media tarifa"):"Sin pago"]].map(function(r,i){
+            return <div key={i} style={{display:"flex",justifyContent:"space-between",gap:10,padding:"6px 0",borderBottom:i<2?"1px solid "+C.gray:"none"}}><span style={{fontSize:11.5,color:C.earth,fontWeight:600}}>{r[0]}</span><span style={{fontSize:12.5,color:i===2?(paga?C.red:C.black):C.black,fontWeight:i===2?700:500}}>{r[1]}</span></div>;
+          })}
+        </div>
+        <div style={{fontSize:11.5,color:C.earth,lineHeight:1.7,marginBottom:16,textWrap:"pretty"}}>
+          {paga
+            ? <>Es después de las 9:00 am: el técnico ya organizó su día. Se le crea de inmediato un trabajo con la etiqueta <b>Cancelación</b> por Q{monto.toLocaleString()} y le llega el correo avisándole que <b>sí se le paga</b>.</>
+            : <>Es antes de las 9:00 am: queda el registro de la cancelación pero <b>no genera pago</b>. Le llega el correo avisándole.</>}
+        </div>
+        <F label="Motivo (opcional)"><textarea rows={2} placeholder="El huésped extendió su estancia, la reserva se canceló…" value={motivo} onChange={function(e){setMotivo(e.target.value);}}/></F>
+        <div style={{display:"flex",gap:9,marginTop:18}}>
+          <button onClick={onClose} style={{flex:1,padding:"13px",borderRadius:12,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:13,fontWeight:600,cursor:"pointer"}}>No cancelar</button>
+          <button onClick={function(){onConfirm(motivo);}} style={{flex:1.4,padding:"13px",borderRadius:12,border:"none",background:C.red,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>Confirmar cancelación</button>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, schedErr, onUpsert}) {
   /* Abre en HOY: la ruta que el equipo está corriendo ahora mismo es la que el
      administrador necesita ver al entrar, no la de mañana. */
   const [dia,      setDia]      = useState(0);      /* 0 = hoy, 1 = mañana, … */
@@ -7975,6 +8492,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   const [buscaTec, setBuscaTec] = useState("");
   const [accion,   setAccion]   = useState(null);   /* limpieza con sus acciones abiertas */
   const [asigSel,  setAsigSel]  = useState({});     /* técnico elegido para cada checkout pendiente */
+  const [cancelar, setCancelar] = useState(null);   /* limpieza que el admin está cancelando */
 
   /* Si el administrador toca un día que ya salió por correo, el equipo tiene una
      versión vieja. Se marca para ofrecer el reenvío — nunca se manda solo. */
@@ -8069,7 +8587,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
        correr el motor no puede cambiarle el trabajo a alguien que ya lo tiene. */
     var conservar=previas.filter(function(s){
       var sf=String(s.fecha).slice(0,10);
-      return sf<=hoy || (!desdeCero && s.origen==="manual") || (s.notificadoEn && !reabrir[sf]);
+      return sf<=hoy || String(s.estado||"")==="cancelada" || (!desdeCero && s.origen==="manual") || (s.notificadoEn && !reabrir[sf]);
     });
     /* Se congela FILA por fila: la ruta de quien ya recibió su correo no cambia,
        pero el resto del día sí se puede replanificar. */
@@ -8242,6 +8760,68 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
     }));
     marcarCambio(String(sched.fecha).slice(0,10));
   }
+  /* ─── Cancelar una limpieza.
+     Antes de las 9:00 am del día de la limpieza no hay pago —pero sí registro—;
+     después, el técnico ya se organizó su día, así que se le crea el trabajo con
+     media tarifa y le llega el correo diciendo si se le paga o no. */
+  function cancelPagable(sched){
+    var f=String(sched.fecha).slice(0,10);
+    if(f<hoy)  return true;
+    if(f>hoy)  return false;
+    return horaGT()>=CANCEL_HORA_LIMITE;
+  }
+  function cancelTarifa(sched){
+    var em=emailVigente(sched);
+    var v=(vendors||[]).find(function(x){ return String(x.email||"").toLowerCase()===em; });
+    var t=parseFloat((v&&v.tarifaLimpieza)||autoTarifa(em,vendors).tarifa||0)||0;
+    return t;
+  }
+  function ejecutarCancelacion(sched, motivo){
+    var f=String(sched.fecha).slice(0,10);
+    var em=emailVigente(sched);
+    var v=(vendors||[]).find(function(x){ return String(x.email||"").toLowerCase()===em; });
+    var paga=cancelPagable(sched);
+    var tarifa=cancelTarifa(sched);
+    var monto=paga?Math.round(tarifa/2):0;
+    var hora=horaTxtGT();
+    onSvSchedules((schedules||[]).map(function(x){
+      return x.id===sched.id ? Object.assign({},x,{
+        estado:"cancelada", canceladaEn:hoy, canceladaHora:hora, canceladaPor:"administrador",
+        cancelPaga:paga, cancelMonto:monto, cancelMotivo:motivo||""
+      }) : x;
+    }));
+    /* Con pago: el trabajo aparece de inmediato en el dashboard con su etiqueta. */
+    if(paga && monto>0 && onUpsert){
+      onUpsert({
+        id:Date.now(), createdAt:Date.now(), categoria:"Cancelación",
+        propiedad:sched.propiedad, fecha:f,
+        reportadoPor:em, vendorId:sched.vendorId||(v&&v.id)||"",
+        descripcion:"Limpieza cancelada por la administración a las "+hora+" — se paga media tarifa",
+        comentarios:motivo||"", total:String(monto), paid:false, pagadoPor:"Spacio AM",
+        fotoAntes:[], fotoDespues:[], factura:null,
+        cancelacion:true, canceladaHora:hora, tarifaOriginal:String(tarifa), scheduleId:sched.id
+      });
+    }
+    if(v&&(v.notifEmail||v.email)){
+      try{
+        notifyTemplate([v.notifEmail||v.email], "limpiezaCancelada", {
+          tecnico: vendorDisplay(v), propiedad: sched.propiedad,
+          fecha: fmtDate(f), dia: schedDiaNombre(f), hora: hora,
+          paga: paga?"sí":"no",
+          monto: paga?("Q"+monto.toLocaleString()):"Q0",
+          motivo: motivo||"",
+          detalle: paga
+            ? "Se te paga la mitad de tu tarifa (Q"+monto.toLocaleString()+"), porque la cancelación ocurrió después de las 9:00 am."
+            : "Esta cancelación no genera pago: se hizo antes de las 9:00 am, con tiempo para reacomodar tu día."
+        });
+      }catch(_){}
+    }
+    marcarCambio(f);
+    bitacora("cancelacion","Limpieza cancelada · "+sched.propiedad+" · "+f+" · "+(v?vendorDisplay(v):em)+" · "+hora+" · "+(paga?("pago Q"+monto):"sin pago")+(motivo?" · "+motivo:""));
+    setCancelar(null); setAccion(null);
+    aviso("Limpieza cancelada"+(paga?(" · se creó el trabajo de Q"+monto+" para "+(v?vendorDisplay(v):em)):" · sin pago")+".");
+  }
+
   function quitar(sched){
     if(!window.confirm("¿Quitar "+sched.propiedad+" de la programación del "+fmtDate(sched.fecha)+"?")) return;
     onSvSchedules((schedules||[]).filter(function(s){ return s.id!==sched.id; }));
@@ -8537,6 +9117,15 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           </div>
         </div>
       )}
+
+      {/* Cancelación de una limpieza */}
+      {cancelar&&(function(){
+        var paga=cancelPagable(cancelar), tarifa=cancelTarifa(cancelar), monto=paga?Math.round(tarifa/2):0;
+        var em=emailVigente(cancelar);
+        var v=(vendors||[]).find(function(x){ return String(x.email||"").toLowerCase()===em; });
+        return <CancelarModal sched={cancelar} tecnico={v?vendorDisplay(v):em} paga={paga} tarifa={tarifa} monto={monto}
+          onClose={function(){setCancelar(null);}} onConfirm={function(motivo){ ejecutarCancelacion(cancelar, motivo); }}/>;
+      })()}
 
       {/* Propuesta de reajuste */}
       {prop&&(
@@ -8871,6 +9460,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                                 {(function(){
                                   var cz=cierres[s.id]||{};
                                   if(cz.estado==="futura"||!cz.estado) return null;
+                                  if(cz.estado==="cancelada") return <div style={{fontSize:9.5,fontWeight:700,color:C.red,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>Cancelada{cz.hora?" · "+cz.hora:""} · {cz.paga?"media tarifa":"sin pago"}</div>;
                                   if(cz.estado==="hecha") return <div style={{fontSize:9.5,fontWeight:700,color:C.green,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>✓ {cz.ajuste?"Ajuste":"Formulario"}{cz.hora?" · "+cz.hora:""}{cz.porOtro?" · lo hizo otro":""}</div>;
                                   var rojo=cz.estado==="atrasada"||cz.estado==="faltante";
                                   return <div style={{fontSize:9.5,fontWeight:700,color:rojo?C.red:C.orange,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>{rojo?"Sin formulario":"Formulario pendiente"}</div>;
@@ -8892,7 +9482,8 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                                     return <option key={x.id} value={String(x.email||"").toLowerCase()}>{vendorDisplay(x)} · {cnt} hoy</option>;
                                   })}
                                 </select>
-                                <button onClick={function(){quitar(s);}} style={{fontSize:11,padding:"7px 12px",minHeight:36,borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.red,cursor:"pointer",fontWeight:600,fontFamily:"Montserrat,sans-serif"}}>Quitar del día</button>
+                                {String(s.estado||"")!=="cancelada"&&<button onClick={function(){setCancelar(s);}} style={{fontSize:11,padding:"7px 12px",minHeight:36,borderRadius:8,border:"1px solid #DBC8C4",background:"#F5EDEC",color:C.red,cursor:"pointer",fontWeight:700,fontFamily:"Montserrat,sans-serif"}}>Cancelar limpieza</button>}
+                                <button onClick={function(){quitar(s);}} style={{fontSize:11,padding:"7px 12px",minHeight:36,borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",fontWeight:600,fontFamily:"Montserrat,sans-serif"}}>Quitar del día</button>
                               </div>
                             )}
                           </div>
@@ -9172,6 +9763,7 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
         )}
         {(function(){
           var cz=cierreDe(s, ixCierre, hoy);
+          if(cz.estado==="cancelada") return <div style={{marginTop:11,background:"#F5EDEC",borderRadius:9,padding:"9px 12px",fontSize:11.5,color:C.red,fontWeight:600,lineHeight:1.5}}>Cancelada por la administración{cz.hora?" a las "+cz.hora:""} · {cz.paga?"se te paga media tarifa":"sin pago"}</div>;
           if(cz.estado==="futura") return null;
           if(cz.estado==="hecha") return <div style={{marginTop:11,background:"#EDF5EF",borderRadius:9,padding:"9px 12px",fontSize:11.5,color:C.green,fontWeight:600,lineHeight:1.5}}>✓ Registrada{cz.ajuste?" con formulario de ajuste":""}{cz.hora?" · "+cz.hora:""}</div>;
           var rojo=cz.estado==="atrasada"||cz.estado==="faltante";
@@ -12363,6 +12955,7 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
   const [err,setErr]       = useState("");
   const [busy,setBusy]     = useState(false);
   const [preview,setPreview]= useState(null);
+  const [histAb,setHistAb]  = useState(false);
   const fileRef = useRef(null);
 
   var montoN = parseFloat(monto||0)||0;
@@ -12445,6 +13038,42 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
           </div>
         </div>
       )}
+
+      {/* Historial: los adelantos que ya terminaron salen de la vista, pero quedan
+          aquí para consulta. */}
+      {(function(){
+        var terminados=mine.filter(function(a){ return a.status==="pagado"||a.status==="rechazado"; })
+          .sort(function(x,y){ return String(y.fechaLiquidacion||y.fechaInicio||"").localeCompare(String(x.fechaLiquidacion||x.fechaInicio||"")); });
+        if(!terminados.length) return null;
+        return (
+          <div style={{marginBottom:18,background:"#fff",border:"1px solid "+C.line,borderRadius:14,overflow:"hidden"}}>
+            <button onClick={function(){setHistAb(!histAb);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"13px 15px",background:"none",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"Montserrat,sans-serif"}}>
+              <span>
+                <span style={{display:"block",fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>Historial</span>
+                <span style={{display:"block",fontSize:11.5,color:C.taupe,marginTop:3}}>{terminados.length} adelanto{terminados.length===1?"":"s"} ya finalizado{terminados.length===1?"":"s"}</span>
+              </span>
+              <span style={{fontSize:11,color:C.taupe}}>{histAb?"▴":"▾"}</span>
+            </button>
+            {histAb&&(
+              <div style={{borderTop:"1px solid "+C.line,padding:"11px 15px 15px",display:"flex",flexDirection:"column",gap:7}}>
+                {terminados.map(function(a){
+                  var ok=a.status==="pagado";
+                  return (
+                    <button key={a.id} onClick={function(){setPreview(a);}} style={{textAlign:"left",background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"11px 13px",display:"flex",alignItems:"center",gap:11,cursor:"pointer"}}>
+                      <span style={{width:8,height:8,borderRadius:"50%",background:ok?C.green:C.red,flexShrink:0}}/>
+                      <span style={{flex:1,minWidth:0}}>
+                        <span style={{display:"block",fontSize:12.5,fontWeight:700,color:C.black}}>Q{(a.monto||0).toLocaleString()} <span style={{fontWeight:500,color:C.earth,fontSize:11}}>· {ok?"liquidado":"rechazado"}</span></span>
+                        <span style={{display:"block",fontSize:10.5,color:C.earth,marginTop:2}}>{a.fechaInicio?fmtDate(a.fechaInicio):"—"} → {a.fechaLiquidacion?fmtDate(a.fechaLiquidacion):"—"}</span>
+                      </span>
+                      <span style={{fontSize:10.5,color:C.earth,fontWeight:600}}>Ver →</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {maxTotal<=0 ? (
         <div style={{background:C.surfaceWarm,borderRadius:14,padding:"22px",textAlign:"center",fontSize:13,color:C.earth,lineHeight:1.7,border:"1px solid "+C.line}}>Aún no tienes trabajos registrados en las últimas 8 semanas, por lo que no hay un monto disponible para adelanto.</div>
@@ -12603,12 +13232,29 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
   const [preview,setPreview] = useState(null);
   const [adjust, setAdjust]  = useState(null); /* id del adelanto en modo ajuste */
   const [creating,setCreating] = useState(false);
+  const [histAb, setHistAb]  = useState(false);
   var list = adelantos||[];
   var pendTec = list.filter(function(a){return a.status==="pendiente_tecnico";}); /* admin inició, espera al técnico */
   var pend    = list.filter(function(a){return a.status==="pendiente";});         /* técnico solicitó, espera aprobación */
   var porDep  = list.filter(function(a){return a.status==="por_depositar";});      /* técnico firmó, espera depósito */
   var active  = list.filter(function(a){return a.status==="activo";});
   var done    = list.filter(function(a){return a.status==="pagado"||a.status==="rechazado";});
+  /* Un adelanto con saldo en cero ya terminó: se cierra solo y desaparece de la
+     vista operativa. El registro queda en el historial — nunca se borra. */
+  useEffect(function(){
+    var cerrar=list.filter(function(a){
+      if(a.status!=="activo") return false;
+      var st=advanceState(a,reps);
+      return st.monto>0 && st.saldo<=0;
+    });
+    if(!cerrar.length) return;
+    var ids={}; cerrar.forEach(function(a){ ids[a.id]=1; });
+    onSvAdelantos(list.map(function(a){
+      if(!ids[a.id]) return a;
+      var st=advanceState(a,reps);
+      return Object.assign({},a,{status:"pagado", fechaLiquidacion:a.fechaLiquidacion||todayStr(), montoLiquidado:st.debited});
+    }));
+  },[list,reps]);
 
   function update(id, patch){ onSvAdelantos(list.map(function(a){return a.id===id?Object.assign({},a,patch):a;})); }
   /* Aprobar (solicitud del técnico): activa y unifica con cualquier adelanto activo previo. */
@@ -12809,18 +13455,46 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
         );})}
       </div>
 
-      {/* History */}
+      {/* Historial — adelantos finalizados. Fuera de la vista operativa, pero con
+          su rastro completo: monto, cuota, cuándo empezó y cuándo terminó. */}
       {done.length>0&&(
-        <div style={{marginTop:26}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",marginBottom:12}}>Historial · {done.length}</div>
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {done.map(function(a){ return (
-              <div key={a.id} style={{background:C.surfaceWarm,borderRadius:12,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",border:"1px solid "+C.line}}>
-                <div><div style={{fontSize:13,fontWeight:600,color:C.black}}>{a.vendorName||a.vendorEmail}</div><div style={{fontSize:11,color:C.earth}}>Q{(a.monto||0).toLocaleString()}</div></div>
-                <span style={{fontSize:11,fontWeight:700,letterSpacing:".06em",padding:"3px 10px",borderRadius:100,background:a.status==="pagado"?"#EDF5EF":"#F5EDEC",color:a.status==="pagado"?C.green:C.red}}>{a.status==="pagado"?"Pagado":"Rechazado"}</span>
-              </div>
-            );})}
-          </div>
+        <div style={{marginTop:26,background:"#fff",border:"1px solid "+C.line,borderRadius:16,overflow:"hidden"}}>
+          <button onClick={function(){setHistAb(!histAb);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"14px 17px",background:"none",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"Montserrat,sans-serif"}}>
+            <span>
+              <span style={{display:"block",fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>Historial de adelantos</span>
+              <span style={{display:"block",fontSize:11.5,color:C.taupe,marginTop:3}}>{done.length} finalizado{done.length===1?"":"s"} · liquidados, cancelados y rechazados</span>
+            </span>
+            <span style={{fontSize:11,color:C.taupe}}>{histAb?"▴":"▾"}</span>
+          </button>
+          {histAb&&(
+            <div style={{borderTop:"1px solid "+C.line,padding:"12px 17px 17px",display:"flex",flexDirection:"column",gap:8}}>
+              {done.slice().sort(function(x,y){ return String(y.fechaLiquidacion||y.fechaInicio||"").localeCompare(String(x.fechaLiquidacion||x.fechaInicio||"")); }).map(function(a){
+                var st=advanceState(a,reps);
+                var ok=a.status==="pagado";
+                return (
+                  <div key={a.id} style={{background:C.surfaceWarm,borderRadius:12,padding:"12px 15px",border:"1px solid "+C.line}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+                      <div style={{minWidth:0}}>
+                        <div style={{fontSize:13,fontWeight:700,color:C.black}}>{a.vendorName||a.vendorEmail}</div>
+                        <div style={{fontSize:11,color:C.earth,marginTop:2}}>
+                          Q{(a.monto||0).toLocaleString()} · {advIsPlanilla(a)?"cuota quincenal":"cuota semanal"} {advCuota(a)?("Q"+advQ(advCuota(a))):"—"}
+                        </div>
+                      </div>
+                      <span style={{fontSize:10,fontWeight:700,letterSpacing:".06em",padding:"3px 10px",borderRadius:100,background:ok?"#EDF5EF":"#F5EDEC",color:ok?C.green:C.red,whiteSpace:"nowrap"}}>{ok?"Liquidado":"Rechazado"}</span>
+                    </div>
+                    <div style={{marginTop:9,paddingTop:9,borderTop:"1px solid "+C.gray,display:"flex",gap:18,flexWrap:"wrap"}}>
+                      {[["Inicio",a.fechaInicio?fmtDate(a.fechaInicio):"—"],
+                        ["Cierre",a.fechaLiquidacion?fmtDate(a.fechaLiquidacion):"—"],
+                        ["Descontado",ok?("Q"+advQ(a.montoLiquidado!=null?a.montoLiquidado:st.debited)):"Q0"]].map(function(r,i){
+                        return <div key={i}><div style={{fontSize:8.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:3}}>{r[0]}</div><div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{r[1]}</div></div>;
+                      })}
+                      <button onClick={function(){setPreview(a);}} style={{marginLeft:"auto",alignSelf:"center",padding:"7px 13px",borderRadius:100,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Ver contrato</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
