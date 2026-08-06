@@ -51,6 +51,46 @@ function withAutoPagador(list){
   });
 }
 
+/* ═══ GUARDIÁN DE DUPLICADOS ═════════════════════════════════════════════════
+   Un técnico no puede reclamar dos veces la misma limpieza. Las dos formas en que
+   ha pasado:
+     · dos formularios de limpieza (tradicional o profunda) el mismo día en el
+       mismo apartamento, y
+     · una limpieza más un ajuste por el monto de su tarifa de limpieza — el ajuste
+       usado como segundo cobro.
+   Un ajuste por otro monto (compras, tokens, un trabajo extra) NO es duplicado:
+   son dos cosas distintas que sí pasaron.
+   Se avisa al ELEGIR EL APARTAMENTO, no al final: llenar todo un formulario para
+   que al enviarlo se le diga que no servía es la peor versión de esto. */
+function esLimpiezaCat(cat){ var c=String(cat||""); return c==="Limpieza tradicional"||c==="Limpieza profunda"; }
+function mismoTecnico(r, email){
+  var a=String((r&&r.reportadoPor)||"").toLowerCase().trim(), b=String(email||"").toLowerCase().trim();
+  return !!a&&a===b;
+}
+/* Los formularios ya subidos que este nuevo vendría a repetir. */
+function dupConflictos(reps, nuevo, vendors){
+  if(!nuevo||!nuevo.propiedad||!nuevo.fecha) return [];
+  var f=String(nuevo.fecha).slice(0,10), k=normalize(nuevo.propiedad||"");
+  var tarifa=parseFloat(autoTarifa(nuevo.reportadoPor||"", vendors).tarifa)||0;
+  var nuevaEsLimpieza=esLimpiezaCat(nuevo.categoria);
+  var nuevoMonto=parseFloat(nuevo.total)||0;
+  /* Un ajuste solo entra en el pleito si cobra justo la tarifa de limpieza. */
+  var nuevoCobraLimpieza = nuevaEsLimpieza || (String(nuevo.categoria||"")==="Ajuste" && tarifa>0 && Math.abs(nuevoMonto-tarifa)<0.01);
+  if(!nuevoCobraLimpieza) return [];
+  return (reps||[]).filter(function(r){
+    if(!r||String(r.id)===String(nuevo.id)) return false;
+    if(String(r.fecha||"").slice(0,10)!==f) return false;
+    if(normalize(r.propiedad||"")!==k) return false;
+    if(!mismoTecnico(r, nuevo.reportadoPor)) return false;
+    if(esLimpiezaCat(r.categoria)) return true;
+    if(String(r.categoria||"")==="Ajuste"){
+      var m=parseFloat(r.total)||0;
+      return tarifa>0 && Math.abs(m-tarifa)<0.01;
+    }
+    return false;
+  }).sort(function(a,b){ return (a.createdAt||a.id||0)-(b.createdAt||b.id||0); });
+}
+
 /* ─── Auto-tariff helper — shared across all form types */
 function autoTarifa(email, vendors) {
   if (!email||!vendors) return {tarifa:"",locked:false};
@@ -1545,6 +1585,11 @@ function App() {
   },[adelantos, reps]);
 
   async function upsert(r) {
+    /* Lo que este formulario vino a reemplazar: el técnico ya lo aceptó en el aviso
+       de duplicados. Se borra después de guardar el nuevo, nunca antes —si la subida
+       falla, no queremos habernos quedado sin ninguno de los dos. */
+    var reemplaza=(r&&r._reemplaza)||[];
+    if(r&&r._reemplaza) { r=Object.assign({},r); delete r._reemplaza; }
     /* Vincular el reporte a su técnico por id — robusto ante futuros cambios de correo */
     try {
       if (r && !r.vendorId && r.reportadoPor) {
@@ -1578,6 +1623,13 @@ function App() {
       });
       setRetryQ(rq_pending());
     } finally { setSyncing(false); setSyncMsg(""); }
+    for(var i=0;i<reemplaza.length;i++){
+      try{ await deleteReportById(reemplaza[i]); }catch(e){ console.error("No se pudo borrar el duplicado", reemplaza[i], e); }
+    }
+    if(reemplaza.length){
+      var fuera={}; reemplaza.forEach(function(id){ fuera[String(id)]=1; });
+      setReps(function(p){ return p.filter(function(x){ return !fuera[String(x.id)]; }); });
+    }
   }
   async function del(id) {
     await deleteReportById(id);
@@ -2084,7 +2136,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
       />
 
       <div style={{display:tab==="dash"?"block":"none"}}><DashView props={props} nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} meEmails={adminVendor?vendorEmailSet(adminVendor):[]} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh} schedules={schedules||[]} onSvSchedules={onSvSchedules} onUpsert={onUpsert} onDelete={onDelete}/></div>
-      <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
+      <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} myReps={reps} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
       <div style={{display:tab==="sched"?"block":"none"}}>
         <ProgramacionAdmin schedules={schedules||[]} onSvSchedules={onSvSchedules} vendors={vendors||[]} props={props||[]}
           reservas={reservas||[]} onSvReservas={onSvReservas} ausencias={ausencias||[]} onSvAusencias={onSvAusencias}
@@ -2237,7 +2289,36 @@ function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete, s
     return {s:s, f:f, cand:cand};
   }).filter(Boolean).sort(function(a,b){ return b.f.localeCompare(a.f); });
 
-  var total=sinForm.length+huerfanos.length;
+  /* C) duplicados — dos formularios de cierre para el mismo apartamento el mismo
+     día. Casi siempre es el técnico que reenvió porque creyó que no había pasado,
+     y si nadie lo ve se paga dos veces. Se agrupa y se muestra el más viejo como
+     el que se queda, para que la decisión sea sobre el reenvío. */
+  /* Un ajuste de compras o tokens el mismo día de una limpieza no es un duplicado:
+     son dos cosas distintas que pasaron en la misma casa. Solo cuenta como
+     duplicado lo que reclama la misma limpieza — los formularios de limpieza y los
+     ajustes cuyo trabajo declarado ES una limpieza. */
+  function reclamaLimpieza(r){
+    if(String(r.categoria||"")!=="Ajuste") return true;
+    return /limpieza/i.test(ajusteTrabajoDe(r)||"");
+  }
+  var dupGrupos=(function(){
+    var g={};
+    reps0.forEach(function(r){
+      if(!r||!esCierre(r.categoria)||!reclamaLimpieza(r)) return;
+      var f=String(r.fecha||"").slice(0,10);
+      if(!f||f<desde||f>hasta) return;
+      var k=f+"|"+normalize(r.propiedad||"");
+      (g[k]=g[k]||[]).push(r);
+    });
+    return Object.keys(g).filter(function(k){ return g[k].length>1; }).map(function(k){
+      var lista=g[k].slice().sort(function(a,b){ return (a.createdAt||a.id||0)-(b.createdAt||b.id||0); });
+      var monto=lista.reduce(function(t,r){ return t+(parseFloat(r.total)||0); },0);
+      return {key:k, fecha:String(lista[0].fecha).slice(0,10), propiedad:lista[0].propiedad, lista:lista, monto:monto};
+    }).sort(function(a,b){ return b.fecha.localeCompare(a.fecha); });
+  })();
+  var dupCount=dupGrupos.reduce(function(t,g){ return t+(g.lista.length-1); },0);
+
+  var total=sinForm.length+huerfanos.length+dupCount;
   function tecOf(r){
     var em=String(r.reportadoPor||"").toLowerCase().trim();
     var v=(vendors||[]).find(function(x){ return vendorEmailSet(x).indexOf(em)>=0; });
@@ -2311,7 +2392,7 @@ function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete, s
       {abierto&&(
         <div style={{borderTop:"1px solid "+C.line,padding:"14px 18px 18px"}}>
           <div style={{fontSize:11.5,color:C.earth,lineHeight:1.7,marginBottom:12,textWrap:"pretty"}}>
-            Cruce {rango?<>del <b style={{color:C.black}}>{fmtDate(desde)} al {fmtDate(hasta)}</b></>:<>de los últimos {dias} días</>} entre lo programado y los formularios entregados (tradicional, profunda y ajuste). Es informativo: nada se corrige solo.
+            Cruce {rango?<>del <b style={{color:C.black}}>{fmtDate(desde)} al {fmtDate(hasta)}</b></>:<>de los últimos {dias} días</>} entre lo programado y los formularios entregados (tradicional, profunda y ajuste), más los duplicados del mismo apartamento el mismo día. Es informativo: nada se corrige solo.
             {(sc.label||rango)&&<div style={{marginTop:7,fontSize:11,color:C.taupe}}>Sigue los filtros del dashboard{sc.label?": "+sc.label:""}. El estado de pago y el tipo de trabajo no se aplican aquí — un formulario huérfano lo es de todas formas.</div>}
           </div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14,alignItems:"center"}}>
@@ -2320,7 +2401,7 @@ function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete, s
               return <button key={d} onClick={function(){setDias(d);}} style={{fontSize:11,fontWeight:a?700:600,padding:"6px 12px",borderRadius:100,border:"1px solid "+(a?C.black:C.gray),background:a?C.black:"#fff",color:a?"#fff":C.earth,cursor:"pointer"}}>{d} días</button>;
             })}
             <span style={{marginLeft:"auto",display:"flex",gap:6}}>
-              {[["A","Sin formulario · "+sinForm.length],["B","Sin programación · "+huerfanos.length]].map(function(it){
+              {[["A","Sin formulario · "+sinForm.length],["B","Sin programación · "+huerfanos.length],["C","Duplicados · "+dupCount]].map(function(it){
                 var a=tab===it[0];
                 return <button key={it[0]} onClick={function(){setTab(it[0]);}} style={{fontSize:11,fontWeight:a?700:600,padding:"6px 12px",borderRadius:100,border:"1px solid "+(a?C.black:C.gray),background:a?C.beige:"#fff",color:a?C.black:C.earth,cursor:"pointer"}}>{it[1]}</button>;
               })}
@@ -2359,6 +2440,44 @@ function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete, s
                           })}
                         </div>
                       )}
+                    </div>
+                  );
+                })}
+              </div>
+          )}
+
+          {tab==="C"&&(dupGrupos.length===0
+            ? <div style={{padding:"14px",borderRadius:10,background:"#EDF5EF",fontSize:12.5,color:C.green,fontWeight:600}}>✓ Ningún apartamento tiene dos formularios el mismo día.</div>
+            : <div style={{display:"flex",flexDirection:"column",gap:9}}>
+                {dupGrupos.map(function(g){
+                  return (
+                    <div key={g.key} style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"12px 14px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+                        <div style={{minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:700,color:C.black}}>{g.propiedad}</div>
+                          <div style={{fontSize:11,color:C.earth,marginTop:3}}>{fmtDate(g.fecha)} · {g.lista.length} formularios · Q{g.monto.toFixed(2)} en total</div>
+                        </div>
+                        <span style={{fontSize:9.5,fontWeight:700,color:C.red,letterSpacing:".08em",textTransform:"uppercase",whiteSpace:"nowrap"}}>Duplicado</span>
+                      </div>
+                      <div style={{marginTop:10,borderTop:"1px dashed "+C.gray,paddingTop:10,display:"flex",flexDirection:"column",gap:7}}>
+                        {g.lista.map(function(r,i){
+                          return (
+                            <div key={r.id} style={{background:"#fff",border:"1px solid "+(i===0?C.line:"#DBC8C4"),borderRadius:10,padding:"10px 12px"}}>
+                              <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap",alignItems:"baseline"}}>
+                                <div style={{fontSize:12,color:C.black,fontWeight:600}}>{r.categoria} · {tecOf(r)}</div>
+                                <div style={{fontSize:11,color:C.earth}}>
+                                  {i===0?"el primero":"reenvío "+i}
+                                  {r.total?" · Q"+(parseFloat(r.total)||0).toFixed(2):""}
+                                  {r.paid?" · pagado":""}
+                                </div>
+                              </div>
+                              {r.categoria==="Ajuste"&&ajusteTrabajoDe(r)&&<div style={{fontSize:11,color:C.earth,marginTop:2}}>{ajusteTrabajoDe(r)}</div>}
+                              {i>0&&<AccionesForm r={r}/>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{marginTop:9,fontSize:10.5,color:C.taupe,lineHeight:1.6,textWrap:"pretty"}}>Revisa si de verdad hubo dos limpiezas. Si fue un reenvío, elimínalo o muévelo al día que le corresponde antes de pagar.</div>
                     </div>
                   );
                 })}
@@ -2534,7 +2653,12 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
   }));
 
   var fReps = reps.filter(function(r){ return pasa(r); });
-  var shown  = showAll ? fReps : fReps.slice(0,10);
+  /* Tres semanas se muestran completas: es el periodo que el administrador revisa
+     de corrido y cortarlo a diez filas obligaba a un clic en todas las sesiones.
+     El botón aparece solo cuando de verdad se está mirando más atrás. */
+  var CORTE_3SEM = isoShift(todayStr(), -21);
+  var recientes  = fReps.filter(function(r){ return String(r.fecha||"").slice(0,10)>=CORTE_3SEM; });
+  var shown  = showAll ? fReps : recientes;
   /* Use auto-tariff as fallback when r.total is not yet saved */
   function effT(r){
     if(isDanos(r.categoria)) return 0; /* daños = seguimiento, no genera pago */
@@ -2750,7 +2874,7 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
 
       {fReps.length===0&&<div style={{textAlign:"center",padding:"52px 20px",color:C.earth,fontSize:14}}>No hay trabajos con estos filtros.<br/><button onClick={reset} style={{marginTop:14,padding:"9px 22px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:13,fontWeight:600,cursor:"pointer"}}>Limpiar filtros</button></div>}
       {fReps.length>0&&(view==="table"
-        ?<TableView reps={shown} total={fReps.length} showAll={showAll} onToggleAll={function(){setShowAll(function(p){return !p;});}} onSelect={onSelect} onMarkPaid={onMarkPaid} vendors={vendors}/>
+        ?<TableView reps={shown} total={fReps.length} visible={shown.length} showAll={showAll} onToggleAll={function(){setShowAll(function(p){return !p;});}} onSelect={onSelect} onMarkPaid={onMarkPaid} vendors={vendors}/>
         :<CalView   reps={fReps} onSelect={onSelect} onMarkPaid={onMarkPaid} vendors={vendors}/>
       )}
     </div>
@@ -2758,7 +2882,7 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
 }
 
 /* ─── Table View */
-function TableView({reps,total,showAll,onToggleAll,onSelect,onMarkPaid,vendors}) {
+function TableView({reps,total,visible,showAll,onToggleAll,onSelect,onMarkPaid,vendors}) {
   return (
     <div style={{padding:"20px 16px 80px"}}>
       <div style={{background:"#fff",borderRadius:16,border:"1px solid "+C.gray,overflow:"hidden"}}>
@@ -2786,7 +2910,7 @@ function TableView({reps,total,showAll,onToggleAll,onSelect,onMarkPaid,vendors})
           );
         })}
       </div>
-      {total>10&&<button onClick={onToggleAll} style={{marginTop:12,width:"100%",padding:"12px",borderRadius:10,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:13,fontWeight:600,cursor:"pointer"}}>{showAll?"Mostrar solo últimos 10":"Ver todos los "+total+" registros →"}</button>}
+      {total>(visible==null?reps.length:visible)&&<button onClick={onToggleAll} style={{marginTop:12,width:"100%",padding:"12px",borderRadius:10,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:13,fontWeight:600,cursor:"pointer"}}>{showAll?"Mostrar solo las últimas 3 semanas":"Ver todos los "+total+" registros — incluye más de 3 semanas atrás →"}</button>}
     </div>
   );
 }
@@ -3458,6 +3582,7 @@ function AjusteForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) {
   const [done,    setDone]    = useState(false);
 
   var esOtro = trabajo===AJUSTE_OTRO;
+  var dup = useDupGuard({myReps:myReps, vendors:vendors, propiedad:prop, fecha:fecha, categoria:"Ajuste", total:monto, email:defaultVendor, onDesistir:function(){ setProp(""); }});
   var snap = {trabajo:trabajo,otroTxt:otroTxt,prop:prop,fecha:fecha,monto:monto,coment:coment};
   var dr = useDraft("ajuste:"+(defaultVendor||"anon"), snap, function(d){
     setTrabajo(d.trabajo||""); setOtroTxt(d.otroTxt||""); setProp(d.prop||"");
@@ -3488,7 +3613,8 @@ function AjusteForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) {
       descripcion: coment ? titulo+" — "+coment : titulo,
       ajusteTrabajo: titulo, ajusteOtro: esOtro,
       comentarios:coment, total:monto, paid:false, pagadoPor:"",
-      fotoAntes:[], fotoDespues:[], factura:null
+      fotoAntes:[], fotoDespues:[], factura:null,
+      _reemplaza: dup.reemplaza
     });
     setBusy(false); setDone(true);
   }
@@ -3500,6 +3626,7 @@ function AjusteForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) {
   return (
     <div style={{maxWidth:480,margin:"0 auto",padding:"24px 16px 90px",fontFamily:"Montserrat,sans-serif"}}>
       <ResumeDraftModal data={dr.pend} stepCaption="Formulario" stepLabel="Ajuste" onResume={dr.resume} onFresh={dr.fresh}/>
+      {dup.modal}
       <WifiAviso propiedad={prop} props={props} vendorEmail={defaultVendor}/>
       <div style={{marginBottom:10}}><button onClick={onBack} style={{background:"none",border:"none",color:C.earth,fontSize:12.5,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>← Cambiar tipo</button></div>
       <div style={{marginBottom:24}}>
@@ -3695,7 +3822,7 @@ function RefGallery({propObj, acked, onAck}){
 }
 
 /* ═══════════════ LIMPIEZA TRADICIONAL WIZARD ══════════════════════════ */
-function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFeedback}) {
+function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFeedback,myReps}) {
   const STEPS = ["Bienvenida","País","Ciudad","Responsable","Propiedad","Habitaciones","Baños","Cocina","Sala y Comedor","Detalles finales","Inventario","Daños","Foto uniforme","Confirmación"];
   var TOTAL_STEPS_F = STEPS.length - 1;
   const [step,setStep]   = useState(0);
@@ -3729,6 +3856,10 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
   var draftKey = "trad:"+(defaultVendor||"anon");
   const [resumeData,setResumeData] = useState(null);
   const [draftReady,setDraftReady] = useState(false);
+  /* Al elegir el apartamento: si ya hay un formulario de ese día, se avisa aquí y
+     no al final. Desistir devuelve al paso de la propiedad. */
+  var dupT = useDupGuard({myReps:myReps, vendors:vendors, propiedad:form.propiedad, fecha:form.fecha, categoria:"Limpieza tradicional", email:form.reportadoPor||defaultVendor,
+    onDesistir:function(){ setForm(function(p){ return Object.assign({},p,{propiedad:""}); }); setStep(STEPS.indexOf("Propiedad")); }});
   useEffect(function(){
     var alive=true;
     draftLoad(draftKey).then(function(d){ if(!alive) return; if(d&&d.form&&(d.step>0||d.form.propiedad)) setResumeData(d); setDraftReady(true); });
@@ -3843,6 +3974,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
       categoria:"Limpieza tradicional",
       descripcion:"Limpieza tradicional — "+form.propiedad,
       total:tarifa, paid:false, pagadoPor:"Spacio AM",
+      _reemplaza: dupT.reemplaza,
       fotoAntes:[], fotoDespues:[], factura:null,
       qaStatus:"pendiente", qaComentario:"", qaFecha:"", qaRespuesta:null, qaRespuestaFecha:"",
     });
@@ -3895,6 +4027,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
   return (
     <div style={{maxWidth:560,margin:"0 auto",padding:"0 0 80px",fontFamily:"Montserrat,sans-serif"}}>
       <ResumeDraftModal data={resumeData} stepLabel={resumeData?STEPS[resumeData.step]:""} onResume={doResume} onFresh={doFresh}/>
+      {dupT.modal}
       <WifiAviso propiedad={form.propiedad} props={props} vendorEmail={defaultVendor}/>
       {/* Progress bar */}
       {step>0&&step<STEPS.length-1&&(
@@ -4275,7 +4408,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
 }
 
 /* ═══════════════ LIMPIEZA PROFUNDA WIZARD ═════════════════════════════ */
-function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack}) {
+function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) {
   const STEPS_P = ["Bienvenida","Propiedad","Regadera y Ducha","Ventanas","Cocina profunda","Gavetas y Detrás","Detalle extra","Inventario","Foto uniforme","Confirmación"];
   const [step,setStep]   = useState(0);
   const [errMsg,setErrMsg] = useState("");
@@ -4297,6 +4430,8 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack}) {
   var draftKeyP = "prof:"+(defaultVendor||"anon");
   const [resumeDataP,setResumeDataP] = useState(null);
   const [draftReadyP,setDraftReadyP] = useState(false);
+  var dupP = useDupGuard({myReps:myReps, vendors:vendors, propiedad:form.propiedad, fecha:form.fecha, categoria:"Limpieza profunda", email:form.reportadoPor||defaultVendor,
+    onDesistir:function(){ setForm(function(p){ return Object.assign({},p,{propiedad:""}); }); setStep(STEPS_P.indexOf("Propiedad")); }});
   useEffect(function(){
     var alive=true;
     draftLoad(draftKeyP).then(function(d){ if(!alive) return; if(d&&d.form&&(d.step>0||d.form.propiedad)) setResumeDataP(d); setDraftReadyP(true); });
@@ -4343,7 +4478,7 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack}) {
     setBusy(true);
     var vP=vendors.find(function(v){return v.email===form.reportadoPor;});
     var tarifaP=vP&&vP.tarifaLimpieza?String(vP.tarifaLimpieza):"";
-    var rep=Object.assign({},form,{id:Date.now(),createdAt:Date.now(),categoria:"Limpieza profunda",descripcion:"Limpieza profunda — "+form.propiedad,total:tarifaP,paid:false,pagadoPor:"",fotoAntes:[],fotoDespues:[],factura:null,qaStatus:"pendiente",qaComentario:"",qaFecha:"",qaRespuesta:null,qaRespuestaFecha:""});
+    var rep=Object.assign({},form,{id:Date.now(),createdAt:Date.now(),categoria:"Limpieza profunda",descripcion:"Limpieza profunda — "+form.propiedad,total:tarifaP,paid:false,pagadoPor:"",_reemplaza:dupP.reemplaza,fotoAntes:[],fotoDespues:[],factura:null,qaStatus:"pendiente",qaComentario:"",qaFecha:"",qaRespuesta:null,qaRespuestaFecha:""});
     try {
       await onSubmit(rep);
       try{
@@ -4365,6 +4500,7 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack}) {
   return (
     <div style={{maxWidth:560,margin:"0 auto",padding:"0 0 80px",fontFamily:"Montserrat,sans-serif"}}>
       <ResumeDraftModal data={resumeDataP} stepLabel={resumeDataP?STEPS_P[resumeDataP.step]:""} accent="#2e7d52" onResume={doResumeP} onFresh={doFreshP}/>
+      {dupP.modal}
       <WifiAviso propiedad={form.propiedad} props={props} vendorEmail={defaultVendor}/>
       {step>0&&step<STEPS_P.length-1&&(
         <div style={{position:"sticky",top:58,zIndex:20,background:"#fff",borderBottom:"1px solid "+C.gray,padding:"12px 18px"}}>
@@ -5616,6 +5752,65 @@ async function fetchOwnerRaw(){
   for(var r=1;r<rows.length;r++){ var nm=(rows[r][iName]||"").trim(); if(!nm) continue; var k=normNm(nm); if(seen[k])continue; seen[k]=1; out.push({name:nm,link:iLink>=0?(rows[r][iLink]||"").trim():""}); }
   return out;
 }
+/* El aviso. Dice qué hay ya subido y qué pasa si sigue: el anterior se borra.
+   Dos salidas, ninguna escondida. */
+function DupAvisoModal({conflictos, propiedad, fecha, onContinuar, onDesistir}){
+  var uno=conflictos.length===1;
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:960,background:"rgba(62,63,63,.42)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{width:"100%",maxWidth:430,background:"#fff",borderRadius:20,padding:"22px 22px 24px",fontFamily:"Montserrat,sans-serif",boxShadow:"0 28px 80px rgba(62,63,63,.16)",maxHeight:"88vh",overflowY:"auto"}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:C.orange,letterSpacing:".22em",textTransform:"uppercase",marginBottom:7}}>Ya hay un formulario</div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,color:C.black,lineHeight:1.25,marginBottom:11,textWrap:"balance"}}>
+          {uno?"Este apartamento ya tiene un formulario de este día":"Este apartamento ya tiene formularios de este día"}
+        </div>
+        <div style={{fontSize:12.5,color:C.earth,lineHeight:1.7,marginBottom:14,textWrap:"pretty"}}>
+          Subiste {uno?"esto":"esto"} para <b style={{color:C.black}}>{propiedad}</b> el <b style={{color:C.black}}>{fmtDate(fecha)}</b>:
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:7,marginBottom:15}}>
+          {conflictos.map(function(r){
+            return (
+              <div key={r.id} style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:11,padding:"10px 12px"}}>
+                <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>{r.categoria}{r.categoria==="Ajuste"&&ajusteTrabajoDe(r)?" · "+ajusteTrabajoDe(r):""}</div>
+                <div style={{fontSize:11,color:C.earth,marginTop:2}}>{fmtDate(r.fecha)}{r.total?" · Q"+(parseFloat(r.total)||0).toFixed(2):""}{r.paid?" · pagado":""}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{background:"#F5EDEC",border:"1px solid #E7D3CE",borderRadius:12,padding:"12px 13px",fontSize:12,color:"#8a4a44",lineHeight:1.65,marginBottom:16,textWrap:"pretty"}}>
+          Si subes otro, {uno?"el anterior se borrará automáticamente":"los anteriores se borrarán automáticamente"}. Solo se paga una limpieza por apartamento por día.
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:9}}>
+          <button onClick={onDesistir} style={{width:"100%",padding:"14px",minHeight:50,borderRadius:13,border:"none",background:C.black,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+            Desistir — ya está registrado
+          </button>
+          <button onClick={onContinuar} style={{width:"100%",padding:"13px",minHeight:48,borderRadius:13,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+            Continuar y reemplazar {uno?"el anterior":"los anteriores"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* El guardián como pieza reutilizable: cada formulario le pasa qué está por subir
+   y recibe el modal ya resuelto más los ids que el envío debe reemplazar. */
+function useDupGuard({myReps, vendors, propiedad, fecha, categoria, total, email, onDesistir}){
+  const [ok,setOk] = useState(false);   /* el técnico ya decidió continuar */
+  const [visto,setVisto] = useState("");
+  var clave=normalize(propiedad||"")+"|"+String(fecha||"").slice(0,10);
+  useEffect(function(){ if(visto&&visto!==clave){ setOk(false); setVisto(""); } },[clave]);
+  var conf=dupConflictos(myReps, {propiedad:propiedad, fecha:fecha, categoria:categoria, total:total, reportadoPor:email}, vendors);
+  var mostrar=!!(propiedad&&fecha)&&conf.length>0&&!ok;
+  return {
+    reemplaza: conf.map(function(r){ return r.id; }),
+    modal: mostrar
+      ? <DupAvisoModal conflictos={conf} propiedad={propiedad} fecha={fecha}
+          onContinuar={function(){ setOk(true); setVisto(clave); }}
+          onDesistir={function(){ setOk(false); setVisto(""); onDesistir&&onDesistir(); }}/>
+      : null
+  };
+}
+
 /* "Z10 - Fiamene - 404" → "Fiamene 404": lo justo para caber en una línea. */
 function aptoCorto(n){
   try{ var p=SCHED.partes(n||""); return [p.edificio,p.unidad].filter(Boolean).join(" ")||String(n||""); }
