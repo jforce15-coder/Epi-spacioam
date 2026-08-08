@@ -2881,8 +2881,65 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
   );
 }
 
+/* ─── Lista de trabajos en móvil ─────────────────────────────────────────
+   La tabla de cinco columnas cabe en un escritorio, no en un teléfono: en
+   pantalla angosta cada columna se estrangula y el texto se parte letra por
+   letra. En móvil cada trabajo pasa a ser una ficha: propiedad, qué se hizo,
+   cuánto y cómo va el pago — en ese orden, que es el orden en que se lee. */
+function MobileJobList({reps,onSelect,onMarkPaid,vendors}) {
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {reps.map(function(r){
+        var b=BADGE[r.categoria]||BADGE["Mantenimiento"]; var al=alertLvl(r);
+        var tec=(function(){var v=(vendors||[]).find(function(x){return repMatchesVendor(r,x);});return v?vendorDisplay(v):(r.reportadoPor||"—");})();
+        var pagable=!isDanos(r.categoria)&&(r.total||autoTarifa(r.reportadoPor||"",vendors).tarifa);
+        return (
+          <div key={r.id} onClick={function(){onSelect(r);}}
+            style={{background:"#fff",border:"1px solid "+(al?ALT[al].clr+"55":C.line),borderLeft:"3px solid "+(al?ALT[al].clr:b.tx),borderRadius:14,padding:"13px 14px",cursor:"pointer",boxShadow:"0 2px 10px rgba(62,63,63,.04)"}}>
+            <div style={{display:"flex",alignItems:"baseline",gap:10,justifyContent:"space-between"}}>
+              <span style={{padding:"3px 9px",borderRadius:100,fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",background:b.bg,color:b.tx,whiteSpace:"nowrap"}}>{r.categoria}</span>
+              <span style={{fontSize:11,color:C.taupe,whiteSpace:"nowrap"}}>{fmtDate(r.fecha)}</span>
+            </div>
+            <div style={{fontSize:15,fontWeight:600,color:C.black,lineHeight:1.35,marginTop:9,textWrap:"pretty"}}>{r.propiedad}</div>
+            {r.descripcion&&<div style={{fontSize:13,color:C.earth,lineHeight:1.6,marginTop:6,display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical",overflow:"hidden",textWrap:"pretty"}}>{r.descripcion}</div>}
+            {al&&<div style={{fontSize:11,color:ALT[al].clr,fontWeight:700,marginTop:8}}>⚠ {ALT[al].label}</div>}
+            <div style={{height:1,background:C.line,margin:"11px 0 10px"}}/>
+            <div style={{display:"flex",alignItems:"center",gap:10,justifyContent:"space-between",flexWrap:"wrap"}}>
+              <div style={{minWidth:0,flex:1}}>
+                <div style={{fontSize:9,color:C.taupe,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase"}}>Técnico</div>
+                <div style={{fontSize:12.5,color:C.black,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tec}</div>
+              </div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontSize:17,fontWeight:700,color:isDanos(r.categoria)?C.taupe:C.black,fontVariantNumeric:"tabular-nums"}}>{isDanos(r.categoria)?"Sin pago":(r.total?"Q"+r.total:"—")}</div>
+                <div style={{marginTop:5}} onClick={function(e){e.stopPropagation();}}>
+                  {isDanos(r.categoria)
+                    ? <span style={{padding:"5px 11px",borderRadius:100,fontSize:10,fontWeight:700,letterSpacing:".08em",background:"#F0EDE8",color:C.earth}}>SEGUIMIENTO</span>
+                    : (pagable
+                      ? <button onClick={function(e){e.stopPropagation();onMarkPaid(r.id,!r.paid);}} style={{padding:"7px 13px",minHeight:34,borderRadius:100,border:"none",fontSize:11.5,fontWeight:700,cursor:"pointer",background:r.paid?"#EDF5EF":"#F5EDEC",color:r.paid?C.green:C.red,whiteSpace:"nowrap"}}>{r.paid?"✓ Pagado":"● Pendiente"}</button>
+                      : <span style={{fontSize:12,color:C.gray}}>—</span>)}
+                </div>
+              </div>
+            </div>
+            {r.pagadoPor&&!isDanos(r.categoria)&&<div style={{marginTop:9}}><span style={{fontSize:9.5,fontWeight:700,letterSpacing:".08em",padding:"3px 9px",borderRadius:100,background:r.pagadoPor==="Spacio AM"?"#EEF3FA":"#FEF0EC",color:r.pagadoPor==="Spacio AM"?"#4a7fa5":"#E9826A"}}>Paga {r.pagadoPor}</span></div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ─── Table View */
 function TableView({reps,total,visible,showAll,onToggleAll,onSelect,onMarkPaid,vendors}) {
+  var sc = useScreen();
+  var verTodos = total>(visible==null?reps.length:visible)
+    ? <button onClick={onToggleAll} style={{marginTop:12,width:"100%",padding:"13px",borderRadius:10,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",lineHeight:1.5}}>{showAll?"Mostrar solo las últimas 3 semanas":"Ver todos los "+total+" registros — incluye más de 3 semanas atrás →"}</button>
+    : null;
+  if (sc.mobile) return (
+    <div style={{padding:"14px 12px 100px"}}>
+      <MobileJobList reps={reps} onSelect={onSelect} onMarkPaid={onMarkPaid} vendors={vendors}/>
+      {verTodos}
+    </div>
+  );
   return (
     <div style={{padding:"20px 16px 80px"}}>
       <div style={{background:"#fff",borderRadius:16,border:"1px solid "+C.gray,overflow:"hidden"}}>
@@ -2910,7 +2967,7 @@ function TableView({reps,total,visible,showAll,onToggleAll,onSelect,onMarkPaid,v
           );
         })}
       </div>
-      {total>(visible==null?reps.length:visible)&&<button onClick={onToggleAll} style={{marginTop:12,width:"100%",padding:"12px",borderRadius:10,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:13,fontWeight:600,cursor:"pointer"}}>{showAll?"Mostrar solo las últimas 3 semanas":"Ver todos los "+total+" registros — incluye más de 3 semanas atrás →"}</button>}
+      {verTodos}
     </div>
   );
 }
@@ -3425,6 +3482,13 @@ function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendo
           </div>
         </Card>
         <BigBtn onClick={sub} dis={busy||!form.propiedad||!form.reportadoPor||!form.descripcion}>{busy?"Enviando…":"Enviar reporte →"}</BigBtn>
+        {/* Para reclamos a Airbnb: el mismo reporte, en inglés y con la evidencia numerada. */}
+        <button onClick={function(){ airbnbClaimPDF(Object.assign({id:Date.now(),createdAt:Date.now(),categoria:cat},form), vendors); }}
+          disabled={!form.propiedad||!form.descripcion}
+          style={{padding:"13px",borderRadius:12,border:"1.5px solid "+C.gray,background:"#fff",color:(!form.propiedad||!form.descripcion)?C.gray:C.black,fontSize:12.5,fontWeight:700,cursor:(!form.propiedad||!form.descripcion)?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>
+          Reporte para soporte de Airbnb (en inglés) →
+        </button>
+        <div style={{fontSize:11,color:C.taupe,textAlign:"center",lineHeight:1.6,marginTop:-4}}>Genera un PDF en inglés con el resumen, los costos y la evidencia numerada, listo para adjuntar a un caso.</div>
       </div>
     </div>
   );
@@ -3769,6 +3833,13 @@ function DanosFormSolo({vendors,props,onSubmit,defaultVendor,onBack}) {
 
         <button onClick={addDanio} style={{padding:"12px",borderRadius:12,border:"2px dashed "+C.gray,background:"#fff",color:C.earth,fontSize:13,fontWeight:600,cursor:"pointer"}}>+ Agregar otro daño</button>
         <BigBtn onClick={sub} dis={busy||!prop||!resp||!danios[0].desc}>{busy?"Enviando…":"Enviar reporte de daños →"}</BigBtn>
+        {/* El mismo reporte en inglés, armado para presentar el reclamo. */}
+        <button onClick={function(){ airbnbClaimPDF({id:Date.now(),createdAt:Date.now(),categoria:"Reporte de Daños",propiedad:prop,fecha:fecha,reportadoPor:resp,descripcion:danios.map(function(d,i){return "Daño "+(i+1)+": "+d.desc;}).join(" | "),comentarios:"",total:"",hayDanios:true,danios:danios}, vendors); }}
+          disabled={!prop||!danios[0].desc}
+          style={{padding:"13px",borderRadius:12,border:"1.5px solid "+C.gray,background:"#fff",color:(!prop||!danios[0].desc)?C.gray:C.black,fontSize:12.5,fontWeight:700,cursor:(!prop||!danios[0].desc)?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>
+          Reporte para soporte de Airbnb (en inglés) →
+        </button>
+        <div style={{fontSize:11,color:C.taupe,textAlign:"center",lineHeight:1.6,marginTop:-4}}>Genera un PDF en inglés con lo ocurrido, el responsable y la evidencia numerada, listo para adjuntar a un caso.</div>
       </div>
     </div>
   );
@@ -6488,6 +6559,7 @@ function SecurityCfg({adminPin,onSave}) {
 /* ─── Detail Modal */
 function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,hasLinkedDmg,onExtract,readOnly}) {
   const [editing, setEditing] = useState(false);
+  var scDM = useScreen();
   /* Auto-fill total from tariff if empty — NUNCA para reportes de daños (no generan pago) */
   var initAT2 = autoTarifa(rep.reportadoPor||"", vendors);
   var initTotal = rep.total || (isDanos(rep.categoria)?"":initAT2.tarifa);
@@ -6547,13 +6619,13 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
 
   return (
     <Overlay onClick={onClose}>
-      <div style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:580,maxHeight:"90vh",overflow:"auto",boxShadow:"0 32px 80px rgba(0,0,0,.22)"}} onClick={function(e){e.stopPropagation();}}>
+      <div style={{background:"#fff",borderRadius:scDM.mobile?"18px 18px 0 0":20,width:"100%",maxWidth:580,maxHeight:scDM.mobile?"92vh":"90vh",overflow:"auto",boxShadow:"0 32px 80px rgba(0,0,0,.22)",alignSelf:scDM.mobile?"flex-end":"center",marginBottom:scDM.mobile?-16:0}} onClick={function(e){e.stopPropagation();}}>
 
         {/* Header */}
-        <div style={{padding:"18px 24px",borderBottom:"1px solid "+C.gray,display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:"#fff",zIndex:10}}>
-          <div>
+        <div style={{padding:scDM.mobile?"14px 16px":"18px 24px",borderBottom:"1px solid "+C.gray,display:"flex",justifyContent:"space-between",alignItems:scDM.mobile?"flex-start":"center",gap:12,flexWrap:"wrap",position:"sticky",top:0,background:"#fff",zIndex:10}}>
+          <div style={{minWidth:0,flex:scDM.mobile?"1 1 100%":"0 1 auto"}}>
             <div style={{fontSize:10,color:editing?C.peach:C.earth,fontWeight:700,letterSpacing:".18em",textTransform:"uppercase",marginBottom:3}}>{editing?"Modo edición":"Detalle del trabajo"}</div>
-            <div style={{fontSize:15,fontWeight:600,color:C.black}}>{rep.propiedad}</div>
+            <div style={{fontSize:15,fontWeight:600,color:C.black,lineHeight:1.35,textWrap:"pretty"}}>{rep.propiedad}</div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
             {saved&&<span style={{fontSize:11,fontWeight:700,color:C.green,background:"#EDF5EF",padding:"4px 10px",borderRadius:100}}>✓ Guardado</span>}
@@ -6565,7 +6637,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
           </div>
         </div>
 
-        <div style={{padding:"22px 24px",display:"flex",flexDirection:"column",gap:18}}>
+        <div style={{padding:scDM.mobile?"18px 16px 28px":"22px 24px",display:"flex",flexDirection:"column",gap:18}}>
 
           {/* ── EDIT MODE ── */}
           {editing&&(
@@ -7570,6 +7642,187 @@ function RetryBanner({retryQ, setRetryQ, reps, setReps, onSyncing}) {
   );
 }
 
+/* ═══ REPORTE EN INGLÉS PARA SOPORTE DE AIRBNB ═════════════════════════════
+   Un reclamo se gana con orden: qué pasó, quién lo vio, cuándo, cuánto cuesta
+   y la evidencia numerada. Este módulo traduce el reporte al inglés y arma un
+   PDF listo para adjuntar a un caso. El texto original en español queda al
+   final, íntegro: en un reclamo la declaración de quien estuvo ahí vale más
+   que su traducción. */
+const EN_CAT = {"Limpieza tradicional":"Standard turnover cleaning","Limpieza profunda":"Deep cleaning","Mantenimiento":"Maintenance intervention","Nuevo Producto":"Replacement / new item","Ajuste":"Operational adjustment","Reporte de Daños":"Damage report"};
+const EN_PARTY = {"Spacio AM":"Spacio AM (property manager)","Dueño":"Property owner","Dueno":"Property owner","Huésped":"Guest","Huesped":"Guest","Airbnb":"Airbnb"};
+const EN_PHRASES = [
+  ["al hacer la limpieza de salida","during the check-out cleaning"],["al hacer la limpieza","during the cleaning"],["limpieza de salida","check-out cleaning"],
+  ["vidrio templado","tempered glass"],["del huesped","by the guest"],["del huésped","by the guest"],["la mesa de la sala","the living room table"],
+  ["no lo subió la plataforma","the platform did not upload it"],["no lo subio la plataforma","the platform did not upload it"],
+  ["la plataforma no lo subio","the platform did not upload it"],["la plataforma no lo subió","the platform did not upload it"],
+  ["servicio de fumigacion","pest control service"],["servicio de fumigación","pest control service"],
+  ["control de plagas","pest control"],["limpieza adicional","additional cleaning"],["limpieza profunda","deep cleaning"],
+  ["aire acondicionado","air conditioning unit"],["agua caliente","hot water"],["fuga de agua","water leak"],
+  ["no funciona","is not working"],["no enciende","does not turn on"],["no cierra","does not close"],["no abre","does not open"],
+  ["mala manipulacion","mishandling"],["mala manipulación","mishandling"],["mal uso","misuse"],["uso normal","normal wear and tear"],
+  ["desgaste normal","normal wear and tear"],["por el huesped","by the guest"],["por el huésped","by the guest"],
+  ["se encontro","was found"],["se encontró","was found"],["hace falta","is missing"],["esta roto","is broken"],["está roto","is broken"],
+  ["cambio de","replacement of"],["reparacion de","repair of"],["reparación de","repair of"],["toma corriente","power outlet"],
+  ["cortina de baño","shower curtain"],["papel higienico","toilet paper"],["papel higiénico","toilet paper"],
+  ["manchas en","stains on"],["olor a","smell of"],["tipo comun","common type"],["tipo común","common type"],
+  ["insumos de cortesia","courtesy amenities"],["insumos de cortesía","courtesy amenities"],["check out","check-out"],["check in","check-in"]
+];
+const EN_WORDS = {
+  "el":"the","la":"the","los":"the","las":"the","un":"a","una":"a","unos":"some","unas":"some","de":"of","del":"of the","y":"and","o":"or","en":"in","con":"with","sin":"without","para":"for","por":"by","al":"to the","se":"","que":"that","muy":"very","mas":"more","más":"more","no":"not","si":"yes","su":"its","sus":"its","este":"this","esta":"this","esto":"this","todo":"all","toda":"all","todos":"all","otro":"other","otra":"other",
+  "huesped":"guest","huésped":"guest","huespedes":"guests","huéspedes":"guests","dueño":"owner","dueno":"owner","tecnico":"technician","técnico":"technician","proveedor":"vendor","apartamento":"apartment","propiedad":"property","unidad":"unit","edificio":"building","zona":"zone",
+  "limpieza":"cleaning","mantenimiento":"maintenance","reparacion":"repair","reparación":"repair","reparar":"repair","reparado":"repaired","cambio":"replacement","cambiar":"replace","cambiado":"replaced","instalacion":"installation","instalación":"installation","instalar":"install","instalo":"installed","instaló":"installed","revision":"inspection","revisión":"inspection","reviso":"inspected","revisó":"inspected","compra":"purchase","compras":"purchases","servicio":"service","trabajo":"work","reporte":"report","daño":"damage","daños":"damages","danio":"damage","danios":"damages","perdida":"loss","pérdida":"loss","faltante":"missing item","faltan":"are missing","falta":"is missing","roto":"broken","rota":"broken","rotos":"broken","rotas":"broken","quebrado":"broken","quebrada":"broken","quemado":"burnt","quemada":"burnt","manchado":"stained","manchada":"stained","mancha":"stain","manchas":"stains","sucio":"dirty","sucia":"dirty","rayado":"scratched","rayon":"scratch","rayón":"scratch","golpe":"impact mark","golpeado":"dented","fisura":"crack","grieta":"crack","fuga":"leak","gotera":"leak","humedad":"damp","moho":"mould","olor":"smell","plaga":"pest infestation","plagas":"pests","insectos":"insects","fumigacion":"pest control treatment","fumigación":"pest control treatment",
+  "cocina":"kitchen","baño":"bathroom","bano":"bathroom","sala":"living room","habitacion":"bedroom","habitación":"bedroom","cuarto":"bedroom","dormitorio":"bedroom","closet":"closet","clóset":"closet","balcon":"balcony","balcón":"balcony","piso":"floor","pared":"wall","techo":"ceiling","puerta":"door","ventana":"window","vidrio":"glass","espejo":"mirror","mueble":"furniture","muebles":"furniture","sillon":"sofa","sillón":"sofa","silla":"chair","mesa":"table","cama":"bed","colchon":"mattress","colchón":"mattress","sabanas":"bed linen","sábanas":"bed linen","toalla":"towel","toallas":"towels","almohada":"pillow","cortina":"curtain","alfombra":"rug","lampara":"lamp","lámpara":"lamp","foco":"light bulb","bombillo":"light bulb","llave":"key","cerradura":"lock","control":"remote control","televisor":"television","television":"television","televisión":"television","refrigerador":"refrigerator","refri":"refrigerator","congelador":"freezer","estufa":"stove","horno":"oven","microondas":"microwave","cafetera":"coffee maker","licuadora":"blender","lavatrastos":"dishwasher","lavadora":"washing machine","secadora":"dryer","ecofiltro":"water filter","ducha":"shower","regadera":"shower head","inodoro":"toilet","lavamanos":"sink","grifo":"faucet","chorro":"faucet","drenaje":"drain","tuberia":"pipe","tubería":"pipe","enchufe":"power outlet","interruptor":"light switch","cable":"cable","platos":"plates","vasos":"glasses","cubiertos":"cutlery","ollas":"pots","utensilios":"utensils",
+  "fecha":"date","hora":"time","dia":"day","día":"day","dias":"days","días":"days","antes":"before","despues":"after","después":"after","durante":"during","entrada":"check-in","salida":"check-out","estadia":"stay","estadía":"stay","reserva":"reservation","pago":"payment","pagado":"paid","pendiente":"pending","total":"total","costo":"cost","precio":"price","factura":"invoice","foto":"photo","fotos":"photos","evidencia":"evidence","nota":"note","notas":"notes","comentario":"comment","comentarios":"comments","observacion":"observation","observación":"observation","pendientes":"pending items","realizado":"performed","realizada":"performed","encontrado":"found","encontrada":"found","reportado":"reported","reportada":"reported","solicito":"requested","solicitó":"requested","requiere":"requires","necesita":"needs","nuevo":"new","nueva":"new","adicional":"additional","urgente":"urgent","grave":"severe","leve":"minor","completo":"complete","completa":"complete","bueno":"good","buena":"good","malo":"poor","mala":"poor","estado":"condition","tipo":"type","comun":"common","común":"common","plataforma":"platform","subio":"uploaded","subió":"uploaded","token":"token","tokens":"tokens","lavado":"laundry","transporte":"transport","ajuste":"adjustment","quebro":"broke","quebró":"broke","rompio":"broke","rompió":"broke","mancho":"stained","manchó":"stained","dejo":"left","dejó":"left","hacer":"perform","hizo":"performed","templado":"tempered","perdio":"lost","perdió":"lost","llevo":"took","llevó":"took","derramo":"spilled","derramó":"spilled","quemo":"burnt","quemó":"burnt","raya":"scratch","tapado":"blocked","tapada":"blocked","desprendido":"detached","suelto":"loose","floja":"loose"
+};
+function trEN(t){
+  if(!t) return "";
+  var out = " "+String(t).replace(/\s+/g," ")+" ";
+  EN_PHRASES.forEach(function(p){
+    out = out.replace(new RegExp(p[0].replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"gi"), " "+p[1]+" ");
+  });
+  out = out.replace(/[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+/g, function(w){
+    var v = EN_WORDS[w.toLowerCase()];
+    if(v===undefined) return w;
+    if(v==="") return "";
+    return /^[A-ZÁÉÍÓÚÑ]/.test(w) ? v.charAt(0).toUpperCase()+v.slice(1) : v;
+  });
+  out = out.replace(/\s+/g," ").replace(/\s+([,.;:])/g,"$1").trim();
+  return out ? out.charAt(0).toUpperCase()+out.slice(1) : "";
+}
+function enDate(f){
+  if(!f) return "—";
+  var p=String(f).split("-");
+  if(p.length<3) return f;
+  return new Date(parseInt(p[0]),parseInt(p[1])-1,parseInt(p[2])).toLocaleDateString("en-US",{year:"numeric",month:"long",day:"numeric"});
+}
+
+function airbnbClaimPDF(rep, vendors){
+  var vn = (function(){var v=vendors&&vendors.find(function(x){return x.email===rep.reportadoPor;});return v?vendorDisplay(v):rep.reportadoPor||"Spacio AM field technician";})();
+  var danios = (rep.danios||[]).filter(function(d){return d&&(d.desc||d.tipo||d.origen);});
+  var cat = EN_CAT[rep.categoria]||rep.categoria;
+  var caseRef = "SAM-"+String(rep.id||Date.now()).slice(-6)+"-"+String(rep.fecha||"").replace(/-/g,"");
+  function isP(v){return v&&typeof v==="string"&&(v.startsWith("http")||v.startsWith("data:"));}
+  function thumb(src){var d=src,m=src.match(/[?&/]id=([a-zA-Z0-9_-]{20,})/)||src.match(/\/d\/([a-zA-Z0-9_-]{20,})\//);if(m)d="https://drive.google.com/thumbnail?id="+m[1]+"&sz=w600";return d;}
+  function esc(t){return String(t==null?"":t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+  function row(l,v){return "<tr><td style='padding:7px 0;color:#8C8C8A;font-size:12px;width:38%;vertical-align:top;border-bottom:1px solid #F0EDE8'>"+l+"</td><td style='padding:7px 0;font-size:13px;vertical-align:top;border-bottom:1px solid #F0EDE8'>"+v+"</td></tr>";}
+  function h2(n,t){return "<h2 style='font-size:11px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:#3E3F3F;margin:30px 0 10px;padding-bottom:6px;border-bottom:1px solid #D8D4CE'>"+n+". "+t+"</h2>";}
+
+  var photos=[];
+  function push(src,cap){ if(isP(src)) photos.push({src:src,cap:cap}); }
+  (rep.fotoAntes||[]).forEach(function(s,i){push(s,"Condition documented before the intervention ("+(i+1)+")");});
+  danios.forEach(function(d,di){
+    (d.fotos||[]).forEach(function(s,i){push(s,"Damage item "+(di+1)+" — evidence "+(i+1)+": "+trEN(d.desc||d.tipo||""));});
+    (d.fotos2||[]).forEach(function(s,i){push(s,"Damage item "+(di+1)+" — additional view "+(i+1));});
+  });
+  (rep.fotoDespues||[]).forEach(function(s,i){push(s,"Condition after the intervention / repair completed ("+(i+1)+")");});
+  if(rep.factura&&rep.factura.type&&rep.factura.type.indexOf("image")===0) push(rep.factura.data,"Supplier invoice for the repair / replacement");
+  if(isP(rep.fotoUniforme)) push(rep.fotoUniforme,"Spacio AM technician on site, in uniform, at the time of the inspection");
+
+  var amount = rep.total?"GTQ "+rep.total:"To be confirmed";
+  var L=[
+    "<html><head><meta charset='UTF-8'><title>Airbnb claim — "+esc(rep.propiedad)+"</title><style>",
+    "body{font-family:Helvetica,Arial,sans-serif;max-width:760px;margin:34px auto;color:#3E3F3F;line-height:1.65;padding:0 22px}",
+    "table{width:100%;border-collapse:collapse}",
+    "p{font-size:13px;margin:0 0 10px}",
+    "li{font-size:12.5px;margin-bottom:6px}",
+    "@media print{body{margin:12px}.nb{page-break-inside:avoid}}",
+    "</style></head><body>",
+    "<div style='display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #3E3F3F;padding-bottom:12px'>",
+      "<div><div style='font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:#938B8A'>Spacio AM · Property Management · Guatemala</div>",
+      "<h1 style='font-size:22px;font-weight:600;margin:8px 0 0'>Damage &amp; incident claim report</h1>",
+      "<div style='font-size:12.5px;color:#938B8A;margin-top:4px'>Prepared for Airbnb Support · Resolution Centre</div></div>",
+      "<div style='text-align:right;font-size:11px;color:#938B8A;white-space:nowrap'>Case ref.<br/><strong style='font-size:13px;color:#3E3F3F'>"+caseRef+"</strong><br/>Issued "+new Date().toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"})+"</div>",
+    "</div>",
+    h2(1,"Case at a glance"),
+    "<table>"+
+      row("Listing / unit", esc(rep.propiedad))+
+      row("Date of incident", enDate(rep.fecha))+
+      row("Detected during", cat)+
+      row("Reported by", esc(vn)+" — Spacio AM on-site technician")+
+      row("Report filed", rep.createdAt?new Date(rep.createdAt).toLocaleString("en-US"):enDate(rep.fecha))+
+      row("Items claimed", danios.length?String(danios.length):"1")+
+      row("Amount claimed", "<strong>"+amount+"</strong>")+
+      row("Supporting invoice", rep.factura?"Attached":"Not applicable")+
+      row("Photographic evidence", photos.length+" image"+(photos.length===1?"":"s")+" (indexed in section 5)")+
+    "</table>",
+    h2(2,"What happened"),
+    "<p>On "+enDate(rep.fecha)+", during the "+cat.toLowerCase()+" of "+esc(rep.propiedad)+", the Spacio AM technician "+esc(vn)+" inspected the unit and documented the situation described below. The unit is photographed at every turnover, so the condition of the apartment immediately before and after the stay is on record.</p>",
+    rep.descripcion?"<p style='background:#F5F3F0;border-left:3px solid #E9826A;padding:12px 14px;margin:14px 0'><strong>Technician's report (translated):</strong><br/>"+esc(trEN(rep.descripcion))+"</p>":"",
+    rep.comentarios?"<p><strong>Additional notes (translated):</strong> "+esc(trEN(rep.comentarios))+"</p>":""
+  ];
+
+  var items="";
+  if(danios.length){
+    danios.forEach(function(d,i){
+      items+="<div class='nb' style='border:1px solid #D8D4CE;border-radius:8px;padding:14px 16px;margin-bottom:12px'>";
+      items+="<div style='font-size:14px;font-weight:700;margin-bottom:8px'>Item "+(i+1)+" — "+esc(trEN(d.desc||d.tipo||"Damage reported"))+"</div><table>";
+      if(d.origen)      items+=row("Cause / origin", esc(trEN(d.origen)));
+      if(d.reparacion)  items+=row("Repair action", esc(trEN(d.reparacion)));
+      if(d.quienPaga)   items+=row("Party held responsible", esc(EN_PARTY[d.quienPaga]||trEN(d.quienPaga)));
+      if(d.costo)       items+=row("Documented cost", "GTQ "+esc(d.costo));
+      if(d.comentarios) items+=row("Notes", esc(trEN(d.comentarios)));
+      items+=row("Original wording (Spanish)", "<em style='color:#938B8A'>"+esc([d.desc,d.origen,d.reparacion,d.comentarios].filter(Boolean).join(" · "))+"</em>");
+      items+="</table></div>";
+    });
+  } else {
+    items+="<div class='nb' style='border:1px solid #D8D4CE;border-radius:8px;padding:14px 16px'><table>"+
+      row("Work performed / issue", esc(trEN(rep.descripcion||"—")))+
+      row("Party held responsible", esc(EN_PARTY[rep.pagadoPor]||"To be determined"))+
+      row("Documented cost", amount)+
+    "</table></div>";
+  }
+  L.push(h2(3, danios.length?"Itemised damages":"Work performed"), items);
+
+  L.push(h2(4,"Costs claimed"),
+    "<table>"+
+      row("Service / repair carried out", esc(trEN(rep.descripcion||cat)))+
+      row("Executed by", esc(vn))+
+      row("Invoice on file", rep.factura?"Yes — attached to this claim":"No separate invoice; cost recorded in the management system")+
+      row("<strong>Total claimed</strong>", "<strong style='font-size:15px'>"+amount+"</strong>")+
+    "</table>"+
+    "<p style='font-size:11.5px;color:#938B8A;margin-top:8px'>Amounts are in Guatemalan Quetzales (GTQ), the currency in which the repair was paid locally.</p>"
+  );
+
+  var ev="";
+  if(photos.length){
+    photos.forEach(function(p,i){
+      ev+="<div class='nb' style='display:inline-block;width:31%;margin:0 1% 16px 0;vertical-align:top'>"+
+        "<img src='"+thumb(p.src)+"' style='width:100%;height:150px;object-fit:cover;border-radius:6px;border:1px solid #D8D4CE'/>"+
+        "<div style='font-size:10.5px;color:#938B8A;margin-top:5px;line-height:1.45'><strong style='color:#3E3F3F'>Photo "+(i+1)+".</strong> "+esc(p.cap)+"</div></div>";
+    });
+  } else ev="<p style='color:#938B8A'>No photographic evidence was attached to this record.</p>";
+  L.push(h2(5,"Evidence index"), ev);
+
+  L.push(h2(6,"How this evidence was collected"),
+    "<ul style='padding-left:18px;margin:0'>"+
+    "<li>Every unit managed by Spacio AM is inspected and photographed by a uniformed technician at each turnover, before and after every stay.</li>"+
+    "<li>Photographs are captured on site with the technician's device and uploaded immediately to Spacio AM's operations system, where each record is stored with its date, the unit and the technician who filed it.</li>"+
+    "<li>The turnover immediately preceding this stay was documented in the same way, which establishes the condition of the apartment before the guest's arrival.</li>"+
+    "<li>The text in section 8 is the technician's original statement in Spanish, reproduced exactly as filed; the English text in this report is a translation of that statement.</li>"+
+    "</ul>"
+  );
+
+  L.push(h2(7,"Resolution requested"),
+    "<p>We respectfully request reimbursement of <strong>"+amount+"</strong> for the damage and remediation work described above, in accordance with Airbnb's Host Damage Protection. The unit was returned to a guest-ready condition at the host's cost so that the following reservation would not be affected.</p>"+
+    "<p>We remain available to provide additional photographs, the original invoice, or a statement from the technician who attended the property.</p>"
+  );
+
+  L.push(h2(8,"Original statement (Spanish, verbatim)"),
+    "<div style='background:#FAFAFA;border:1px solid #EAE6E0;border-radius:8px;padding:14px 16px;font-size:12.5px;color:#3E3F3F;white-space:pre-wrap'>"+
+    esc([rep.propiedad, fmtDate(rep.fecha), rep.categoria, rep.descripcion, rep.comentarios].filter(Boolean).join("\n")+
+      (danios.length?"\n\n"+danios.map(function(d,i){return "Daño "+(i+1)+": "+[d.desc,d.origen?"Origen: "+d.origen:"",d.reparacion?"Reparación: "+d.reparacion:"",d.quienPaga?"Cubre: "+d.quienPaga:"",d.comentarios].filter(Boolean).join(" · ");}).join("\n"):""))+
+    "</div>"
+  );
+
+  L.push("<div style='margin-top:34px;padding-top:12px;border-top:1px solid #D8D4CE;font-size:11px;color:#938B8A;text-align:center'>Spacio AM · Property management, Guatemala · hola@spacioam.com · +502 5690 9499<br/>Case "+caseRef+" · generated "+new Date().toLocaleString("en-US")+"</div></body></html>");
+
+  var w=window.open("","_blank","width=900,height=780");
+  if(!w){ alert("Permite las ventanas emergentes para generar el reporte."); return; }
+  w.document.write(L.join(""));
+  w.document.close();
+  setTimeout(function(){w.print();},900);
+}
+
 /* ─── Executive Summary + PDF export */
 function ExecSummary({rep, vendors}) {
   var vn = (function(){var v=vendors&&vendors.find(function(x){return x.email===rep.reportadoPor;});return v?vendorDisplay(v):rep.reportadoPor||"—";})();
@@ -7578,6 +7831,25 @@ function ExecSummary({rep, vendors}) {
   var okItems  = inv.filter(function(x){return x.estado==="ok"&&!(parseInt(x.malEstado||0)>0);});
   var badItems = inv.filter(function(x){return x.estado!=="ok"||parseInt(x.malEstado||0)>0;});
   var danios   = rep.danios||[];
+  var scES     = useScreen();
+  var esDanio  = isDanos(rep.categoria);
+  var claimable= esDanio || rep.categoria==="Mantenimiento" || rep.categoria==="Nuevo Producto" || (isCl&&rep.hayDanios);
+  var nFotos   = (function(){
+    var n=0;
+    function cuenta(v){ if(!v) return; if(Array.isArray(v)) v.forEach(cuenta); else if(typeof v==="string"&&(v.startsWith("http")||v.startsWith("data:"))) n++; }
+    cuenta(rep.fotoAntes); cuenta(rep.fotoDespues); cuenta(rep.fotoUniforme);
+    danios.forEach(function(d){ cuenta(d.fotos); cuenta(d.fotos2); });
+    return n;
+  })();
+  var fichaRows = [];
+  fichaRows.push(["Propiedad", rep.propiedad||"—"]);
+  fichaRows.push(["Categoría", rep.categoria]);
+  fichaRows.push(["Fecha", fmtDate(rep.fecha)]);
+  fichaRows.push(["Técnico", vn]);
+  if(!esDanio) fichaRows.push(["Quién paga", rep.pagadoPor||"Sin clasificar"]);
+  fichaRows.push(["Evidencia", (nFotos?nFotos+" foto"+(nFotos===1?"":"s"):"Sin fotos")+(rep.factura?" · factura adjunta":"")]);
+  if(danios.length) fichaRows.push(["Daños", danios.length+" registrado"+(danios.length===1?"":"s")]);
+  if(!esDanio&&rep.total&&!rep.paid) fichaRows.push(["Pendiente desde", daysSince(rep.createdAt||rep.id)+" día"+(daysSince(rep.createdAt||rep.id)===1?"":"s")]);
 
   function exportPDF() {
     function isP(v){return v&&typeof v==="string"&&(v.startsWith("http")||v.startsWith("data:"));}
@@ -7682,16 +7954,33 @@ function ExecSummary({rep, vendors}) {
   }
 
   return (
-    <div style={{background:C.surfaceWarm,borderRadius:10,padding:"16px",border:"1px solid "+C.line}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
-        <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Resumen ejecutivo</div>
-        <button onClick={exportPDF} style={{padding:"6px 13px",borderRadius:6,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>📄 PDF</button>
+    <div style={{background:C.surfaceWarm,borderRadius:12,padding:scES.mobile?"14px":"16px",border:"1px solid "+C.line}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:13}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Resumen del trabajo</div>
+        <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+          <button onClick={exportPDF} style={{padding:"7px 13px",minHeight:36,borderRadius:100,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11.5,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>PDF completo</button>
+          {claimable&&<button onClick={function(){airbnbClaimPDF(rep,vendors);}} title="Genera un reporte en inglés, listo para adjuntar a un caso de Airbnb" style={{padding:"7px 13px",minHeight:36,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>Reporte Airbnb (EN)</button>}
+        </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:isCl&&inv.length>0?12:0}}>
-        <Tile label="Técnico" value={vn}/>
-        <Tile label="Fecha"   value={fmtDate(rep.fecha)}/>
-        <Tile label="Total"   value={isDanos(rep.categoria)?"Sin pago":(rep.total?"Q"+rep.total:"—")} accent={!!rep.total&&!isDanos(rep.categoria)}/>
-        <Tile label="Pago"    value={isDanos(rep.categoria)?"No aplica":(rep.paid?"✓ Pagado":"● Pendiente")}/>
+
+      {/* La cifra primero — es lo que se busca al abrir. Luego la ficha, una
+          línea por dato, que se lee sin esfuerzo en un teléfono. */}
+      <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",gap:12,flexWrap:"wrap",background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"12px 14px",marginBottom:12}}>
+        <div>
+          <div style={{fontSize:9,color:C.taupe,fontWeight:700,letterSpacing:".18em",textTransform:"uppercase"}}>{esDanio?"Seguimiento":"Total"}</div>
+          <div style={{fontSize:23,fontWeight:700,color:esDanio?C.taupe:C.black,marginTop:3,fontVariantNumeric:"tabular-nums",lineHeight:1.1}}>{esDanio?"Sin pago":(rep.total?"Q"+rep.total:"—")}</div>
+        </div>
+        <span style={{padding:"6px 13px",borderRadius:100,fontSize:11.5,fontWeight:700,background:esDanio?"#F0EDE8":(rep.paid?"#EDF5EF":"#F5EDEC"),color:esDanio?C.earth:(rep.paid?C.green:C.red),whiteSpace:"nowrap"}}>{esDanio?"No aplica":(rep.paid?"✓ Pagado":"● Pendiente")}</span>
+      </div>
+      <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"4px 14px",marginBottom:isCl&&inv.length>0?12:0}}>
+        {fichaRows.map(function(r,i){
+          return (
+            <div key={r[0]} style={{display:"flex",gap:12,alignItems:"baseline",padding:"9px 0",borderTop:i?"1px solid "+C.line:"none"}}>
+              <span style={{fontSize:9,color:C.taupe,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",width:scES.mobile?96:120,flexShrink:0,lineHeight:1.5}}>{r[0]}</span>
+              <span style={{fontSize:13,color:C.black,lineHeight:1.5,textWrap:"pretty",minWidth:0}}>{r[1]}</span>
+            </div>
+          );
+        })}
       </div>
       {/* Uniform photo check — only for cleanings */}
       {isCl&&(
@@ -10108,7 +10397,8 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                     {filas.map(function(f){
                       var cancelada=f.cz.estado==="cancelada";
                       return (
-                        <div key={f.s.id} style={{display:"grid",gridTemplateColumns:"1fr auto 40%",gap:10,alignItems:"center",padding:"11px 2px",borderBottom:"1px solid "+C.line}}>
+                        <div key={f.s.id} style={{borderBottom:"1px solid "+C.line,background:accion===f.s.id?C.surfaceWarm:"transparent"}}>
+                        <div onClick={function(){ setAccion(accion===f.s.id?null:f.s.id); }} style={{display:"grid",gridTemplateColumns:"1fr auto 40%",gap:10,alignItems:"center",padding:"11px 2px",cursor:"pointer"}}>
                           <div style={{minWidth:0}}>
                             <div style={{fontSize:12.5,fontWeight:600,color:cancelada?C.taupe:C.black,textDecoration:cancelada?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.apto}</div>
                             <div style={{display:"flex",gap:6,marginTop:3,flexWrap:"wrap",alignItems:"center"}}>
@@ -10121,11 +10411,29 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                           {farolActivo
                             ? <Farol estado={farol([f.s])} size={11}/>
                             : <span/>}
-                          <div style={{fontSize:12,color:f.tec?C.black:C.orange,fontWeight:f.tec?500:700,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.tec||"sin técnico"}</div>
+                          <div style={{display:"flex",alignItems:"center",gap:7,minWidth:0}}>
+                            <span style={{fontSize:12,color:f.tec?C.black:C.orange,fontWeight:f.tec?500:700,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.tec||"sin técnico"}</span>
+                            <span style={{marginLeft:"auto",color:C.taupe,fontSize:11,flexShrink:0}}>{accion===f.s.id?"▴":"⋯"}</span>
+                          </div>
                         </div>
+                        {/* Las mismas acciones que en la vista por técnico: mover, cancelar, quitar. */}
+                        {accion===f.s.id&&(
+                          <div style={{display:"flex",gap:7,padding:"0 2px 12px",flexWrap:"wrap",alignItems:"center"}}>
+                            <select value="" onChange={function(e){ if(e.target.value){ mover(f.s, e.target.value); setAccion(null); } }} style={{flex:1,minWidth:150,fontSize:11,padding:"8px 9px",borderRadius:8,border:"1px solid "+C.gray,background:"#fff",fontFamily:"Montserrat,sans-serif",color:C.earth,minHeight:38}}>
+                              <option value="">Mover a…</option>
+                              {tecs.filter(function(x){ return String(x.email||"").toLowerCase()!==emailVigente(f.s); }).map(function(x){
+                                var cnt=(porTec[String(x.email||"").toLowerCase()]||[]).length;
+                                return <option key={x.id} value={String(x.email||"").toLowerCase()}>{vendorDisplay(x)} · {cnt} hoy</option>;
+                              })}
+                            </select>
+                            {!cancelada&&String(f.s.estado||"")!=="cancelada"&&<button onClick={function(){setCancelar(f.s);}} style={{fontSize:11,padding:"8px 12px",minHeight:38,borderRadius:8,border:"1px solid #DBC8C4",background:"#F5EDEC",color:C.red,cursor:"pointer",fontWeight:700,fontFamily:"Montserrat,sans-serif"}}>Cancelar limpieza</button>}
+                            <button onClick={function(){quitar(f.s);setAccion(null);}} style={{fontSize:11,padding:"8px 12px",minHeight:38,borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",fontWeight:600,fontFamily:"Montserrat,sans-serif"}}>Quitar del día</button>
+                          </div>
+                        )}
+                      </div>
                       );
                     })}
-                    <div style={{fontSize:10.5,color:C.taupe,marginTop:9}}>{filas.length} limpieza{filas.length===1?"":"s"} este día · toca los títulos para ordenar</div>
+                    <div style={{fontSize:10.5,color:C.taupe,marginTop:9,lineHeight:1.6}}>{filas.length} limpieza{filas.length===1?"":"s"} este día · toca los títulos para ordenar · toca una fila para mover, cancelar o quitar</div>
                   </div>
                 )}
               </div>
