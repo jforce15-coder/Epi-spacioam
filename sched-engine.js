@@ -245,6 +245,14 @@
      limpieza tradicional ahí, para un técnico distinto y en el mismo horario. */
   function agregarProfundas(limpiezas, o) {
     var props = o.props || [], historial = o.historial || [], hoy = o.hoy;
+    /* Reglas por propiedad: hay apartamentos a los que no se les programa
+       profunda automática, y otros cuya profunda siempre la hace la misma
+       persona. Se leen de la ficha: sinProfundas / profundaTecnico. */
+    var reglas = {};
+    for (var rp = 0; rp < props.length; rp++) {
+      var pn = props[rp] && (props[rp].name || props[rp].nombre);
+      if (pn) reglas[norm(pn)] = props[rp];
+    }
     /* Cada profunda ocupa el turno completo de un técnico: si se programaran todas
        las que "toca" el mismo día, el equipo entero quedaría en profundas y las
        limpiezas de checkout se caerían. Se limitan por día y se atienden primero
@@ -285,6 +293,7 @@
     for (var pk in porProp) {
       if (!porProp.hasOwnProperty(pk)) continue;
       if (excluir[pk]) continue; /* ya tiene una profunda agendada sin hacer */
+      if (reglas[pk] && reglas[pk].sinProfundas) continue; /* fuera del ciclo automático */
       var base = porProp[pk];
       var prev = ultima[pk];
       /* Sin historial: se programa la primera. Con historial: cuando ya pasaron
@@ -315,7 +324,10 @@
         entradaHoy: base.entradaHoy,
         codigoAcceso: base.codigoAcceso,
         parDe: base.key,
-        ultimaProfunda: prev
+        ultimaProfunda: prev,
+        /* Si la propiedad tiene técnico fijo para profundas, la limpieza nace
+           amarrada a él: el reparto no la ofrece a nadie más. */
+        fijoEmail: (reglas[pk] && reglas[pk].profundaTecnico) ? String(reglas[pk].profundaTecnico).toLowerCase() : ""
       });
     }
     return limpiezas.concat(extra);
@@ -496,6 +508,7 @@
     /* ── Filtros duros: puede este técnico tomar esta limpieza, sí o no. ─────── */
     function factible(lim, t, exceso) {
       var esP = esProfunda(lim.tipo);
+      if (lim.fijoEmail && t.email !== lim.fijoEmail) return false;
       var tope = exceso ? Math.min(MAX_DIA_TOPE, Math.max(t.maxDia, MAX_DIA_DEF + 2)) : t.maxDia;
       if (t.usados >= tope) return false;
       if (esP && !t.puedeProfunda) return false;
@@ -694,6 +707,7 @@
       /* Ronda: mientras alguien elegible siga en cero, los que ya tienen esperan. */
       if (ctx.soloRonda != null && t.usados > ctx.soloRonda) continue;
       if (esProf && !t.puedeProfunda) continue;
+      if (lim.fijoEmail && t.email !== lim.fijoEmail) continue;
       /* La profunda va a un técnico distinto del de la tradicional del mismo día. */
       if (lim.parDe && yaTieneKey(ctx.asignaciones, t.email, lim.parDe)) continue;
       if (esProf && t.usados > 0) continue;      /* la profunda ocupa el turno completo */
@@ -957,6 +971,8 @@
       if (!nombre) continue;
       /* Una propiedad en pausa no debe salir como profunda vencida: no se programa. */
       if (enPausa(props[p], hoy)) continue;
+      /* Ni una a la que se le quitaron las profundas a propósito. */
+      if (props[p].sinProfundas) continue;
       var key = norm(nombre);
       var u = ultima[key] || "";
       out.push({
