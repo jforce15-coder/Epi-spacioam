@@ -1,0 +1,42 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Spacio AM · EPI App — tokens del Design System v2 (bloque 1, aprobado)
+   Los consume el objeto C / BADGE / el radio de píldora de app.jsx vía var().
+   Cambiar un valor aquí lo cambia en todo el app: nadie escribe un color a mano.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root{
+  --sa-earth:#6F6867;   /* texto secundario · graphite, 5.2:1 (antes #938B8A, 3.19:1) */
+  --sa-taupe:#6F6867;   /* meta / fechas */
+  --sa-red:#C0392B;     /* EXCEPCIÓN · "exige que hagas algo" · 5.21:1 */
+
+  /* ATENCIÓN · "esto merece tu mirada". Un resultado a la baja informa, no
+     alarma: falta un depósito, falta un documento, el mes bajó, una
+     cancelación administrativa, un descuento. En duda: peach.
+     Tres tokens porque el peach vivo NO carga texto — mide 2.56:1. */
+  --sa-attention:#E9826A;        /* solo gráfico: punto, flecha, filete, borde */
+  --sa-attention-text:#AF490E;   /* numerales y etiquetas · 5.32:1 · sobre su tinte 4.80:1 */
+  --sa-attention-tint:#F8ECE9;   /* fondo de píldora y bloque · con ink 9.14:1 */
+  --sa-pill:999px;      /* píldora canónica del DS (antes 100px) */
+
+  /* foco único del DS: borde ink + anillo peach. Antes era un halo gris al 10%
+     que en la práctica no se veía. */
+  --sa-focus-ring:0 0 0 3px rgba(233,130,106,.35);
+
+  /* sombras — cuatro niveles, todas con tinte ink. Antes: 22 variantes
+     distintas en 54 usos, algunas al 28% y varias en negro puro. */
+  --sa-shadow-xs:0 1px 2px rgba(62,63,63,.04);
+  --sa-shadow-sm:0 4px 16px rgba(62,63,63,.05);
+  --sa-shadow-md:0 12px 40px rgba(62,63,63,.07);
+  --sa-shadow-lg:0 28px 80px rgba(62,63,63,.10);
+
+  /* badges de categoría — capa de dominio del DS.
+     Fórmula: fondo tinte S30/L93, texto del mismo tono a L que pasa AA >=4.5. */
+  --sa-b-lt-bg:#E8F3ED;   --sa-b-lt-tx:#317754;   /* Limpieza tradicional */
+  --sa-b-lp-bg:#E8F3F0;   --sa-b-lp-tx:#317766;   /* Limpieza profunda */
+  --sa-b-mant-bg:#E8EDF3; --sa-b-mant-tx:#3B6691; /* Mantenimiento */
+  --sa-b-np-bg:#F3EEE8;   --sa-b-np-tx:#866537;   /* Nuevo producto */
+  --sa-b-aj-bg:#F3F1E8;   --sa-b-aj-tx:#776C31;   /* Ajuste */
+  --sa-b-dano-bg:#F3E9E8; --sa-b-dano-tx:#91473B; /* Reporte de daños */
+  --sa-b-sup-bg:#EEE8F3;  --sa-b-sup-tx:#6D3B91;  /* Supervisión */
+  --sa-b-canc-bg:#F3E8ED; --sa-b-canc-tx:#913B66; /* Cancelación */
+  --sa-b-wifi-bg:#E8F1F3; --sa-b-wifi-tx:#357682; /* Wi-Fi */
+}

@@ -1,5 +1,5 @@
 const {useState,useEffect,useRef,Component}=React;
-const {BarChart,Bar,XAxis,YAxis,Tooltip,ResponsiveContainer,LineChart,Line,CartesianGrid}=(window.Recharts||{});
+const {BarChart,Bar,XAxis,YAxis,Tooltip,ResponsiveContainer,LineChart,Line,CartesianGrid,ComposedChart,Cell}=(window.Recharts||{});
 
 /* ─── Responsive hook */
 function useScreen() {
@@ -14,26 +14,30 @@ function useScreen() {
 
 /* ═══ TOKENS */
 const C = {
-  alabaster:"#FAFAFA", beige:"#F5F3F0",   earth:"#938B8A",
+  alabaster:"#FAFAFA", beige:"#F5F3F0",   earth:"var(--sa-earth)",
   gray:"#D8D4CE",      black:"#3E3F3F",   peach:"#E9826A",
-  green:"#3d6b52",     red:"#8a3030",     orange:"#9a5020",
-  sand:"#E8E4DF",      taupe:"#938B8A",   accent:"#E9826A",
+  green:"#3d6b52",     red:"var(--sa-red)",
+  /* Rol de atención: "esto merece tu mirada", distinto de la excepción que
+     exige una acción. El peach vivo no carga texto (2.56:1) — para numerales
+     y etiquetas va attentionText, que sí pasa AA. */
+  attention:"var(--sa-attention)", attentionText:"var(--sa-attention-text)", attentionTint:"var(--sa-attention-tint)",     orange:"#9a5020",
+  sand:"#E8E4DF",      taupe:"var(--sa-taupe)",   accent:"#E9826A",
   surface:"#FFFFFF",   surfaceWarm:"#F5F3F0", line:"#EAE6E0",
 };
 const CATS = ["Limpieza tradicional","Limpieza profunda","Mantenimiento","Nuevo Producto","Ajuste","Reporte de Daños"];
 const BADGE = {
-  "Limpieza tradicional":{bg:"#E8EDE9",tx:"#4a7a60"},
-  "Limpieza profunda":   {bg:"#DDE8DF",tx:"#3a6b50"},
-  "Mantenimiento":       {bg:"#E8EAF0",tx:"#4a5a7a"},
-  "Nuevo Producto":      {bg:"#EDE8E2",tx:"#7a5a3a"},
-  "Ajuste":             {bg:"#EDEAE3",tx:"#7a7050"},
-  "Reporte de Daños":   {bg:"#EDE4E4",tx:"#9b3a3a"},
-  "Supervisión":        {bg:"#E9E4ED",tx:"#5a4a7a"},
-  "Cancelación":        {bg:"#F1E5E3",tx:"#8a4a44"},
-  "Wi-Fi":              {bg:"#E3EAEC",tx:"#3a6b78"},
+  "Limpieza tradicional":{bg:"var(--sa-b-lt-bg)",tx:"var(--sa-b-lt-tx)"},
+  "Limpieza profunda":   {bg:"var(--sa-b-lp-bg)",tx:"var(--sa-b-lp-tx)"},
+  "Mantenimiento":       {bg:"var(--sa-b-mant-bg)",tx:"var(--sa-b-mant-tx)"},
+  "Nuevo Producto":      {bg:"var(--sa-b-np-bg)",tx:"var(--sa-b-np-tx)"},
+  "Ajuste":             {bg:"var(--sa-b-aj-bg)",tx:"var(--sa-b-aj-tx)"},
+  "Reporte de Daños":   {bg:"var(--sa-b-dano-bg)",tx:"var(--sa-b-dano-tx)"},
+  "Supervisión":        {bg:"var(--sa-b-sup-bg)",tx:"var(--sa-b-sup-tx)"},
+  "Cancelación":        {bg:"var(--sa-b-canc-bg)",tx:"var(--sa-b-canc-tx)"},
+  "Wi-Fi":              {bg:"var(--sa-b-wifi-bg)",tx:"var(--sa-b-wifi-tx)"},
 };
 const ALT = {
-  red:    {label:"Trabajo de hace 3+ semanas", clr:"#9b3a3a", bg:"#EDE4E4"},
+  red:    {label:"Trabajo de hace 3+ semanas", clr:"#C0392B", bg:"#EDE4E4"},
   orange: {label:"Trabajo de hace 2 semanas",  clr:"#b5622a", bg:"#EDE7E0"},
   yellow: {label:"Trabajo de la semana anterior", clr:"#8a7040", bg:"#F5F2EC"},
 };
@@ -374,7 +378,7 @@ function propParts(nombre){
 function propZona(n){ return propParts(n).zona; }
 function propEdificio(n){ return propParts(n).edificio; }
 
-function rvColor(n){ return n==null?"#938B8A" : n>=4.8?"#3d6b52" : n>=4.5?"#5a7a52" : n>=4?"#9a5020" : "#8a3030"; }
+function rvColor(n){ return n==null?"#938B8A" : n>=4.8?"#3d6b52" : n>=4.5?"#3d6b52" : n>=4?"#9a5020" : "#C0392B"; }
 
 /* ═══ CASOS DE REVISIÓN DE RATING ═══
    Un caso = solicitud del técnico + decisión del administrador.
@@ -409,7 +413,7 @@ function rcEstadoTxt(e){
        : e==="rechazada"?"Calificación mantenida" : "En revisión";
 }
 function rcEstadoColor(e){
-  return e==="excluida"?"#3d6b52" : e==="reasignada"?"#4a6b8a" : e==="rechazada"?"#8a3030" : "#9a5020";
+  return e==="excluida"?"#3d6b52" : e==="reasignada"?"#3B6691" : e==="rechazada"?"#C0392B" : "#9a5020";
 }
 /* Sugerencias concretas según la categoría más débil / la brecha con el estándar. */
 /* El resumen IA llega como líneas etiquetadas (BIEN / OPORTUNIDAD / ACCION).
@@ -424,9 +428,9 @@ function rvIAParse(txt){
   return out;
 }
 var RV_IA_META = {
-  BIEN:        {label:"Lo que elogian",      color:"#3d6b52", bg:"#EDF5EF"},
-  OPORTUNIDAD: {label:"Área de oportunidad", color:"#8a6320", bg:"#F7EFE2"},
-  ACCION:      {label:"Acción",              color:"#4a6b8a", bg:"#EDF1F5"}
+  BIEN:        {label:"Lo que elogian",      color:"#3d6b52", bg:"#E8F2ED"},
+  OPORTUNIDAD: {label:"Área de oportunidad", color:"#9a5020", bg:"#F5EBE5"},
+  ACCION:      {label:"Acción",              color:"#3B6691", bg:"#E8EDF3"}
 };
 function RvIABody({texto}){
   var items=rvIAParse(texto);
@@ -437,7 +441,7 @@ function RvIABody({texto}){
         var m=RV_IA_META[it.k]||RV_IA_META.ACCION;
         return (
           <div key={i} style={{display:"flex",gap:9,alignItems:"baseline"}}>
-            <span style={{flexShrink:0,fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:m.color,background:m.bg,borderRadius:100,padding:"3px 8px",whiteSpace:"nowrap"}}>{m.label}</span>
+            <span style={{flexShrink:0,fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:m.color,background:m.bg,borderRadius:"var(--sa-pill)",padding:"3px 8px",whiteSpace:"nowrap"}}>{m.label}</span>
             <span style={{fontSize:12,color:C.black,lineHeight:1.55,textWrap:"pretty"}}>{it.v}</span>
           </div>
         );
@@ -726,6 +730,19 @@ var PRESET_OPTS = [
   ["todo","Todo"],
 ];
 function daysSince(ts) { return Math.floor((Date.now()-ts)/86400000); }
+var QA_VENTANA_DIAS = 7;
+/* Una limpieza que nadie revisó dentro de la ventana. Se cuenta desde la fecha
+   del trabajo, no desde que se registró: lo que importa es qué tan viejo es lo
+   que se estaría aprobando. Aprobar una limpieza de hace tres semanas no es un
+   control de calidad —nadie se acuerda— y firmarla ensucia el historial. */
+function qaFueraDeTiempo(r){
+  if(!r || !isCleaning(r.categoria)) return false;
+  if((r.qaStatus||"pendiente")!=="pendiente") return false;
+  var f = String(r.fecha||"").slice(0,10);
+  if(!f) return false;
+  return SCHED.dias(f, SCHED.hoyGT()) > QA_VENTANA_DIAS;
+}
+
 function alertLvl(r) {
   if (r.paid || !r.total || isDanos(r.categoria)) return null;
   var d = daysSince(r.createdAt||r.id);
@@ -733,6 +750,63 @@ function alertLvl(r) {
   return null;
 }
 function uniq(arr) { return [...new Set(arr)]; }
+var DANIO_VIDEO_MAX_MB = 12;
+/* Un video explica en tres segundos lo que tres fotos no: si la gaveta cierra,
+   si la fuga gotea, si el ruido viene del motor. Los videos NO se comprimen
+   —no hay forma barata en el navegador—, así que el tope se aplica al aceptar
+   el archivo: 12 MB dan de sobra para ~15 segundos de teléfono. */
+function leerVideo(file){
+  return new Promise(function(res, rej){
+    var mb = file.size/1048576;
+    if(mb > DANIO_VIDEO_MAX_MB){
+      rej(new Error("El video pesa "+mb.toFixed(1)+" MB y el máximo es "+DANIO_VIDEO_MAX_MB+" MB. Graba uno más corto, de unos 10 a 15 segundos."));
+      return;
+    }
+    var fr=new FileReader();
+    fr.onload=function(ev){ res({data:ev.target.result, name:file.name||"video.mp4", mime:file.type||"video/mp4", mb:mb}); };
+    fr.onerror=function(){ rej(new Error("No se pudo leer el video.")); };
+    fr.readAsDataURL(file);
+  });
+}
+
+function VideoDanio({video, onSet}){
+  const [err,setErr] = useState("");
+  const ref = useRef(null);
+  function pick(e){
+    var f=e.target.files&&e.target.files[0];
+    e.target.value="";
+    if(!f) return;
+    setErr("");
+    leerVideo(f).then(function(v){ onSet(v); }, function(ex){ setErr(ex.message); });
+  }
+  var yaSubido = video && video.url && !video.data;
+  return (
+    <div>
+      <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>
+        Video corto <span style={{fontWeight:600,letterSpacing:".04em",textTransform:"none",color:C.taupe}}>· opcional</span>
+      </div>
+      {(video&&(video.data||video.url))
+        ? (
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <video src={video.data||video.url} controls playsInline style={{width:"100%",maxHeight:220,borderRadius:12,border:"1px solid "+C.gray,background:"#000",display:"block"}}/>
+            <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <span style={{fontSize:11,color:C.taupe,fontVariantNumeric:"tabular-nums"}}>{yaSubido?"Guardado":(video.mb?video.mb.toFixed(1)+" MB":"")}</span>
+              <button type="button" onClick={function(){onSet(null);setErr("");}} style={{fontSize:11.5,fontWeight:600,color:C.earth,background:"#fff",border:"1px solid "+C.gray,borderRadius:"var(--sa-pill)",padding:"0 15px",minHeight:38,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Quitar video</button>
+            </div>
+          </div>
+        )
+        : (
+          <button type="button" onClick={function(){ref.current&&ref.current.click();}} style={{width:"100%",border:"2px dashed color-mix(in srgb, "+C.earth+" 31%, transparent)",background:C.surfaceWarm,borderRadius:12,padding:"16px 14px",cursor:"pointer",fontFamily:"Montserrat,sans-serif",color:C.earth,fontSize:12.5,fontWeight:600,display:"flex",flexDirection:"column",alignItems:"center",gap:5}}>
+            <span>+ Grabar o subir un video</span>
+            <span style={{fontSize:11,fontWeight:400,color:C.taupe,textWrap:"pretty",textAlign:"center",lineHeight:1.5}}>De 10 a 15 segundos, máximo {DANIO_VIDEO_MAX_MB} MB. Para mostrar lo que una foto no explica.</span>
+          </button>
+        )}
+      <input ref={ref} type="file" accept="video/*" style={{display:"none"}} onChange={pick}/>
+      {err&&<div style={{marginTop:8,fontSize:11.5,color:C.red,fontWeight:600,lineHeight:1.6,textWrap:"pretty"}}>{err}</div>}
+    </div>
+  );
+}
+
 function compress(file) {
   return new Promise(function(res) {
     var fr = new FileReader();
@@ -1225,6 +1299,12 @@ async function processMedia(rep) {
       var dobj=Object.assign({},r.danios[di]);
       dobj.fotos  = await upArr(dobj.fotos,  "danio-"+di);
       dobj.fotos2 = await upArr(dobj.fotos2, "danio2-"+di);
+      /* El video va igual que las fotos: base64 fuera, URL de Drive dentro. */
+      if(dobj.video&&dobj.video.data&&String(dobj.video.data).startsWith("data:")){
+        var vext=(String(dobj.video.mime||"").indexOf("quicktime")>=0)?"mov":"mp4";
+        var vurl=await safeUp(dobj.video.data,"danio-video-"+di+"-"+id+"."+vext,dobj.video.mime||"video/mp4");
+        if(vurl&&!String(vurl).startsWith("data:")) dobj.video={url:vurl,mime:dobj.video.mime||"video/mp4",mb:dobj.video.mb||0};
+      }
       nd.push(dobj);
     }
     r.danios=nd;
@@ -1777,14 +1857,14 @@ function LoginField({label,type,value,onChange,ph,err,onEnter,autoFocus}) {
       <div style={{position:"relative",display:"flex",alignItems:"center"}}>
         <input value={value} onChange={function(e){onChange(e.target.value);}} placeholder={ph} type={isPass&&!show?"password":(isPass?"text":type)} autoCapitalize="none" autoCorrect="off" autoFocus={autoFocus} onKeyDown={function(e){if(e.key==="Enter"&&onEnter)onEnter();}}
           style={{width:"100%",boxSizing:"border-box",fontFamily:"Montserrat,sans-serif",fontSize:15,letterSpacing:".04em",color:C.black,padding:"15px 16px",paddingRight:isPass?52:16,background:C.alabaster,border:"1px solid "+(err?C.peach:C.gray),borderRadius:14,outline:"none",transition:"border-color .18s"}}
-          onFocus={function(e){e.target.style.borderColor=C.black;}} onBlur={function(e){e.target.style.borderColor=err?C.peach:C.gray;}}/>
-        {isPass&&<button type="button" onClick={function(){setShow(function(s){return !s;});}} aria-label={show?"Ocultar contraseña":"Ver contraseña"} style={{position:"absolute",right:12,border:"none",background:"transparent",cursor:"pointer",color:C.earth,padding:4,display:"flex"}}><svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.25} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={show?"M3 3l18 18M10.6 10.7a3 3 0 004.2 4.2M9.4 5.7A9.5 9.5 0 0112 5.5c6 0 9.5 6.5 9.5 6.5a16 16 0 01-2.6 3.3M6.2 6.3A16 16 0 002.5 12S6 18.5 12 18.5a9 9 0 003.6-.7":"M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12zM12 15a3 3 0 100-6 3 3 0 000 6z"}></path></svg></button>}
+          onFocus={function(e){e.target.style.borderColor=C.black;e.target.style.boxShadow="var(--sa-focus-ring)";}} onBlur={function(e){e.target.style.borderColor=err?C.peach:C.gray;e.target.style.boxShadow="none";}}/>
+        {isPass&&<button type="button" onClick={function(){setShow(function(s){return !s;});}} aria-label={show?"Ocultar contraseña":"Ver contraseña"} style={{position:"absolute",right:12,border:"none",background:"transparent",cursor:"pointer",color:C.earth,padding:4,display:"flex"}}><svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={show?"M3 3l18 18M10.6 10.7a3 3 0 004.2 4.2M9.4 5.7A9.5 9.5 0 0112 5.5c6 0 9.5 6.5 9.5 6.5a16 16 0 01-2.6 3.3M6.2 6.3A16 16 0 002.5 12S6 18.5 12 18.5a9 9 0 003.6-.7":"M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12zM12 15a3 3 0 100-6 3 3 0 000 6z"}></path></svg></button>}
       </div>
     </label>
   );
 }
 function LoginBtn({onClick,dis,children}) {
-  return <button onClick={onClick} disabled={dis} style={{marginTop:6,width:"100%",border:"none",cursor:dis?"default":"pointer",background:dis?C.gray:C.black,color:C.alabaster,borderRadius:14,padding:"16px",fontFamily:"Montserrat,sans-serif",fontSize:11.5,fontWeight:600,letterSpacing:".24em",textTransform:"uppercase",opacity:dis?.6:1,transition:"opacity .18s",display:"flex",alignItems:"center",justifyContent:"center",gap:10}}><svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.25} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 11V8a5 5 0 0110 0v3M5.5 11h13a1 1 0 011 1v8a1 1 0 01-1 1h-13a1 1 0 01-1-1v-8a1 1 0 011-1z"></path></svg>{children}</button>;
+  return <button onClick={onClick} disabled={dis} style={{marginTop:6,width:"100%",border:"none",cursor:dis?"default":"pointer",background:dis?C.gray:C.black,color:C.alabaster,borderRadius:14,padding:"16px",fontFamily:"Montserrat,sans-serif",fontSize:11.5,fontWeight:600,letterSpacing:".24em",textTransform:"uppercase",opacity:dis?.6:1,transition:"opacity .18s",display:"flex",alignItems:"center",justifyContent:"center",gap:10}}><svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 11V8a5 5 0 0110 0v3M5.5 11h13a1 1 0 011 1v8a1 1 0 01-1 1h-13a1 1 0 01-1-1v-8a1 1 0 011-1z"></path></svg>{children}</button>;
 }
 /* ═══ ONBOARDING — primer ingreso EPI Limpieza interno: define correo de notificaciones + nueva contraseña */
 function OnboardModal({vendor, allVendors, onSvV, onClose}) {
@@ -1821,7 +1901,7 @@ function OnboardModal({vendor, allVendors, onSvV, onClose}) {
     onClose();
   }
 
-  var card={width:"100%",maxWidth:430,background:"#fff",borderRadius:22,padding:"32px 28px",boxShadow:"0 28px 80px rgba(62,63,63,.22)",maxHeight:"92vh",overflowY:"auto"};
+  var card={width:"100%",maxWidth:430,background:"#fff",borderRadius:22,padding:"32px 28px",boxShadow:"var(--sa-shadow-lg)",maxHeight:"92vh",overflowY:"auto"};
   var primaryBtn={width:"100%",border:"none",cursor:"pointer",background:C.black,color:C.alabaster,borderRadius:13,padding:"15px",fontFamily:"Montserrat,sans-serif",fontSize:11.5,fontWeight:600,letterSpacing:".18em",textTransform:"uppercase"};
   var ghostBtn={width:"100%",border:"1.5px solid "+C.gray,cursor:"pointer",background:"#fff",color:C.earth,borderRadius:13,padding:"13px",fontSize:13,fontWeight:600};
   var titleStyle={fontFamily:"'Valky','Cormorant Garamond',serif",fontWeight:400,fontSize:25,lineHeight:1.18,color:C.black,margin:"0 0 8px"};
@@ -1839,7 +1919,7 @@ function OnboardModal({vendor, allVendors, onSvV, onClose}) {
             <h2 style={titleStyle}>¿A qué correo electrónico podemos enviarte las notificaciones?</h2>
             <p style={{fontSize:13,lineHeight:1.6,color:C.earth,margin:"0 0 22px"}}>Este será también el correo con el que iniciarás sesión de ahora en adelante.</p>
             <F label="Correo electrónico"><input type="email" value={email} placeholder="tu@correo.com" onChange={function(e){setEmail(e.target.value);setErr("");}}/></F>
-            {err&&<div style={{fontSize:12,color:C.peach,fontWeight:600,margin:"10px 0 0"}}>⚠ {err}</div>}
+            {err&&<div style={{fontSize:12,color:C.red,fontWeight:600,margin:"10px 0 0"}}>⚠ {err}</div>}
             <div style={{marginTop:22}}><button onClick={goEmail} style={primaryBtn}>Continuar</button></div>
           </>
         )}
@@ -1852,7 +1932,7 @@ function OnboardModal({vendor, allVendors, onSvV, onClose}) {
               <F label="Nueva contraseña"><input type="password" value={pass} placeholder="••••••••" onChange={function(e){setPass(e.target.value);setErr("");}}/></F>
               <F label="Confirma la contraseña"><input type="password" value={pass2} placeholder="••••••••" onChange={function(e){setPass2(e.target.value);setErr("");}}/></F>
             </div>
-            {err&&<div style={{fontSize:12,color:C.peach,fontWeight:600,margin:"10px 0 0"}}>⚠ {err}</div>}
+            {err&&<div style={{fontSize:12,color:C.red,fontWeight:600,margin:"10px 0 0"}}>⚠ {err}</div>}
             <div style={{display:"flex",flexDirection:"column",gap:10,marginTop:22}}>
               <button onClick={goPass} style={primaryBtn}>Continuar</button>
               <button onClick={function(){setErr("");setStep(0);}} style={ghostBtn}>← Atrás</button>
@@ -1917,8 +1997,8 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
 
       {/* Sheets badge + hidden admin gear — top right, fixed */}
       <div style={{position:"fixed",top:14,right:14,display:"flex",alignItems:"center",gap:8,zIndex:200}}>
-        {sheetsOk===false&&<div style={{fontSize:10,fontWeight:700,background:"#F5EDEC",color:"#8a3030",padding:"4px 10px",borderRadius:6,border:"1px solid #DBC8C4",letterSpacing:".06em"}}>⚠ Sin Sheets</div>}
-        {sheetsOk===true&&<div style={{fontSize:10,fontWeight:700,background:"#EDF5EF",color:"#3d6b52",padding:"4px 10px",borderRadius:6,letterSpacing:".06em"}}>● Sheets OK</div>}
+        {sheetsOk===false&&<div style={{fontSize:10,fontWeight:700,background:"#F7E7E4",color:"#C0392B",padding:"4px 10px",borderRadius:6,border:"1px solid #E9C9C2",letterSpacing:".06em"}}>⚠ Sin Sheets</div>}
+        {sheetsOk===true&&<div style={{fontSize:10,fontWeight:700,background:"#E8F2ED",color:"#3d6b52",padding:"4px 10px",borderRadius:6,letterSpacing:".06em"}}>● Sheets OK</div>}
         <button onClick={function(){setShowAdmin(function(p){return !p;});setAdminErr("");setAdminPin2("");setErr("");}} title="Acceso administrador" style={{background:"none",border:"none",cursor:"pointer",padding:"4px",color:C.gray,fontSize:15,lineHeight:1,opacity:.45}}>⚙</button>
       </div>
 
@@ -1928,7 +2008,7 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
         <div style={{position:"relative",zIndex:2}}><img src={LOGO_BADGE} alt="Spacio AM" style={{height:62,width:"auto",display:"block"}}/></div>
         <div style={{position:"relative",zIndex:2,maxWidth:460}}>
           <svg viewBox="0 0 100 100" width={22} height={22} fill={C.peach} aria-hidden="true" style={{display:"block"}}><path d="M50 4 C 52 32, 58 42, 96 50 C 58 58, 52 68, 50 96 C 48 68, 42 58, 4 50 C 42 42, 48 32, 50 4 Z"></path></svg>
-          <p style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontWeight:300,fontStyle:"italic",fontSize:"clamp(26px,3vw,40px)",lineHeight:1.18,color:C.black,margin:"20px 0 0",textWrap:"balance"}}>“Hay espacios en donde sueñas con volver a despertar.”</p>
+          <p style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontWeight:400,fontStyle:"italic",fontSize:"clamp(26px,3vw,40px)",lineHeight:1.18,color:C.black,margin:"20px 0 0",textWrap:"balance"}}>“Hay espacios en donde sueñas con volver a despertar.”</p>
           <div style={{width:38,height:1,background:C.black,margin:"26px 0 14px"}}/>
           <div style={{fontSize:10.5,letterSpacing:".24em",textTransform:"uppercase",color:C.earth,fontWeight:600}}>Spacio AM · Equipo de primera impresión</div>
         </div>
@@ -1947,18 +2027,18 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
               <div style={{display:"flex",flexDirection:"column",gap:18}}>
                 <LoginField label="Correo electrónico" type="email" value={email} onChange={function(v){setEmail(v);setErr("");}} ph="tu@correo.com" err={!!err} onEnter={loginUser} autoFocus/>
                 <LoginField label="Contraseña" type="password" value={pass} onChange={function(v){setPass(v);setErr("");}} ph="••••••••" err={!!err} onEnter={loginUser}/>
-                {err&&<div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.peach,marginTop:-4}}>⚠ {err}</div>}
+                {err&&<div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.red,marginTop:-4}}>⚠ {err}</div>}
                 <LoginBtn onClick={loginUser} dis={!email||!pass}>Ingresar</LoginBtn>
               </div>
             </>
           ):(
             <>
-              <div style={{fontSize:10,fontWeight:700,letterSpacing:".26em",textTransform:"uppercase",color:C.peach,marginBottom:14}}>Acceso administrador</div>
+              <div style={{fontSize:10,fontWeight:700,letterSpacing:".26em",textTransform:"uppercase",color:C.earth,marginBottom:14,display:"flex",alignItems:"center",gap:7}}><span style={{width:6,height:6,borderRadius:999,background:C.attention,flexShrink:0,display:"inline-block"}}/>Acceso administrador</div>
               <h1 style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontWeight:400,fontSize:34,letterSpacing:"-.01em",lineHeight:1.1,color:C.black,margin:0}}>Panel de administración</h1>
               <p style={{fontSize:13,letterSpacing:".03em",lineHeight:1.7,color:C.earth,margin:"12px 0 28px"}}>Ingresa la contraseña de administrador para acceder al panel completo.</p>
               <div style={{display:"flex",flexDirection:"column",gap:18}}>
                 <LoginField label="Contraseña de administrador" type="password" value={adminPin2} onChange={function(v){setAdminPin2(v);setAdminErr("");}} ph="••••••••" err={!!adminErr} onEnter={loginAdmin} autoFocus/>
-                {adminErr&&<div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.peach,marginTop:-4}}>⚠ {adminErr}</div>}
+                {adminErr&&<div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.red,marginTop:-4}}>⚠ {adminErr}</div>}
                 <LoginBtn onClick={loginAdmin} dis={!adminPin2}>Ingresar como admin</LoginBtn>
                 <button onClick={function(){setShowAdmin(false);setAdminErr("");}} style={{background:"none",border:"none",color:C.earth,fontSize:12,cursor:"pointer",letterSpacing:".04em"}}>← Volver al ingreso normal</button>
               </div>
@@ -2000,16 +2080,16 @@ function NotifCfg({prefs, vendors, onSave, readOnly}){
       <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:30,color:C.black,marginBottom:6}}>Notificaciones</div>
       <div style={{fontSize:13,color:C.earth,lineHeight:1.7,marginBottom:18,maxWidth:640}}>Elige qué perfiles reciben cada tipo de correo. El <b style={{color:C.black}}>técnico</b> siempre es la persona del evento (quien hizo la limpieza, pidió el adelanto, etc.).</div>
       <div style={{display:"flex",flexWrap:"wrap",gap:10,marginBottom:22}}>
-        <span style={{fontSize:11.5,color:C.earth,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:100,padding:"6px 13px"}}>Admin principal: <b style={{color:C.black}}>{prinName}</b></span>
-        <span style={{fontSize:11.5,color:C.earth,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:100,padding:"6px 13px"}}>Admin secundarios: <b style={{color:C.black}}>{secCount}</b></span>
-        <span style={{fontSize:11.5,color:C.earth,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:100,padding:"6px 13px"}}>Supervisores: <b style={{color:C.black}}>{supCount}</b></span>
+        <span style={{fontSize:11.5,color:C.earth,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:"var(--sa-pill)",padding:"6px 13px"}}>Admin principal: <b style={{color:C.black}}>{prinName}</b></span>
+        <span style={{fontSize:11.5,color:C.earth,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:"var(--sa-pill)",padding:"6px 13px"}}>Admin secundarios: <b style={{color:C.black}}>{secCount}</b></span>
+        <span style={{fontSize:11.5,color:C.earth,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:"var(--sa-pill)",padding:"6px 13px"}}>Supervisores: <b style={{color:C.black}}>{supCount}</b></span>
       </div>
       {readOnly&&<div style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"12px 15px",fontSize:12.5,color:C.earth,lineHeight:1.6,marginBottom:20}}>Solo el administrador principal ({prinName}) puede modificar esta configuración. La estás viendo en modo lectura.</div>}
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         {NOTIF_META.map(function(m){
           var pf=prefOf(m.id);
           return (
-            <div key={m.id} style={{background:"#fff",border:"1px solid "+C.line,borderRadius:16,padding:"16px 18px",boxShadow:"0 3px 12px rgba(62,63,63,.03)",opacity:readOnly?.85:1}}>
+            <div key={m.id} style={{background:"#fff",border:"1px solid "+C.line,borderRadius:16,padding:"16px 18px",boxShadow:"var(--sa-shadow-xs)",opacity:readOnly?.85:1}}>
               <div style={{fontSize:14.5,fontWeight:700,color:C.black,marginBottom:2}}>{m.label}</div>
               <div style={{fontSize:12,color:C.earth,marginBottom:10}}>{m.desc}</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:"0 18px",borderTop:"1px solid "+C.line,paddingTop:6}}>
@@ -2111,7 +2191,43 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
     try{ notifyQAResult(upd,status,comment,vendors); }catch(_){}
   }
   var alerts    = reps.filter(function(r){return !!alertLvl(r);});
-  var pendingQA = reps.filter(function(r){return isCleaning(r.categoria)&&r.qaStatus==="pendiente";}).length;
+
+  /* ── Las tres alertas del encabezado ── */
+  var _hoyAl = SCHED.hoyGT();
+  /* a) Propiedades con un daño que lleva más de una semana sin programar ni
+        revisar. Se cuentan PROPIEDADES, no reportes: al admin le importa a qué
+        apartamento tiene que ir. */
+  var alertDanosProps = (function(){
+    var set = {};
+    (reps||[]).forEach(function(r){
+      if(!r || !isDanos(r.categoria)) return;
+      /* Los estados reales son pendiente · proceso · resuelto. "En proceso" ya
+         fue revisado por alguien, así que no es una alerta: solo cuenta lo que
+         sigue en pendiente. */
+      if((r.dmgStatus||"pendiente")!=="pendiente") return;
+      var yaProg = !!r.mantProgramado || (schedules||[]).some(function(x){
+        return x && String(x.danoId||"")===String(r.id) && x.estado!=="cancelada";
+      });
+      if(yaProg) return;
+      var f=String(r.fecha||"").slice(0,10);
+      if(!f || SCHED.dias(f,_hoyAl)<=7) return;
+      if(r.propiedad) set[r.propiedad]=1;
+    });
+    return Object.keys(set).length;
+  })();
+  /* b) Técnicos que pidieron revisar una calificación de huésped. */
+  var alertReviews = rcPend(rvCasos||[]).length;
+  /* c) Propiedades sin profunda en más de 60 días. estadoProfundas ya excluye
+        las pausadas y las que tienen las profundas quitadas a propósito. */
+  var alertProfundas = (function(){
+    try{
+      return SCHED.estadoProfundas({
+        hoy:_hoyAl, props:props,
+        historial:(reps||[]).map(function(r){ return {propiedad:r.propiedad, tipo:r.categoria, fecha:r.fecha}; }),
+        programadas:schedules||[]
+      }).filter(function(x){ return x.diasDesde===null || x.diasDesde>60; }).length;
+    }catch(_){ return 0; }
+  })();
   /* Extraer daños embebidos en un reporte de limpieza → reporte de daños independiente */
   function extractDanios(r) {
     var nid=Date.now();
@@ -2130,7 +2246,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
       <GS/>
       {syncing&&<SyncBanner msg={syncMsg}/>}
       {sheetsOk===false&&(
-        <div style={{background:"#F5EDEC",borderBottom:"1px solid #DBC8C4",padding:"10px 20px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+        <div style={{background:"#F7E7E4",borderBottom:"1px solid #E9C9C2",padding:"10px 20px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
           <span style={{fontSize:13,fontWeight:700,color:C.red}}>⚠ Sin conexión a Google Sheets</span>
           <span style={{fontSize:12,color:C.earth}}>Los datos se guardan localmente. Se reintentará automáticamente.</span>
         </div>
@@ -2138,7 +2254,9 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
       {retryQ&&retryQ.length>0&&<RetryBanner retryQ={retryQ} setRetryQ={setRetryQ} reps={reps} setReps={setReps} onSyncing={function(b,m){}}/>}
       <ResponsiveHeader
         tab={tab} setTab={setTab}
-        alertCount={alerts.length} pendingQA={pendingQA} sheetsOk={sheetsOk} adminLabel={adminVendor?vendorDisplay(adminVendor):"Admin"}
+        alertDanos={alertDanosProps} alertReviews={alertReviews} alertProfundas={alertProfundas}
+        onAlert={function(k){ if(k==="prof") setTab("sched"); else setTab("qa"); }}
+        sheetsOk={sheetsOk} adminLabel={adminVendor?vendorDisplay(adminVendor):"Admin"}
         navItems={[["dash","Dashboard","dash"],["form","Formulario","edit"],["sched","Programa","calendar"],["qa","Calidad","star"],["adv","Adelantos","coins"]]}
         onConfig={function(){setTab("cfg");}} configActive={tab==="cfg"}
         onLogout={onLogout}
@@ -2147,7 +2265,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
         wifiVendor={adminVendor?adminVendor.email:""}
       />
 
-      <div style={{display:tab==="dash"?"block":"none"}}><DashView props={props} nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} meEmails={adminVendor?vendorEmailSet(adminVendor):[]} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh} schedules={schedules||[]} onSvSchedules={onSvSchedules} onUpsert={onUpsert} onDelete={onDelete}/></div>
+      <div style={{display:tab==="dash"?"block":"none"}}><DashView props={props} reservas={reservas||[]} nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} meEmails={adminVendor?vendorEmailSet(adminVendor):[]} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh} schedules={schedules||[]} onSvSchedules={onSvSchedules} onUpsert={onUpsert} onDelete={onDelete}/></div>
       <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} myReps={reps} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
       <div style={{display:tab==="sched"?"block":"none"}}>
         <ProgramacionAdmin schedules={schedules||[]} onSvSchedules={onSvSchedules} vendors={vendors||[]} props={props||[]}
@@ -2176,7 +2294,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
 }
 
 /* ─── Dashboard container */
-function DashView({props,nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews,rvCasos,rvIA,reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh,schedules,onSvSchedules,onUpsert,onDelete}) {
+function DashView({props,reservas,nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews,rvCasos,rvIA,reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh,schedules,onSvSchedules,onUpsert,onDelete}) {
   const [sub,setSub] = useState("ops");
   return (
     <div>
@@ -2187,7 +2305,7 @@ function DashView({props,nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews
         ); })}
       </div>
       <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} props={props} vendors={vendors} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} adelantos={adelantos} onMarkPaidBatch={onMarkPaidBatch} onSelect={onSelect} onMarkPaid={onMarkPaid} onRefresh={onRefresh} schedules={schedules||[]} onSvSchedules={onSvSchedules} onUpsert={onUpsert} onDelete={onDelete}/></div>
-      <div style={{display:sub==="exec"?"block":"none"}}><ExecDash reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos}/></div>
+      <div style={{display:sub==="exec"?"block":"none"}}><ExecDash reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos} props={props} reservas={reservas||[]} schedules={schedules||[]} onSvSchedules={onSvSchedules} onUpsert={onUpsert}/></div>
       {/* Historial de pagos: el admin principal ve todos los comprobantes; un admin
           secundario solo los suyos, igual que un técnico. */}
       <div style={{display:sub==="pagos"?"block":"none"}}><PagosHistory pagos={pagos} vendors={vendors} company={company} reps={reps} isAdmin={canNom} meEmails={canNom?null:meEmails} onSvPagos={canNom?onSvPagos:null}/></div>
@@ -2216,7 +2334,7 @@ function MultiAptoPicker({options, value, onChange, baseStyle, activeStyle}){
       {open&&(
         <>
           <div onClick={function(){setOpen(false);}} style={{position:"fixed",inset:0,zIndex:60}}/>
-          <div style={{position:"absolute",top:"calc(100% + 5px)",left:0,zIndex:61,width:280,maxWidth:"80vw",background:"#fff",border:"1px solid "+C.gray,borderRadius:12,boxShadow:"0 18px 50px rgba(62,63,63,.16)",padding:10}}>
+          <div style={{position:"absolute",top:"calc(100% + 5px)",left:0,zIndex:61,width:280,maxWidth:"80vw",background:"#fff",border:"1px solid "+C.gray,borderRadius:12,boxShadow:"var(--sa-shadow-md)",padding:10}}>
             <input autoFocus placeholder="Buscar apartamento…" value={q} onChange={function(e){setQ(e.target.value);}} style={{width:"100%",boxSizing:"border-box",border:"1px solid "+C.gray,borderRadius:8,padding:"7px 9px",fontSize:12,fontFamily:"Montserrat,sans-serif",outline:"none",marginBottom:8,color:C.black}}/>
             <div style={{maxHeight:250,overflowY:"auto",display:"flex",flexDirection:"column",gap:1}}>
               {lista.length===0&&<div style={{fontSize:11.5,color:C.taupe,padding:"8px 4px"}}>Sin coincidencias.</div>}
@@ -2382,7 +2500,7 @@ function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete, s
               </select>
               <button onClick={function(){reasignar(r,tx);}} style={Object.assign({},BTN,{background:C.black,color:"#fff",border:"none",fontWeight:700})}>Reasignar</button>
             </div>
-            <button onClick={function(){eliminar(r);}} style={Object.assign({},BTN,{alignSelf:"flex-start",color:C.red,border:"1px solid #DBC8C4",background:"#F5EDEC",fontWeight:700})}>Eliminar formulario</button>
+            <button onClick={function(){eliminar(r);}} style={Object.assign({},BTN,{alignSelf:"flex-start",color:C.red,border:"1px solid #E9C9C2",background:"#F7E7E4",fontWeight:700})}>Eliminar formulario</button>
           </div>
         )}
       </div>
@@ -2390,14 +2508,15 @@ function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete, s
   }
 
   return (
-    <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:16,boxShadow:"0 4px 16px rgba(62,63,63,.05)",overflow:"hidden",marginBottom:14}}>
+    <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:16,boxShadow:"var(--sa-shadow-sm)",overflow:"hidden",marginBottom:14}}>
       <button onClick={function(){setAbierto(!abierto);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"15px 18px",background:"none",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"Montserrat,sans-serif"}}>
         <span style={{minWidth:0}}>
           <span style={{display:"block",fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Control</span>
           <span style={{display:"block",fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:19,color:C.black,marginTop:4}}>Programación vs. formularios</span>
         </span>
         <span style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-          <span style={{fontSize:22,fontWeight:600,color:total?C.red:C.green,fontVariantNumeric:"tabular-nums"}}>{total}</span>
+          {/* Minimizado interesa el hallazgo que cuesta dinero: los duplicados. */}
+          <span title={dupCount+" duplicado"+(dupCount!==1?"s":"")+" · "+total+" hallazgo"+(total!==1?"s":"")+" en total"} style={{fontSize:22,fontWeight:600,color:dupCount?C.red:C.green,fontVariantNumeric:"tabular-nums"}}>{dupCount}</span>
           <span style={{fontSize:11,color:C.taupe}}>{abierto?"▴":"▾"}</span>
         </span>
       </button>
@@ -2410,18 +2529,18 @@ function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete, s
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:14,alignItems:"center"}}>
             {!rango&&[7,14,30].map(function(d){
               var a=dias===d;
-              return <button key={d} onClick={function(){setDias(d);}} style={{fontSize:11,fontWeight:a?700:600,padding:"6px 12px",borderRadius:100,border:"1px solid "+(a?C.black:C.gray),background:a?C.black:"#fff",color:a?"#fff":C.earth,cursor:"pointer"}}>{d} días</button>;
+              return <button key={d} onClick={function(){setDias(d);}} style={{fontSize:11,fontWeight:a?700:600,padding:"6px 12px",borderRadius:"var(--sa-pill)",border:"1px solid "+(a?C.black:C.gray),background:a?C.black:"#fff",color:a?"#fff":C.earth,cursor:"pointer"}}>{d} días</button>;
             })}
             <span style={{marginLeft:"auto",display:"flex",gap:6}}>
               {[["A","Sin formulario · "+sinForm.length],["B","Sin programación · "+huerfanos.length],["C","Duplicados · "+dupCount]].map(function(it){
                 var a=tab===it[0];
-                return <button key={it[0]} onClick={function(){setTab(it[0]);}} style={{fontSize:11,fontWeight:a?700:600,padding:"6px 12px",borderRadius:100,border:"1px solid "+(a?C.black:C.gray),background:a?C.beige:"#fff",color:a?C.black:C.earth,cursor:"pointer"}}>{it[1]}</button>;
+                return <button key={it[0]} onClick={function(){setTab(it[0]);}} style={{fontSize:11,fontWeight:a?700:600,padding:"6px 12px",borderRadius:"var(--sa-pill)",border:"1px solid "+(a?C.black:C.gray),background:a?C.beige:"#fff",color:a?C.black:C.earth,cursor:"pointer"}}>{it[1]}</button>;
               })}
             </span>
           </div>
 
           {tab==="A"&&(sinForm.length===0
-            ? <div style={{padding:"14px",borderRadius:10,background:"#EDF5EF",fontSize:12.5,color:C.green,fontWeight:600}}>✓ Toda limpieza programada tiene su formulario.</div>
+            ? <div style={{padding:"14px",borderRadius:10,background:"#E8F2ED",fontSize:12.5,color:C.green,fontWeight:600}}>✓ Toda limpieza programada tiene su formulario.</div>
             : <div style={{display:"flex",flexDirection:"column",gap:9}}>
                 {sinForm.map(function(x){
                   var em=String(x.s.vendorEmail||"").toLowerCase();
@@ -2433,7 +2552,7 @@ function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete, s
                           <div style={{fontSize:13,fontWeight:700,color:C.black}}>{x.s.propiedad}</div>
                           <div style={{fontSize:11,color:C.earth,marginTop:3}}>{fmtDate(x.f)} · {v?vendorDisplay(v):em||"sin técnico"} · {x.s.tipo||"Limpieza"}</div>
                         </div>
-                        <span style={{fontSize:9.5,fontWeight:700,color:C.red,letterSpacing:".08em",textTransform:"uppercase",whiteSpace:"nowrap"}}>Sin formulario</span>
+                        <span style={{fontSize:9.5,fontWeight:700,color:C.attentionText,letterSpacing:".08em",textTransform:"uppercase",whiteSpace:"nowrap"}}>Sin formulario</span>
                       </div>
                       {x.cand.length>0&&(
                         <div style={{marginTop:10,borderTop:"1px dashed "+C.gray,paddingTop:10}}>
@@ -2459,7 +2578,7 @@ function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete, s
           )}
 
           {tab==="C"&&(dupGrupos.length===0
-            ? <div style={{padding:"14px",borderRadius:10,background:"#EDF5EF",fontSize:12.5,color:C.green,fontWeight:600}}>✓ Ningún apartamento tiene dos formularios el mismo día.</div>
+            ? <div style={{padding:"14px",borderRadius:10,background:"#E8F2ED",fontSize:12.5,color:C.green,fontWeight:600}}>✓ Ningún apartamento tiene dos formularios el mismo día.</div>
             : <div style={{display:"flex",flexDirection:"column",gap:9}}>
                 {dupGrupos.map(function(g){
                   return (
@@ -2469,12 +2588,12 @@ function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete, s
                           <div style={{fontSize:13,fontWeight:700,color:C.black}}>{g.propiedad}</div>
                           <div style={{fontSize:11,color:C.earth,marginTop:3}}>{fmtDate(g.fecha)} · {g.lista.length} formularios · Q{g.monto.toFixed(2)} en total</div>
                         </div>
-                        <span style={{fontSize:9.5,fontWeight:700,color:C.red,letterSpacing:".08em",textTransform:"uppercase",whiteSpace:"nowrap"}}>Duplicado</span>
+                        <span style={{fontSize:9.5,fontWeight:700,color:C.attentionText,letterSpacing:".08em",textTransform:"uppercase",whiteSpace:"nowrap"}}>Duplicado</span>
                       </div>
                       <div style={{marginTop:10,borderTop:"1px dashed "+C.gray,paddingTop:10,display:"flex",flexDirection:"column",gap:7}}>
                         {g.lista.map(function(r,i){
                           return (
-                            <div key={r.id} style={{background:"#fff",border:"1px solid "+(i===0?C.line:"#DBC8C4"),borderRadius:10,padding:"10px 12px"}}>
+                            <div key={r.id} style={{background:"#fff",border:"1px solid "+(i===0?C.line:"#E9C9C2"),borderRadius:10,padding:"10px 12px"}}>
                               <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap",alignItems:"baseline"}}>
                                 <div style={{fontSize:12,color:C.black,fontWeight:600}}>{r.categoria} · {tecOf(r)}</div>
                                 <div style={{fontSize:11,color:C.earth}}>
@@ -2489,7 +2608,7 @@ function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete, s
                           );
                         })}
                       </div>
-                      <div style={{marginTop:9,fontSize:10.5,color:C.taupe,lineHeight:1.6,textWrap:"pretty"}}>Revisa si de verdad hubo dos limpiezas. Si fue un reenvío, elimínalo o muévelo al día que le corresponde antes de pagar.</div>
+                      <div style={{marginTop:9,fontSize:12,color:C.taupe,lineHeight:1.6,textWrap:"pretty"}}>Revisa si de verdad hubo dos limpiezas. Si fue un reenvío, elimínalo o muévelo al día que le corresponde antes de pagar.</div>
                     </div>
                   );
                 })}
@@ -2497,7 +2616,7 @@ function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete, s
           )}
 
           {tab==="B"&&(huerfanos.length===0
-            ? <div style={{padding:"14px",borderRadius:10,background:"#EDF5EF",fontSize:12.5,color:C.green,fontWeight:600}}>✓ Todo formulario entregado tiene su limpieza programada.</div>
+            ? <div style={{padding:"14px",borderRadius:10,background:"#E8F2ED",fontSize:12.5,color:C.green,fontWeight:600}}>✓ Todo formulario entregado tiene su limpieza programada.</div>
             : <div style={{display:"flex",flexDirection:"column",gap:9}}>
                 {huerfanos.map(function(r){
                   return (
@@ -2509,7 +2628,7 @@ function ControlProgFormularios({schedules, reps, vendors, onUpsert, onDelete, s
                         </div>
                         <span style={{fontSize:9.5,fontWeight:700,color:C.orange,letterSpacing:".08em",textTransform:"uppercase",whiteSpace:"nowrap"}}>Sin programación</span>
                       </div>
-                      {esAjusteSinEstandarizar(r)&&<div style={{marginTop:7,display:"inline-block",fontSize:9.5,fontWeight:700,color:"#8a6b2f",background:"#F7EFE2",border:"1px solid #E3D5B8",borderRadius:100,padding:"3px 9px",letterSpacing:".06em",textTransform:"uppercase"}}>Ajuste sin estandarizar</div>}
+                      {esAjusteSinEstandarizar(r)&&<div style={{marginTop:7,display:"inline-block",fontSize:9.5,fontWeight:700,color:"#8a6b2f",background:"#F5EBE5",border:"1px solid #E3D5C8",borderRadius:"var(--sa-pill)",padding:"3px 9px",letterSpacing:".06em",textTransform:"uppercase"}}>Ajuste sin estandarizar</div>}
                       <AccionesForm r={r}/>
                     </div>
                   );
@@ -2809,8 +2928,8 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
               </button>
             )}
             <button onClick={onRefresh} title="Actualizar" style={{padding:"7px 11px",borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:15,cursor:"pointer",fontWeight:600,lineHeight:1}}>↻</button>
-            <div style={{display:"flex",background:C.surfaceWarm,borderRadius:100,overflow:"hidden",border:"1px solid "+C.line,padding:2,gap:2}}>
-              {[["table","Lista","list"],["cal","Cal","calendar"]].map(function(it){ var k=it[0],l=it[1],ic=it[2]; return <button key={k} onClick={function(){setView(k);}} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 13px",borderRadius:100,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:view===k?C.black:"transparent",color:view===k?"#fff":C.earth,transition:"all .2s",whiteSpace:"nowrap"}}><Icon name={ic} size={14} stroke={view===k?"#fff":C.earth}/>{l}</button>; })}
+            <div style={{display:"flex",background:C.surfaceWarm,borderRadius:"var(--sa-pill)",overflow:"hidden",border:"1px solid "+C.line,padding:2,gap:2}}>
+              {[["table","Lista","list"],["cal","Cal","calendar"]].map(function(it){ var k=it[0],l=it[1],ic=it[2]; return <button key={k} onClick={function(){setView(k);}} style={{display:"flex",alignItems:"center",gap:6,padding:"0 15px",borderRadius:"var(--sa-pill)",minHeight:38,border:"none",fontSize:11.5,fontWeight:600,cursor:"pointer",background:view===k?C.black:"transparent",color:view===k?"#fff":C.earth,transition:"all .2s",whiteSpace:"nowrap"}}><Icon name={ic} size={14} stroke={view===k?"#fff":C.earth}/>{l}</button>; })}
             </div>
           </div>
         </div>
@@ -2860,7 +2979,7 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
             {fAptos.length>1&&(
               <div style={{marginTop:10,display:"flex",gap:6,flexWrap:"wrap"}}>
                 {fAptos.map(function(n){
-                  return <span key={n} style={{display:"inline-flex",alignItems:"center",gap:6,background:C.beige,border:"1px solid "+C.gray,borderRadius:100,padding:"4px 10px",fontSize:11,color:C.black,fontWeight:600}}>{n}<button onClick={function(){setFAptos(fAptos.filter(function(x){return x!==n;}));}} style={{background:"none",border:"none",color:C.earth,cursor:"pointer",fontSize:13,lineHeight:1,padding:0}}>×</button></span>;
+                  return <span key={n} style={{display:"inline-flex",alignItems:"center",gap:6,background:C.beige,border:"1px solid "+C.gray,borderRadius:"var(--sa-pill)",padding:"4px 10px",fontSize:11,color:C.black,fontWeight:600}}>{n}<button onClick={function(){setFAptos(fAptos.filter(function(x){return x!==n;}));}} style={{background:"none",border:"none",color:C.earth,cursor:"pointer",fontSize:13,lineHeight:1,padding:0}}>×</button></span>;
                 })}
               </div>
             )}
@@ -2870,7 +2989,7 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
 
         {/* Bulk paid action — only shows when there are pending reps */}
         {fReps.filter(function(r){return !r.paid&&isPayable(r,vendors);}).length>0&&(
-          <div style={{background:"#EDF5EF",borderRadius:8,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <div style={{background:"#E8F2ED",borderRadius:8,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
             <div style={{fontSize:12.5,color:C.green,fontWeight:600}}>
               {fReps.filter(function(r){return !r.paid&&isPayable(r,vendors);}).length} trabajo{fReps.filter(function(r){return !r.paid;}).length!==1?"s":""} pendientes de pago{selGroup?" de "+selGroup.label:""}
             </div>
@@ -2884,7 +3003,7 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
         )}
       </div>
 
-      {fReps.length===0&&<div style={{textAlign:"center",padding:"52px 20px",color:C.earth,fontSize:14}}>No hay trabajos con estos filtros.<br/><button onClick={reset} style={{marginTop:14,padding:"9px 22px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:13,fontWeight:600,cursor:"pointer"}}>Limpiar filtros</button></div>}
+      {fReps.length===0&&<div style={{textAlign:"center",padding:"52px 20px",color:C.earth,fontSize:14}}>No hay trabajos con estos filtros.<br/><button onClick={reset} style={{marginTop:14,padding:"9px 22px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:13,fontWeight:600,cursor:"pointer"}}>Limpiar filtros</button></div>}
       {fReps.length>0&&(view==="table"
         ?<TableView reps={shown} total={fReps.length} visible={shown.length} showAll={showAll} onToggleAll={function(){setShowAll(function(p){return !p;});}} onSelect={onSelect} onMarkPaid={onMarkPaid} vendors={vendors}/>
         :<CalView   reps={fReps} onSelect={onSelect} onMarkPaid={onMarkPaid} vendors={vendors}/>
@@ -2907,9 +3026,9 @@ function MobileJobList({reps,onSelect,onMarkPaid,vendors}) {
         var pagable=!isDanos(r.categoria)&&(r.total||autoTarifa(r.reportadoPor||"",vendors).tarifa);
         return (
           <div key={r.id} onClick={function(){onSelect(r);}}
-            style={{background:"#fff",border:"1px solid "+(al?ALT[al].clr+"55":C.line),borderLeft:"3px solid "+(al?ALT[al].clr:b.tx),borderRadius:14,padding:"13px 14px",cursor:"pointer",boxShadow:"0 2px 10px rgba(62,63,63,.04)"}}>
+            style={{background:"#fff",border:"1px solid "+(al?ALT[al].clr+"55":C.line),borderLeft:"3px solid "+(al?ALT[al].clr:b.tx),borderRadius:14,padding:"13px 14px",cursor:"pointer",boxShadow:"var(--sa-shadow-xs)"}}>
             <div style={{display:"flex",alignItems:"baseline",gap:10,justifyContent:"space-between"}}>
-              <span style={{padding:"3px 9px",borderRadius:100,fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",background:b.bg,color:b.tx,whiteSpace:"nowrap"}}>{r.categoria}</span>
+              <span style={{padding:"3px 9px",borderRadius:"var(--sa-pill)",fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",background:b.bg,color:b.tx,whiteSpace:"nowrap"}}>{r.categoria}</span>
               <span style={{fontSize:11,color:C.taupe,whiteSpace:"nowrap"}}>{fmtDate(r.fecha)}</span>
             </div>
             <div style={{fontSize:15,fontWeight:600,color:C.black,lineHeight:1.35,marginTop:9,textWrap:"pretty"}}>{r.propiedad}</div>
@@ -2925,14 +3044,14 @@ function MobileJobList({reps,onSelect,onMarkPaid,vendors}) {
                 <div style={{fontSize:17,fontWeight:700,color:isDanos(r.categoria)?C.taupe:C.black,fontVariantNumeric:"tabular-nums"}}>{isDanos(r.categoria)?"Sin pago":(r.total?"Q"+r.total:"—")}</div>
                 <div style={{marginTop:5}} onClick={function(e){e.stopPropagation();}}>
                   {isDanos(r.categoria)
-                    ? <span style={{padding:"5px 11px",borderRadius:100,fontSize:10,fontWeight:700,letterSpacing:".08em",background:"#F0EDE8",color:C.earth}}>SEGUIMIENTO</span>
+                    ? <span style={{padding:"5px 11px",borderRadius:"var(--sa-pill)",fontSize:10,fontWeight:700,letterSpacing:".08em",background:"#F0EDE8",color:C.earth}}>SEGUIMIENTO</span>
                     : (pagable
-                      ? <button onClick={function(e){e.stopPropagation();onMarkPaid(r.id,!r.paid);}} style={{padding:"7px 13px",minHeight:34,borderRadius:100,border:"none",fontSize:11.5,fontWeight:700,cursor:"pointer",background:r.paid?"#EDF5EF":"#F5EDEC",color:r.paid?C.green:C.red,whiteSpace:"nowrap"}}>{r.paid?"✓ Pagado":"● Pendiente"}</button>
+                      ? <button onClick={function(e){e.stopPropagation();onMarkPaid(r.id,!r.paid);}} style={{padding:"7px 13px",minHeight:34,borderRadius:"var(--sa-pill)",border:"none",fontSize:11.5,fontWeight:700,cursor:"pointer",background:r.paid?"#E8F2ED":"#F7E7E4",color:r.paid?C.green:C.red,whiteSpace:"nowrap"}}>{r.paid?"✓ Pagado":"● Pendiente"}</button>
                       : <span style={{fontSize:12,color:C.gray}}>—</span>)}
                 </div>
               </div>
             </div>
-            {r.pagadoPor&&!isDanos(r.categoria)&&<div style={{marginTop:9}}><span style={{fontSize:9.5,fontWeight:700,letterSpacing:".08em",padding:"3px 9px",borderRadius:100,background:r.pagadoPor==="Spacio AM"?"#EEF3FA":"#FEF0EC",color:r.pagadoPor==="Spacio AM"?"#4a7fa5":"#E9826A"}}>Paga {r.pagadoPor}</span></div>}
+            {r.pagadoPor&&!isDanos(r.categoria)&&<div style={{marginTop:9}}><span style={{fontSize:9.5,fontWeight:700,letterSpacing:".08em",padding:"3px 9px",borderRadius:"var(--sa-pill)",background:r.pagadoPor==="Spacio AM"?"#E8EDF3":"#FEF0EC",color:r.pagadoPor==="Spacio AM"?"#3B6691":"#E9826A"}}>Paga {r.pagadoPor}</span></div>}
           </div>
         );
       })}
@@ -2972,8 +3091,8 @@ function TableView({reps,total,visible,showAll,onToggleAll,onSelect,onMarkPaid,v
               <div style={{fontSize:13,color:C.black,lineHeight:1.55,paddingRight:12}}>{r.descripcion}</div>
               <QuickEditTotal rep={r} vendors={vendors} onSave={function(val){onMarkPaid(Object.assign({},r,{total:val}));}}/>
               <div onClick={function(e){e.stopPropagation();}} style={{display:"flex",flexDirection:"column",gap:5}}>
-                {isDanos(r.categoria) ? <span style={{padding:"4px 9px",borderRadius:100,fontSize:9.5,fontWeight:700,letterSpacing:".08em",background:"#F0EDE8",color:C.earth,whiteSpace:"nowrap"}}>SEGUIMIENTO</span> : (r.total||autoTarifa(r.reportadoPor||"",vendors).tarifa) ? <button onClick={function(e){e.stopPropagation();onMarkPaid(r.id,!r.paid);}} style={{padding:"5px 10px",borderRadius:100,border:"none",fontSize:11,fontWeight:700,cursor:"pointer",background:r.paid?"#EDF5EF":"#F5EDEC",color:r.paid?C.green:C.red,whiteSpace:"nowrap"}}>{r.paid?"✓ Pagado":"● Pendiente"}</button> : <span style={{fontSize:12,color:C.gray}}>—</span>}
-                {r.pagadoPor&&<span style={{fontSize:9.5,fontWeight:700,letterSpacing:".08em",padding:"2px 7px",borderRadius:100,whiteSpace:"nowrap",background:r.pagadoPor==="Spacio AM"?"#EEF3FA":"#FEF0EC",color:r.pagadoPor==="Spacio AM"?"#4a7fa5":"#E9826A"}}>{r.pagadoPor}</span>}
+                {isDanos(r.categoria) ? <span style={{padding:"4px 9px",borderRadius:"var(--sa-pill)",fontSize:9.5,fontWeight:700,letterSpacing:".08em",background:"#F0EDE8",color:C.earth,whiteSpace:"nowrap"}}>SEGUIMIENTO</span> : (r.total||autoTarifa(r.reportadoPor||"",vendors).tarifa) ? <button onClick={function(e){e.stopPropagation();onMarkPaid(r.id,!r.paid);}} style={{padding:"5px 10px",borderRadius:"var(--sa-pill)",border:"none",fontSize:11,fontWeight:700,cursor:"pointer",background:r.paid?"#E8F2ED":"#F7E7E4",color:r.paid?C.green:C.red,whiteSpace:"nowrap"}}>{r.paid?"✓ Pagado":"● Pendiente"}</button> : <span style={{fontSize:12,color:C.gray}}>—</span>}
+                {r.pagadoPor&&<span style={{fontSize:9.5,fontWeight:700,letterSpacing:".08em",padding:"2px 7px",borderRadius:"var(--sa-pill)",whiteSpace:"nowrap",background:r.pagadoPor==="Spacio AM"?"#E8EDF3":"#FEF0EC",color:r.pagadoPor==="Spacio AM"?"#3B6691":"#E9826A"}}>{r.pagadoPor}</span>}
               </div>
             </div>
           );
@@ -3021,7 +3140,7 @@ function CalView({reps,onSelect,onMarkPaid,vendors}) {
           if (!cell) return <div key={idx}/>;
           var isT=cell.ds===today, hw=cell.reps.length>0, ha=cell.reps.some(function(r){return !!alertLvl(r);}), isO=dayP&&dayP.date===cell.ds;
           return (
-            <div key={idx} onClick={function(){if(hw)setDayP(isO?null:{date:cell.ds,reps:cell.reps});}} style={{minHeight:62,borderRadius:10,padding:"8px 7px",background:isO?C.black:(hw?(ha?"#F5EDEC":"#fff"):C.surfaceWarm),border:"1.5px solid "+(isT?C.peach:(isO?C.black:(hw?C.gray:"transparent"))),cursor:hw?"pointer":"default",transition:"all .18s"}}>
+            <div key={idx} onClick={function(){if(hw)setDayP(isO?null:{date:cell.ds,reps:cell.reps});}} style={{minHeight:62,borderRadius:10,padding:"8px 7px",background:isO?C.black:(hw?(ha?"#F7E7E4":"#fff"):C.surfaceWarm),border:"1.5px solid "+(isT?C.peach:(isO?C.black:(hw?C.gray:"transparent"))),cursor:hw?"pointer":"default",transition:"all .18s"}}>
               <div style={{fontSize:12,fontWeight:isT?700:400,color:isO?"#fff":(isT?C.peach:C.black),marginBottom:4}}>{cell.d}</div>
               {hw&&<div style={{display:"flex",flexWrap:"wrap",gap:2,marginBottom:2}}>{cell.reps.slice(0,4).map(function(r,j){var b=BADGE[r.categoria]||BADGE["Mantenimiento"];var al=alertLvl(r);return <div key={j} style={{width:7,height:7,borderRadius:"50%",background:al?ALT[al].clr:(isO?"rgba(255,255,255,.6)":b.tx)}}/>;})}</div>}
               {hw&&<div style={{fontSize:9.5,color:isO?"rgba(255,255,255,.55)":C.earth}}>{cell.reps.length} trab.</div>}
@@ -3043,7 +3162,7 @@ function CalView({reps,onSelect,onMarkPaid,vendors}) {
               </div>
               <div style={{textAlign:"right",flexShrink:0,marginLeft:14}}>
                 <QuickEditTotal rep={r} vendors={vendors} onSave={function(val){onMarkPaid(Object.assign({},r,{total:val}));}} />
-                {r.total&&<div style={{fontSize:10,fontWeight:700,color:r.paid?C.green:C.red,marginTop:3}}>{r.paid?"✓ Pagado":"● Pendiente"}</div>}
+                {r.total&&<div style={{fontSize:10,fontWeight:700,color:r.paid?C.green:C.attentionText,marginTop:3}}>{r.paid?"✓ Pagado":"● Pendiente"}</div>}
               </div>
             </div>
           );})}
@@ -3055,7 +3174,7 @@ function CalView({reps,onSelect,onMarkPaid,vendors}) {
 }
 
 /* ─── Executive Dashboard */
-function ExecDash({reps,vendors,reviews,rvCasos}) {
+function ExecDash({reps,vendors,reviews,rvCasos,props,reservas,schedules,onSvSchedules,onUpsert}) {
   const [fProp,  setFProp]   = useState("Todas");
   const [fDesde, setFDesde]  = useState("");
   const [fHasta, setFHasta]  = useState("");
@@ -3082,12 +3201,6 @@ function ExecDash({reps,vendors,reviews,rvCasos}) {
     if(!tMap[k]) tMap[k]={label:k,count:0}; tMap[k].count++;
   });
   var tData    = Object.values(tMap).sort(function(a,b){return a.label.localeCompare(b.label);});
-  var pRank    = uniq(base.map(function(r){return r.propiedad;}).filter(Boolean)).map(function(p){
-    var pr=base.filter(function(r){return r.propiedad===p;});
-    return {name:p,count:pr.length,total:pr.reduce(function(s,r){return s+(isDanos(r.categoria)?0:parseFloat(r.total||0));},0),pending:pr.filter(function(r){return r.total&&!r.paid&&!isDanos(r.categoria);}).length};
-  }).sort(function(a,b){return b.count-a.count;});
-  var maxC     = pRank.length>0 ? pRank[0].count : 1;
-  var RED_T    = 3;
   function execT(r){ return isDanos(r.categoria)?0:(parseFloat(r.total||0)||0); }
   var tFact    = fil.reduce(function(s,r){return s+execT(r);},0);
   var tCobr    = fil.filter(function(r){return r.paid;}).reduce(function(s,r){return s+execT(r);},0);
@@ -3150,7 +3263,7 @@ function ExecDash({reps,vendors,reviews,rvCasos}) {
           <button onClick={exportDrive} disabled={exp} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 14px",borderRadius:9,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:600,cursor:exp?"not-allowed":"pointer"}}>📁 {exp?"Exportando…":"Exportar a Drive"}</button>
         </div>
       </div>
-      {dSt&&<div style={{marginBottom:16,padding:"10px 14px",borderRadius:9,fontSize:13,fontWeight:600,background:dSt.ok?"#EDF5EF":"#F5EDEC",color:dSt.ok?C.green:C.red}}>{dSt.msg}</div>}
+      {dSt&&<div style={{marginBottom:16,padding:"10px 14px",borderRadius:9,fontSize:13,fontWeight:600,background:dSt.ok?"#E8F2ED":"#F7E7E4",color:dSt.ok?C.green:C.red}}>{dSt.msg}</div>}
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:24}}>
         {[{l:"Trabajos",v:fil.length},{l:"Facturado",v:"Q"+tFact.toLocaleString(),a:true},{l:"Cobrado",v:"Q"+tCobr.toLocaleString(),g:true},{l:"Pendiente",v:"Q"+tPend.toLocaleString(),w:tPend>0}].map(function(s,i){
@@ -3189,47 +3302,23 @@ function ExecDash({reps,vendors,reviews,rvCasos}) {
         </div>
       </div>
 
-      <div style={{background:"#fff",borderRadius:14,padding:"18px",border:"1px solid "+C.line}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <div style={{fontSize:10.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Actividad por propiedad</div>
-          {pRank.filter(function(p){return p.count>=RED_T;}).length>0&&<span style={{fontSize:11,fontWeight:700,color:C.red,background:"#F5EDEC",padding:"3px 10px",borderRadius:100}}>🔴 {pRank.filter(function(p){return p.count>=RED_T;}).length} con alta actividad</span>}
-        </div>
-        {pRank.length===0&&<EmptyChart label="Sin datos en este período"/>}
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {pRank.map(function(p,i){
-            var pct=(p.count/maxC)*100; var isR=p.count>=RED_T;
-            return (
-              <div key={i}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    {isR&&<span style={{fontSize:14}}>🔴</span>}
-                    <span style={{fontSize:13,fontWeight:isR?700:500,color:isR?C.red:C.black}}>{p.name}</span>
-                  </div>
-                  <div style={{display:"flex",gap:14,alignItems:"center",flexShrink:0,marginLeft:12}}>
-                    <span style={{fontSize:12,color:C.earth}}>{p.count} trabajo{p.count!==1?"s":""}</span>
-                    {p.total>0&&<span style={{fontSize:12,fontWeight:600,color:C.black}}>{"Q"+p.total.toLocaleString()}</span>}
-                    {p.pending>0&&<span style={{fontSize:11,fontWeight:700,color:C.red,background:"#F5EDEC",padding:"2px 7px",borderRadius:100}}>{p.pending} pend.</span>}
-                  </div>
-                </div>
-                <div style={{background:C.beige,borderRadius:100,height:6}}><div style={{width:pct+"%",height:"100%",borderRadius:100,background:isR?C.red:C.taupe,transition:"width .4s"}}/></div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
 
-      {/* ── Comparativo de técnicos · últimas 8 semanas */}
+      {/* ── Comparativo de técnicos */}
       <TechCompare8w reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos}/>
 
-      {/* ── Pagos semanales de limpieza */}
-      <PagosLimpieza reps={reps} vendors={vendors}/>
+      {/* ── Análisis de limpiezas profundas y de daños ── */}
+      <ProfundasAnalisis reps={reps} props={props} schedules={schedules}/>
+      <DanosAnalisis reps={reps} props={props} vendors={vendors} reservas={reservas} schedules={schedules} onSvSchedules={onSvSchedules} onUpsert={onUpsert}/>
 
     </div>
   );
 }
 function EmptyChart({label}) { return <div style={{height:160,display:"flex",alignItems:"center",justifyContent:"center",color:C.earth,fontSize:13}}>{label||"Sin datos"}</div>; }
 
-/* ─── Pagos semanales de limpieza */
+/* ─── Pagos semanales de limpieza — YA NO SE MUESTRA.
+   Se quitó del Dashboard Ejecutivo el 18 ago 2026 por pedido del usuario. La
+   función se deja sin llamar por si el bloque se quiere recuperar; lo que se
+   paga por semana ya se ve en Historial de pagos y en Planilla. */
 function PagosLimpieza({reps,vendors}) {
   const [semana,setSemana] = useState(0); /* 0=esta semana, 1=semana pasada, etc */
   var CATS_LIMPIEZA = ["Limpieza tradicional","Limpieza profunda"];
@@ -3307,7 +3396,7 @@ function PagosLimpieza({reps,vendors}) {
                 <div style={{textAlign:"center",fontSize:12,fontWeight:700,color:C.green}}>{row.paid>0?"Q"+row.paid.toLocaleString():"—"}</div>
                 <div style={{textAlign:"center"}}>
                   {row.pendiente>0
-                    ?<span style={{fontSize:12,fontWeight:700,color:C.red,background:"#F5EDEC",padding:"3px 8px",borderRadius:100}}>Q{row.pendiente.toLocaleString()}</span>
+                    ?<span style={{fontSize:12,fontWeight:700,color:C.attentionText,background:"#F8ECE9",padding:"3px 8px",borderRadius:"var(--sa-pill)"}}>Q{row.pendiente.toLocaleString()}</span>
                     :<span style={{fontSize:12,fontWeight:700,color:C.green}}>✓ Al día</span>
                   }
                 </div>
@@ -3401,8 +3490,8 @@ function SupervisionRepForm({vendors,onSubmit,defaultVendor,onBack,myReps}) {
       </div>
       <F label="Fecha"><input type="date" value={fecha} onChange={function(e){setFecha(e.target.value);setErr("");}}/></F>
       <F label="Comentarios (opcional)"><textarea rows={4} placeholder="Observaciones generales de la jornada…" value={coment} onChange={function(e){setComent(e.target.value);}}/></F>
-      {yaHoy&&<div style={{background:"#F7EFE2",border:"1px solid #E3D5B8",borderRadius:8,padding:"10px 13px",fontSize:12,color:"#9a6b2f",fontWeight:600}}>⚠ Ya existe un registro de supervisión para esta fecha.</div>}
-      {err&&<div style={{background:"#F5EDEC",border:"1px solid #DBC8C4",borderRadius:8,padding:"10px 13px",fontSize:12,color:C.red,fontWeight:600}}>{err}</div>}
+      {yaHoy&&<div style={{background:"#F5EBE5",border:"1px solid #E3D5C8",borderRadius:8,padding:"10px 13px",fontSize:12,color:"#9a5020",fontWeight:600}}>⚠ Ya existe un registro de supervisión para esta fecha.</div>}
+      {err&&<div style={{background:"#F7E7E4",border:"1px solid #E9C9C2",borderRadius:8,padding:"10px 13px",fontSize:12,color:C.red,fontWeight:600}}>{err}</div>}
       <button onClick={sub} disabled={busy||yaHoy} style={{padding:"14px",borderRadius:10,border:"none",background:busy||yaHoy?C.gray:C.black,color:"#fff",fontSize:13.5,fontWeight:700,cursor:busy||yaHoy?"default":"pointer",letterSpacing:".04em"}}>{busy?"Enviando…":"Registrar supervisión →"}</button>
     </div>
   );
@@ -3452,7 +3541,7 @@ function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendo
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         <Card title="Tipo de trabajo">
           <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-            {allowedCats.map(function(c){var b=BADGE[c]||BADGE["Mantenimiento"];var s=cat===c;return <button key={c} onClick={function(){setCat(c);}} style={{padding:"7px 14px",borderRadius:100,cursor:"pointer",border:"1.5px solid "+(s?b.tx:C.gray),background:s?b.bg:"#fff",color:s?b.tx:C.earth,fontSize:12.5,fontWeight:600,transition:"all .18s"}}>{c}</button>;})}
+            {allowedCats.map(function(c){var b=BADGE[c]||BADGE["Mantenimiento"];var s=cat===c;return <button key={c} onClick={function(){setCat(c);}} style={{padding:"7px 14px",borderRadius:"var(--sa-pill)",cursor:"pointer",border:"1.5px solid "+(s?b.tx:C.gray),background:s?b.bg:"#fff",color:s?b.tx:C.earth,fontSize:12.5,fontWeight:600,transition:"all .18s"}}>{c}</button>;})}
           </div>
         </Card>
         <Card title="Responsable">
@@ -3562,7 +3651,7 @@ function NuevoProductoForm({vendors,props,onSubmit,defaultVendor,onBack}) {
       <WifiAviso propiedad={prop} props={props} vendorEmail={defaultVendor}/>
       <div style={{marginBottom:10}}><button onClick={onBack} style={{background:"none",border:"none",color:C.earth,fontSize:12.5,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>← Cambiar tipo</button></div>
       <div style={{marginBottom:24}}>
-        <div style={{fontSize:11,color:C.peach,fontWeight:700,letterSpacing:".18em",textTransform:"uppercase",marginBottom:6}}>Nuevo Producto</div>
+        <div style={{fontSize:11,color:C.earth,fontWeight:700,letterSpacing:".18em",textTransform:"uppercase",marginBottom:6,display:"flex",alignItems:"center",gap:7}}><span style={{width:6,height:6,borderRadius:999,background:C.attention,flexShrink:0,display:"inline-block"}}/>Nuevo Producto</div>
         <div style={{fontSize:22,fontWeight:400,color:C.black}}>Registrar nuevo mobiliario</div>
       </div>
 
@@ -3726,7 +3815,7 @@ function AjusteForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) {
             </div>
           )}
           {trabajo&&!esOtro&&/limpieza/i.test(trabajo)&&(
-            <div style={{marginTop:12,background:"#F7EFE2",border:"1px solid #E3D5B8",borderRadius:9,padding:"10px 13px",fontSize:11.5,color:"#9a6b2f",lineHeight:1.6,textWrap:"pretty"}}>
+            <div style={{marginTop:12,background:"#F5EBE5",border:"1px solid #E3D5C8",borderRadius:9,padding:"10px 13px",fontSize:11.5,color:"#9a5020",lineHeight:1.6,textWrap:"pretty"}}>
               Si es una limpieza que no pudiste registrar el día correcto, pon en <b>Fecha</b> el día en que la hiciste: así se cruza con la programación de ese día.
             </div>
           )}
@@ -3752,16 +3841,16 @@ function DanosFormSolo({vendors,props,onSubmit,defaultVendor,onBack}) {
   const [prop,    setProp]    = useState("");
   const [fecha,   setFecha]   = useState(todayStr());
   const [resp,    setResp]    = useState(defaultVendor||"");
-  const [danios,  setDanios]  = useState([{desc:"",fotos:[],origen:"",reparacion:"",comentarios:"",fotos2:[],cobrado:false,quienPaga:""}]);
+  const [danios,  setDanios]  = useState([{desc:"",pieza:"",fotos:[],video:null,origen:"",reparacion:"",comentarios:"",fotos2:[],cobrado:false,quienPaga:""}]);
   const [busy,    setBusy]    = useState(false);
   const [done,    setDone]    = useState(false);
   var snapD = {prop:prop,fecha:fecha,resp:resp,danios:danios};
   var dr = useDraft("danos:"+(defaultVendor||"anon"), snapD, function(d){
     setProp(d.prop||""); setFecha(d.fecha||todayStr()); setResp(d.resp||defaultVendor||"");
-    setDanios(d.danios&&d.danios.length?d.danios:[{desc:"",fotos:[],origen:"",reparacion:"",comentarios:"",fotos2:[],cobrado:false,quienPaga:""}]);
+    setDanios(d.danios&&d.danios.length?d.danios:[{desc:"",pieza:"",fotos:[],video:null,origen:"",reparacion:"",comentarios:"",fotos2:[],cobrado:false,quienPaga:""}]);
   }, done, !!(prop||(danios[0]&&(danios[0].desc||danios[0].fotos.length))), [prop,fecha,resp,danios]);
 
-  function addDanio(){setDanios(function(p){return p.concat([{desc:"",fotos:[],origen:"",reparacion:"",comentarios:"",fotos2:[],cobrado:false,quienPaga:""}]);});}
+  function addDanio(){setDanios(function(p){return p.concat([{desc:"",pieza:"",fotos:[],video:null,origen:"",reparacion:"",comentarios:"",fotos2:[],cobrado:false,quienPaga:""}]);});}
   function rmDanio(idx){setDanios(function(p){return p.filter(function(_,j){return j!==idx;});});}
   function setD(idx,k,v){setDanios(function(p){return p.map(function(d,j){if(j!==idx)return d;var u=Object.assign({},d);u[k]=v;return u;});});}
 
@@ -3806,11 +3895,18 @@ function DanosFormSolo({vendors,props,onSubmit,defaultVendor,onBack}) {
               {danios.length>1&&<button onClick={function(){rmDanio(idx);}} style={{background:"none",border:"none",color:C.gray,fontSize:18,cursor:"pointer",lineHeight:1}}>×</button>}
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div>
+                <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>¿Qué se dañó?</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{["Edredón o duvet","Sábanas o toallas","Mueble","Electrodoméstico","Baño","Pared o piso","Otro"].map(function(op){
+                  return <ChipBtn key={op} active={d.pieza===op} onClick={function(){setD(idx,"pieza",d.pieza===op?"":op);}}>{op}</ChipBtn>;
+                })}</div>
+              </div>
               <F label="Describe el daño"><textarea rows={3} placeholder="¿Qué fue dañado y cómo?" value={d.desc} onChange={function(e){setD(idx,"desc",e.target.value);}}/></F>
               <div>
                 <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Fotos del daño</div>
                 <MultiPhotoUp label="Fotos" photos={d.fotos} max={5} accent={C.peach} onAdd={function(files){var c=[...d.fotos];Promise.all(Array.from(files).slice(0,5-c.length).map(compress)).then(function(ds){setD(idx,"fotos",c.concat(ds).slice(0,5));});}} onDel={function(i){setD(idx,"fotos",d.fotos.filter(function(_,j){return j!==i;}));}}/>
               </div>
+              <VideoDanio video={d.video} onSet={function(v){setD(idx,"video",v);}}/>
               <div>
                 <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Origen del daño</div>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{["Estaba antes","Lo dejó el huésped","No estoy seguro"].map(function(op){return <ChipBtn key={op} active={d.origen===op} onClick={function(){setD(idx,"origen",op);}} color={C.earth}>{op}</ChipBtn>;})}</div>
@@ -3865,8 +3961,8 @@ function ReferenciaGate({titulo, propObj, refKey, onContinue}) {
   var fotos = refPhotosOf(propObj);
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{background:"#FFF9E6",border:"1px solid #E6D88A",borderRadius:12,padding:"14px 16px"}}>
-        <div style={{fontSize:13,fontWeight:700,color:"#7a6000",marginBottom:6}}>Antes de fotografiar {titulo}</div>
+      <div style={{background:"#F5EBE5",border:"1px solid #E3D5C8",borderRadius:12,padding:"14px 16px"}}>
+        <div style={{fontSize:13,fontWeight:700,color:"#9a5020",marginBottom:6}}>Antes de fotografiar {titulo}</div>
         <div style={{fontSize:12.5,color:"#6b5a00",lineHeight:1.65}}>Revisa la <strong>foto de referencia</strong> del anuncio. Toda la decoración debe quedar <strong>idéntica</strong> a la referencia: cojines, mantas, objetos decorativos y su disposición exacta.</div>
       </div>
       {img
@@ -3892,8 +3988,8 @@ function RefGallery({propObj, acked, onAck}){
   var fotos=refPhotosOf(propObj);
   if(!fotos.length) return null;
   return (
-    <div style={{marginTop:8,background:"#FFF9E6",border:"1px solid #E6D88A",borderRadius:12,padding:"14px 16px"}}>
-      <div style={{fontSize:12,fontWeight:700,color:"#7a6000",marginBottom:6}}>Fotos de referencia del anuncio</div>
+    <div style={{marginTop:8,background:"#F5EBE5",border:"1px solid #E3D5C8",borderRadius:12,padding:"14px 16px"}}>
+      <div style={{fontSize:12,fontWeight:700,color:"#9a5020",marginBottom:6}}>Fotos de referencia del anuncio</div>
       <div style={{fontSize:12,color:"#6b5a00",lineHeight:1.6,marginBottom:fotos.length?12:0}}>Revisa cómo debe quedar la propiedad. Toda la decoración debe quedar <strong>idéntica</strong> a estas fotos antes de empezar a limpiar.</div>
       {fotos.length>0&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{fotos.map(function(f,i){return <img key={i} src={f} alt={"Referencia "+(i+1)} loading="lazy" style={{width:"100%",height:120,objectFit:"cover",borderRadius:10,border:"1px solid "+C.line,display:"block"}}/>;})}</div>}
       {typeof onAck==="function"&&(acked
@@ -4007,9 +4103,9 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
       var b=form.fotosBanos[i]||{};
       function updB(field,val){var arr=[...form.fotosBanos];arr[i]=Object.assign({},form.fotosBanos[i]||{},{[field]:val});sf("fotosBanos",arr);}
       if(!b.ducha) out.push({id:"banoD"+i,label:"Baño "+(i+1)+" — ducha",
-        node:<SinglePhotoUp foto={(form.fotosBanos[i]||{}).ducha||null} accent="#3a8fa3" onAdd={function(f){compress(f).then(function(d){updB("ducha",d);});}} onDel={function(){updB("ducha",null);}}/>});
+        node:<SinglePhotoUp foto={(form.fotosBanos[i]||{}).ducha||null} accent="#3B6691" onAdd={function(f){compress(f).then(function(d){updB("ducha",d);});}} onDel={function(){updB("ducha",null);}}/>});
       if(!b.inodoro) out.push({id:"banoI"+i,label:"Baño "+(i+1)+" — inodoro",
-        node:<SinglePhotoUp foto={(form.fotosBanos[i]||{}).inodoro||null} accent="#3a8fa3" onAdd={function(f){compress(f).then(function(d){updB("inodoro",d);});}} onDel={function(){updB("inodoro",null);}}/>});
+        node:<SinglePhotoUp foto={(form.fotosBanos[i]||{}).inodoro||null} accent="#3B6691" onAdd={function(f){compress(f).then(function(d){updB("inodoro",d);});}} onDel={function(){updB("inodoro",null);}}/>});
     });
     TRAD_SINGLE_PHOTOS.forEach(function(p){
       if(!form[p[0]]) out.push({id:p[0],label:p[1],
@@ -4129,10 +4225,10 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
         {step===0&&(
           <div style={{textAlign:"center",padding:"20px 0 40px"}}>
             <div style={{fontSize:48,marginBottom:20}}>🧹</div>
-            <div style={{fontSize:11,color:C.peach,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",marginBottom:10}}>Spacio AM</div>
+            <div style={{fontSize:11,color:C.earth,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",marginBottom:10,display:"flex",alignItems:"center",gap:7}}><span style={{width:6,height:6,borderRadius:999,background:C.attention,flexShrink:0,display:"inline-block"}}/>Spacio AM</div>
             <div style={{fontSize:24,fontWeight:400,color:C.black,marginBottom:14,lineHeight:1.4}}>Bienvenido al Reporte de Limpieza</div>
             <div style={{fontSize:14,color:C.earth,lineHeight:1.7,marginBottom:32}}>Gracias por tu dedicación. Vamos a guiarte paso a paso para completar el control de calidad de esta limpieza.</div>
-            <button onClick={next} style={{padding:"14px 36px",borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer",letterSpacing:".08em"}}>Empezar →</button>
+            <button onClick={next} style={{padding:"14px 36px",borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer",letterSpacing:".08em"}}>Empezar →</button>
             <div style={{marginTop:16}}><button onClick={onBack} style={{background:"none",border:"none",color:C.earth,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>← Volver al formulario general</button></div>
           </div>
         )}
@@ -4238,15 +4334,15 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
                     <div style={{display:"flex",flexDirection:"column",gap:14}}>
                       <div>
                         <div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Ducha</div>
-                        <SinglePhotoUp foto={bano.ducha} accent="#3a8fa3" onAdd={function(f){compress(f).then(function(d){updateBano("ducha",d);});}} onDel={function(){updateBano("ducha",null);}}/>
+                        <SinglePhotoUp foto={bano.ducha} accent="#3B6691" onAdd={function(f){compress(f).then(function(d){updateBano("ducha",d);});}} onDel={function(){updateBano("ducha",null);}}/>
                       </div>
                       <div>
                         <div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Inodoro</div>
-                        <SinglePhotoUp foto={bano.inodoro} accent="#3a8fa3" onAdd={function(f){compress(f).then(function(d){updateBano("inodoro",d);});}} onDel={function(){updateBano("inodoro",null);}}/>
+                        <SinglePhotoUp foto={bano.inodoro} accent="#3B6691" onAdd={function(f){compress(f).then(function(d){updateBano("inodoro",d);});}} onDel={function(){updateBano("inodoro",null);}}/>
                       </div>
                       <div>
                         <div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Papel toilet que estás dejando <span style={{color:C.taupe,fontWeight:500}}>(opcional)</span></div>
-                        <SinglePhotoUp foto={bano.papel} accent="#3a8fa3" onAdd={function(f){compress(f).then(function(d){updateBano("papel",d);});}} onDel={function(){updateBano("papel",null);}}/>
+                        <SinglePhotoUp foto={bano.papel} accent="#3B6691" onAdd={function(f){compress(f).then(function(d){updateBano("papel",d);});}} onDel={function(){updateBano("papel",null);}}/>
                       </div>
                     </div>
                   </div>
@@ -4277,7 +4373,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
                   var key=item[0]; var lbl=item[1];
                   return (
                     <div key={key}>
-                      <div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>{lbl} {!form[key]&&<span style={{color:C.peach,fontWeight:700}}>·obligatoria</span>}</div>
+                      <div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>{lbl} {!form[key]&&<span style={{color:C.attentionText,fontWeight:700}}>·obligatoria</span>}</div>
                       <SinglePhotoUp foto={form[key]} accent={C.peach} onAdd={function(f){compress(f).then(function(d){sf(key,d);});}} onDel={function(){sf(key,null);}}/>
                     </div>
                   );
@@ -4308,7 +4404,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
                   var key=item[0]; var lbl=item[1]; var req=item[2];
                   return (
                     <div key={key}>
-                      <div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>{lbl} {req?(!form[key]&&<span style={{color:C.peach,fontWeight:700}}>·obligatoria</span>):<span style={{color:C.taupe,fontWeight:500}}>(opcional)</span>}</div>
+                      <div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>{lbl} {req?(!form[key]&&<span style={{color:C.attentionText,fontWeight:700}}>·obligatoria</span>):<span style={{color:C.taupe,fontWeight:500}}>(opcional)</span>}</div>
                       <SinglePhotoUp foto={form[key]} accent={C.earth} onAdd={function(f){compress(f).then(function(d){sf(key,d);});}} onDel={function(){sf(key,null);}}/>
                     </div>
                   );
@@ -4334,7 +4430,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
                 var key=item[0]; var lbl=item[1];
                 return (
                   <div key={key}>
-                    <div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>{lbl} {!form[key]&&<span style={{color:C.peach,fontWeight:700}}>·obligatoria</span>}</div>
+                    <div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>{lbl} {!form[key]&&<span style={{color:C.attentionText,fontWeight:700}}>·obligatoria</span>}</div>
                     <SinglePhotoUp foto={form[key]} accent={C.earth} onAdd={function(f){compress(f).then(function(d){sf(key,d);});}} onDel={function(){sf(key,null);}}/>
                   </div>
                 );
@@ -4364,8 +4460,8 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
                         {item.note&&<div style={{fontSize:11,color:C.earth,marginTop:2}}>{item.note}</div>}
                       </div>
                       <div style={{display:"flex",gap:6}}>
-                        <button onClick={function(){setInv("estado","ok");}} style={{padding:"5px 11px",borderRadius:100,border:"none",fontSize:11,fontWeight:700,cursor:"pointer",background:isOk?C.surfaceWarm:"#f5f5f5",color:isOk?C.green:C.taupe}}>✓ OK</button>
-                        <button onClick={function(){setInv("estado","falta");}} style={{padding:"5px 11px",borderRadius:100,border:"none",fontSize:11,fontWeight:700,cursor:"pointer",background:!isOk?"#FEF0EC":"#f5f5f5",color:!isOk?C.peach:C.gray}}>✗ Falta</button>
+                        <button onClick={function(){setInv("estado","ok");}} style={{padding:"5px 11px",borderRadius:"var(--sa-pill)",border:"none",fontSize:11,fontWeight:700,cursor:"pointer",background:isOk?C.surfaceWarm:"#f5f5f5",color:isOk?C.green:C.taupe}}>✓ OK</button>
+                        <button onClick={function(){setInv("estado","falta");}} style={{padding:"5px 11px",borderRadius:"var(--sa-pill)",border:"none",fontSize:11,fontWeight:700,cursor:"pointer",background:!isOk?"#FEF0EC":"#f5f5f5",color:!isOk?C.peach:C.gray}}>✗ Falta</button>
                       </div>
                     </div>
                     {item.countAlways&&<div style={{marginTop:10,display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -4401,7 +4497,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
             next();
           }} canNext>
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
-              <div style={{background:"#EDF5EF",borderRadius:8,padding:"12px 14px",border:"1px solid #c8dfc8",fontSize:13,color:C.black,lineHeight:1.7,fontWeight:500}}>
+              <div style={{background:"#E8F2ED",borderRadius:8,padding:"12px 14px",border:"1px solid #CFE3D6",fontSize:13,color:C.black,lineHeight:1.7,fontWeight:500}}>
                 📸 Tómate una foto con la <strong>cámara</strong> usando tu uniforme completo:<br/>
                 <span style={{fontSize:11.5,color:C.earth}}>✓ Playera Spacio AM &nbsp;·&nbsp; ✓ Gorra Spacio AM</span>
               </div>
@@ -4414,8 +4510,8 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
                 onDel={function(){sf("fotoUniforme",null);}}
               />
               {form.fotoUniforme&&(
-                <div style={{background:"#FFF9E6",borderRadius:8,padding:"10px 14px",border:"1px solid #E6D88A"}}>
-                  <div style={{fontSize:12.5,fontWeight:700,color:"#7a6000",marginBottom:4}}>¿Llevas la gorra?</div>
+                <div style={{background:"#F5EBE5",borderRadius:8,padding:"10px 14px",border:"1px solid #E3D5C8"}}>
+                  <div style={{fontSize:12.5,fontWeight:700,color:"#9a5020",marginBottom:4}}>¿Llevas la gorra?</div>
                   <div style={{display:"flex",gap:8}}>
                     {[["si","✓ Sí, llevo gorra"],["no","✗ No llevo gorra"]].map(function(it){
                       var sel=form._gorraOk===it[0];
@@ -4434,7 +4530,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
         {step===13&&(fixMode?(
           <div>
             <div style={{textAlign:"center",marginBottom:22}}>
-              <div style={{fontSize:11,color:C.peach,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",marginBottom:10}}>Completa lo que falta</div>
+              <div style={{fontSize:11,color:C.earth,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",marginBottom:10,display:"flex",alignItems:"center",gap:7}}><span style={{width:6,height:6,borderRadius:999,background:C.attention,flexShrink:0,display:"inline-block"}}/>Completa lo que falta</div>
               <div style={{fontSize:21,fontWeight:600,color:C.black,marginBottom:8}}>{pendientes.length>0?("Te faltan "+pendientes.length+" dato"+(pendientes.length===1?"":"s")+" por llenar"):"¡Todo listo!"}</div>
               <div style={{fontSize:13.5,color:C.earth,lineHeight:1.7}}>{pendientes.length>0?"Llena únicamente los campos de abajo y luego presiona Finalizar. No tienes que repasar todo el formulario.":"Ya completaste todos los datos pendientes. Presiona Finalizar para enviar tu reporte."}</div>
             </div>
@@ -4446,7 +4542,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
                 </div>
               );})}
             </div>
-            {errMsg&&pendientes.length===0&&<div style={{marginTop:14,padding:"12px 14px",borderRadius:8,background:"#F5EDEC",color:C.red,fontSize:13,fontWeight:600,border:"1px solid #DBC8C4"}}>{errMsg}</div>}
+            {errMsg&&pendientes.length===0&&<div style={{marginTop:14,padding:"12px 14px",borderRadius:8,background:"#F7E7E4",color:C.red,fontSize:13,fontWeight:600,border:"1px solid #E9C9C2"}}>{errMsg}</div>}
             <div style={{display:"flex",gap:10,flexDirection:"column",marginTop:24}}>
               <BigBtn onClick={submitTrad} dis={busy||pendientes.length>0}>{busy?"Subiendo… puede tardar unos segundos":(pendientes.length>0?("Aún faltan "+pendientes.length+" dato"+(pendientes.length===1?"":"s")):"Finalizar y enviar →")}</BigBtn>
               <button onClick={function(){setFixMode(false);}} style={{padding:"12px",borderRadius:12,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:13,fontWeight:600,cursor:"pointer"}}>← Volver al resumen</button>
@@ -4477,7 +4573,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
               </div>
             ):(
               <div style={{display:"flex",gap:10,flexDirection:"column"}}>
-                {errMsg&&<div style={{padding:"12px 14px",borderRadius:8,background:"#F5EDEC",color:C.red,fontSize:13,fontWeight:600,border:"1px solid #DBC8C4"}}>{errMsg}</div>}
+                {errMsg&&<div style={{padding:"12px 14px",borderRadius:8,background:"#F7E7E4",color:C.red,fontSize:13,fontWeight:600,border:"1px solid #E9C9C2"}}>{errMsg}</div>}
                 <button onClick={prev} style={{padding:"12px",borderRadius:12,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:13,fontWeight:600,cursor:"pointer"}}>← Revisar</button>
                 <BigBtn onClick={submitTrad} dis={busy}>{busy?"Subiendo… puede tardar unos segundos":"Enviar limpieza →"}</BigBtn>
               </div>
@@ -4582,7 +4678,7 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) 
 
   return (
     <div style={{maxWidth:560,margin:"0 auto",padding:"0 0 80px",fontFamily:"Montserrat,sans-serif"}}>
-      <ResumeDraftModal data={resumeDataP} stepLabel={resumeDataP?STEPS_P[resumeDataP.step]:""} accent="#2e7d52" onResume={doResumeP} onFresh={doFreshP}/>
+      <ResumeDraftModal data={resumeDataP} stepLabel={resumeDataP?STEPS_P[resumeDataP.step]:""} accent="#3d6b52" onResume={doResumeP} onFresh={doFreshP}/>
       {dupP.modal}
       <WifiAviso propiedad={form.propiedad} props={props} vendorEmail={defaultVendor}/>
       {step>0&&step<STEPS_P.length-1&&(
@@ -4599,19 +4695,19 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) 
         {step===0&&(
           <div style={{textAlign:"center",padding:"20px 0 40px"}}>
             <div style={{fontSize:48,marginBottom:20}}>🫧</div>
-            <div style={{fontSize:11,color:"#2e7d52",fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",marginBottom:10}}>Spacio AM</div>
+            <div style={{fontSize:11,color:"#3d6b52",fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",marginBottom:10}}>Spacio AM</div>
             <div style={{fontSize:24,fontWeight:400,color:C.black,marginBottom:14,lineHeight:1.4}}>Limpieza Profunda</div>
             <div style={{fontSize:14,color:C.earth,lineHeight:1.7,marginBottom:32,textAlign:"left",background:C.beige,padding:"16px",borderRadius:12}}>
               Hoy nos enfocamos en todo lo que normalmente no da tiempo en la rutina diaria:<br/><br/>
               Duchas · Regaderas · Drenajes · Ventanas · Cocina profunda · Organización
             </div>
-            <button onClick={next} style={{padding:"14px 36px",borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer"}}>Empezar →</button>
+            <button onClick={next} style={{padding:"14px 36px",borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer"}}>Empezar →</button>
             <div style={{marginTop:16}}><button onClick={onBack} style={{background:"none",border:"none",color:C.earth,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>← Volver al formulario general</button></div>
           </div>
         )}
 
         {step===1&&(
-          <WizStep title="¿Qué propiedad estás limpiando?" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext={!!form.propiedad&&!!form.reportadoPor} color="#2e7d52">
+          <WizStep title="¿Qué propiedad estás limpiando?" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext={!!form.propiedad&&!!form.reportadoPor} color="#3d6b52">
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
               {defaultVendor
                 ?<div style={{fontSize:14,fontWeight:600,color:C.black,background:C.beige,padding:"11px 14px",borderRadius:10,marginBottom:4}}>{vendors.find(function(v){return v.email===defaultVendor;})?vendors.find(function(v){return v.email===defaultVendor;}).name:defaultVendor}</div>
@@ -4624,15 +4720,15 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) 
         )}
 
         {step===2&&(
-          <WizStep title="Regadera, Ducha y Drenajes" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext={okDuchaP} color="#2e7d52">
+          <WizStep title="Regadera, Ducha y Drenajes" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext={okDuchaP} color="#3d6b52">
             {!okDuchaP&&<PhotoReqWarn msg="Sube al menos 1 foto (regadera o ducha) — es obligatoria para continuar."/>}
             <div style={{display:"flex",flexDirection:"column",gap:16}}>
-              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Regadera — Ojitos (que no estén tapados)</div><SinglePhotoUp foto={form.fotosRegadera} accent="#2e7d52" onAdd={function(f){compress(f).then(function(d){sf("fotosRegadera",d);});}} onDel={function(){sf("fotosRegadera",null);}}/></div>
-              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Ducha / Mampara (vidrio o cortina)</div><SinglePhotoUp foto={form.fotosDucha} accent="#2e7d52" onAdd={function(f){compress(f).then(function(d){sf("fotosDucha",d);});}} onDel={function(){sf("fotosDucha",null);}}/></div>
+              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Regadera — Ojitos (que no estén tapados)</div><SinglePhotoUp foto={form.fotosRegadera} accent="#3d6b52" onAdd={function(f){compress(f).then(function(d){sf("fotosRegadera",d);});}} onDel={function(){sf("fotosRegadera",null);}}/></div>
+              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Ducha / Mampara (vidrio o cortina)</div><SinglePhotoUp foto={form.fotosDucha} accent="#3d6b52" onAdd={function(f){compress(f).then(function(d){sf("fotosDucha",d);});}} onDel={function(){sf("fotosDucha",null);}}/></div>
               <div>
                 <div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Drenajes — 1 foto por baño</div>
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                  {Array.from({length:banos},function(_,i){var foto=form.fotosDrenajes[i]||null;return <div key={i}><div style={{fontSize:11,color:C.earth,marginBottom:6}}>Drenaje baño {i+1}</div><SinglePhotoUp foto={foto} accent="#2e7d52" onAdd={function(f){compress(f).then(function(d){var arr=[...form.fotosDrenajes];arr[i]=d;sf("fotosDrenajes",arr);});}} onDel={function(){var arr=[...form.fotosDrenajes];arr[i]=null;sf("fotosDrenajes",arr);}}/></div>;})}
+                  {Array.from({length:banos},function(_,i){var foto=form.fotosDrenajes[i]||null;return <div key={i}><div style={{fontSize:11,color:C.earth,marginBottom:6}}>Drenaje baño {i+1}</div><SinglePhotoUp foto={foto} accent="#3d6b52" onAdd={function(f){compress(f).then(function(d){var arr=[...form.fotosDrenajes];arr[i]=d;sf("fotosDrenajes",arr);});}} onDel={function(){var arr=[...form.fotosDrenajes];arr[i]=null;sf("fotosDrenajes",arr);}}/></div>;})}
                 </div>
               </div>
             </div>
@@ -4640,43 +4736,43 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) 
         )}
 
         {step===3&&(
-          <WizStep title="Ventanas" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext color="#2e7d52">
+          <WizStep title="Ventanas" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext color="#3d6b52">
             <div><div style={{fontSize:13,color:C.earth,marginBottom:12}}>Al menos 1 ventana limpia por apartamento.</div>
-            <MultiPhotoUp label="Ventanas" photos={form.fotosVentanas} max={4} accent="#2e7d52" onAdd={function(files){var copies=[...form.fotosVentanas];Promise.all(Array.from(files).slice(0,4-copies.length).map(compress)).then(function(ds){sf("fotosVentanas",copies.concat(ds).slice(0,4));});}} onDel={function(i){sf("fotosVentanas",form.fotosVentanas.filter(function(_,j){return j!==i;}));}}/>
+            <MultiPhotoUp label="Ventanas" photos={form.fotosVentanas} max={4} accent="#3d6b52" onAdd={function(files){var copies=[...form.fotosVentanas];Promise.all(Array.from(files).slice(0,4-copies.length).map(compress)).then(function(ds){sf("fotosVentanas",copies.concat(ds).slice(0,4));});}} onDel={function(i){sf("fotosVentanas",form.fotosVentanas.filter(function(_,j){return j!==i;}));}}/>
             </div>
           </WizStep>
         )}
 
         {step===4&&(
-          <WizStep title="Cocina profunda" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext={okCocinaP} color="#2e7d52">
+          <WizStep title="Cocina profunda" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext={okCocinaP} color="#3d6b52">
             {!okCocinaP&&<PhotoReqWarn msg="Sube al menos 1 foto de la cocina profunda — es obligatoria para continuar."/>}
             <div style={{display:"flex",flexDirection:"column",gap:14}}>
-              {[["fotosEstufa","Estufa limpia"],["fotosFregadero","Fregadero limpio"],["fotosMicroondas2","Interior del microondas"],["fotosPlatos","Platos, vasos y cubiertos ordenados"]].map(function(item){var key=item[0];var lbl=item[1];return <div key={key}><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>{lbl}</div><SinglePhotoUp foto={form[key]} accent="#2e7d52" onAdd={function(f){compress(f).then(function(d){sf(key,d);});}} onDel={function(){sf(key,null);}}/></div>;})}
+              {[["fotosEstufa","Estufa limpia"],["fotosFregadero","Fregadero limpio"],["fotosMicroondas2","Interior del microondas"],["fotosPlatos","Platos, vasos y cubiertos ordenados"]].map(function(item){var key=item[0];var lbl=item[1];return <div key={key}><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>{lbl}</div><SinglePhotoUp foto={form[key]} accent="#3d6b52" onAdd={function(f){compress(f).then(function(d){sf(key,d);});}} onDel={function(){sf(key,null);}}/></div>;})}
             </div>
           </WizStep>
         )}
 
         {step===5&&(
-          <WizStep title="Gavetas y detrás de electrodomésticos" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext color="#2e7d52">
+          <WizStep title="Gavetas y detrás de electrodomésticos" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext color="#3d6b52">
             <div style={{display:"flex",flexDirection:"column",gap:16}}>
-              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Organización de gavetas / utensilios (1-2 ejemplos)</div><MultiPhotoUp label="Gavetas" photos={form.fotosGavetas} max={3} accent="#2e7d52" onAdd={function(files){var c=[...form.fotosGavetas];Promise.all(Array.from(files).slice(0,3-c.length).map(compress)).then(function(ds){sf("fotosGavetas",c.concat(ds).slice(0,3));});}} onDel={function(i){sf("fotosGavetas",form.fotosGavetas.filter(function(_,j){return j!==i;}));}}/></div>
-              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Detrás de electrodomésticos (si se movieron)</div><SinglePhotoUp foto={form.fotosDetrasElect} accent="#2e7d52" onAdd={function(f){compress(f).then(function(d){sf("fotosDetrasElect",d);});}} onDel={function(){sf("fotosDetrasElect",null);}}/></div>
+              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Organización de gavetas / utensilios (1-2 ejemplos)</div><MultiPhotoUp label="Gavetas" photos={form.fotosGavetas} max={3} accent="#3d6b52" onAdd={function(files){var c=[...form.fotosGavetas];Promise.all(Array.from(files).slice(0,3-c.length).map(compress)).then(function(ds){sf("fotosGavetas",c.concat(ds).slice(0,3));});}} onDel={function(i){sf("fotosGavetas",form.fotosGavetas.filter(function(_,j){return j!==i;}));}}/></div>
+              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Detrás de electrodomésticos (si se movieron)</div><SinglePhotoUp foto={form.fotosDetrasElect} accent="#3d6b52" onAdd={function(f){compress(f).then(function(d){sf("fotosDetrasElect",d);});}} onDel={function(){sf("fotosDetrasElect",null);}}/></div>
             </div>
           </WizStep>
         )}
 
         {step===6&&(
-          <WizStep title="Detalle extra" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext color="#2e7d52">
+          <WizStep title="Detalle extra" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext color="#3d6b52">
             <div>
               <div style={{fontSize:13,color:C.earth,marginBottom:12}}>Cualquier detalle adicional que hayas corregido — antes/después si aplica.</div>
-              <MultiPhotoUp label="Detalles extra" photos={form.fotosDetalle} max={6} accent="#2e7d52" onAdd={function(files){var c=[...form.fotosDetalle];Promise.all(Array.from(files).slice(0,6-c.length).map(compress)).then(function(ds){sf("fotosDetalle",c.concat(ds).slice(0,6));});}} onDel={function(i){sf("fotosDetalle",form.fotosDetalle.filter(function(_,j){return j!==i;}));}}/>
+              <MultiPhotoUp label="Detalles extra" photos={form.fotosDetalle} max={6} accent="#3d6b52" onAdd={function(files){var c=[...form.fotosDetalle];Promise.all(Array.from(files).slice(0,6-c.length).map(compress)).then(function(ds){sf("fotosDetalle",c.concat(ds).slice(0,6));});}} onDel={function(i){sf("fotosDetalle",form.fotosDetalle.filter(function(_,j){return j!==i;}));}}/>
               <div style={{marginTop:16}}><F label="Comentarios adicionales"><textarea rows={3} placeholder="Observaciones del equipo…" value={form.comentarios} onChange={function(e){sf("comentarios",e.target.value);}}/></F></div>
             </div>
           </WizStep>
         )}
 
         {step===7&&(
-          <WizStep title="Inventario de la propiedad" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext={invPendP.length===0} color="#2e7d52"
+          <WizStep title="Inventario de la propiedad" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext={invPendP.length===0} color="#3d6b52"
             pendingHint={"Aún falta el conteo de: "+invPendP.map(function(x){return x.name;}).join(", ")+(invPendP.some(function(x){return parseInt(x.malEstado||0)>0&&!x.foto;})?" (y la foto de las piezas en mal estado)":"")+". Toca el botón para ir directo a esos campos."}
             onFillPending={function(){setInvOnlyPendP(true);}}>
             {invPendP.length>0&&<PhotoReqWarn msg={"Completa el conteo de: "+invPendP.map(function(x){return x.name;}).join(", ")+(invPendP.some(function(x){return parseInt(x.malEstado||0)>0&&!x.foto;})?" — incluye la foto de las piezas en mal estado":"")+"."}/>}
@@ -4692,8 +4788,8 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) 
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                       <div style={{fontSize:13,fontWeight:600,color:C.black}}>{item.name}</div>
                       <div style={{display:"flex",gap:6}}>
-                        <button onClick={function(){setInv("estado","ok");}} style={{padding:"5px 11px",borderRadius:100,border:"none",fontSize:11,fontWeight:700,cursor:"pointer",background:isOk?C.surfaceWarm:"#f5f5f5",color:isOk?C.green:C.taupe}}>✓</button>
-                        <button onClick={function(){setInv("estado","falta");}} style={{padding:"5px 11px",borderRadius:100,border:"none",fontSize:11,fontWeight:700,cursor:"pointer",background:!isOk?"#FEF0EC":"#f5f5f5",color:!isOk?C.peach:C.gray}}>✗</button>
+                        <button onClick={function(){setInv("estado","ok");}} style={{padding:"5px 11px",borderRadius:"var(--sa-pill)",border:"none",fontSize:11,fontWeight:700,cursor:"pointer",background:isOk?C.surfaceWarm:"#f5f5f5",color:isOk?C.green:C.taupe}}>✓</button>
+                        <button onClick={function(){setInv("estado","falta");}} style={{padding:"5px 11px",borderRadius:"var(--sa-pill)",border:"none",fontSize:11,fontWeight:700,cursor:"pointer",background:!isOk?"#FEF0EC":"#f5f5f5",color:!isOk?C.peach:C.gray}}>✗</button>
                       </div>
                     </div>
                     {item.countAlways&&<div style={{marginTop:10,display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -4704,7 +4800,7 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) 
                       <div style={{fontSize:10,color:C.red,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",marginBottom:6}}>Foto de las piezas en mal estado (obligatoria)</div>
                       <SinglePhotoUp foto={item.foto} accent={C.red} onAdd={function(f){compress(f).then(function(d){setInv("foto",d);});}} onDel={function(){setInv("foto",null);}}/>
                     </div>}
-                    {item.requirePhoto&&<div style={{marginTop:8}}><SinglePhotoUp foto={item.foto} accent="#2e7d52" onAdd={function(f){compress(f).then(function(d){setInv("foto",d);});}} onDel={function(){setInv("foto",null);}}/></div>}
+                    {item.requirePhoto&&<div style={{marginTop:8}}><SinglePhotoUp foto={item.foto} accent="#3d6b52" onAdd={function(f){compress(f).then(function(d){setInv("foto",d);});}} onDel={function(){setInv("foto",null);}}/></div>}
                   </div>
                 );
               })}
@@ -4722,7 +4818,7 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) 
             <div style={{background:C.beige,borderRadius:14,padding:"16px 18px",marginBottom:20}}>
               {[["Propiedad",form.propiedad],["Fecha",fmtDate(form.fecha)],["Responsable",form.reportadoPor]].map(function(r,i){return <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:i<2?"1px solid "+C.gray:"none"}}><span style={{fontSize:12,color:C.earth,fontWeight:600}}>{r[0]}</span><span style={{fontSize:13,color:C.black}}>{r[1]||"—"}</span></div>;})}
             </div>
-            {errMsg&&<div style={{padding:"12px 14px",borderRadius:8,background:"#F5EDEC",color:C.red,fontSize:13,fontWeight:600,border:"1px solid #DBC8C4"}}>{errMsg}</div>}
+            {errMsg&&<div style={{padding:"12px 14px",borderRadius:8,background:"#F7E7E4",color:C.red,fontSize:13,fontWeight:600,border:"1px solid #E9C9C2"}}>{errMsg}</div>}
             <div style={{display:"flex",gap:10,flexDirection:"column"}}>
               <button onClick={prev} style={{padding:"12px",borderRadius:12,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:13,fontWeight:600,cursor:"pointer"}}>← Revisar</button>
               <BigBtn onClick={submit} dis={busy}>{busy?"Subiendo… puede tardar unos segundos":"Enviar limpieza →"}</BigBtn>
@@ -4778,7 +4874,7 @@ function ResumeDraftModal({data, stepLabel, stepCaption, accent, onResume, onFre
   if(when) rows.push(["Guardado",when.toLocaleDateString("es-GT",{day:"numeric",month:"short"})+" · "+when.toLocaleTimeString("es-GT",{hour:"2-digit",minute:"2-digit"})]);
   return (
     <div style={{position:"fixed",inset:0,zIndex:9200,background:"rgba(62,63,63,.55)",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",padding:18,fontFamily:"Montserrat,sans-serif"}}>
-      <div style={{width:"100%",maxWidth:400,background:"#fff",borderRadius:22,padding:"30px 26px",boxShadow:"0 28px 80px rgba(62,63,63,.22)"}}>
+      <div style={{width:"100%",maxWidth:400,background:"#fff",borderRadius:22,padding:"30px 26px",boxShadow:"var(--sa-shadow-lg)"}}>
         <div style={{fontSize:30,marginBottom:12,textAlign:"center"}}>📝</div>
         <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontWeight:400,fontSize:24,lineHeight:1.2,color:C.black,textAlign:"center",marginBottom:10}}>Tienes un reporte sin terminar</div>
         <div style={{fontSize:13.5,color:C.earth,lineHeight:1.65,textAlign:"center",marginBottom:18}}>Guardamos tu avance automáticamente. ¿Deseas continuar donde lo dejaste o empezar uno desde cero?</div>
@@ -4796,12 +4892,12 @@ function ResumeDraftModal({data, stepLabel, stepCaption, accent, onResume, onFre
 
 /* Alerta de foto obligatoria faltante (1 por espacio) */
 function PhotoReqWarn({msg}) {
-  return <div style={{background:"#F5EDEC",border:"1px solid #DBC8C4",borderRadius:8,padding:"10px 14px",fontSize:12.5,fontWeight:600,color:C.red,lineHeight:1.5}}>⚠ {msg}</div>;
+  return <div style={{background:"#F7E7E4",border:"1px solid #E9C9C2",borderRadius:8,padding:"10px 14px",fontSize:12.5,fontWeight:600,color:C.red,lineHeight:1.5}}>⚠ {msg}</div>;
 }
 
 function DaniosSection({form,sf}) {
   function addDanio() {
-    sf("danios",form.danios.concat([{desc:"",fotos:[],origen:"",reparacion:"",comentarios:"",fotos2:[],factura:null,cobrado:false,quienPaga:""}]));
+    sf("danios",form.danios.concat([{desc:"",pieza:"",fotos:[],video:null,origen:"",reparacion:"",comentarios:"",fotos2:[],factura:null,cobrado:false,quienPaga:""}]));
   }
   function setDanio(idx,k,v) {
     sf("danios",form.danios.map(function(d,j){if(j!==idx)return d;var u=Object.assign({},d);u[k]=v;return u;}));
@@ -4821,7 +4917,7 @@ function DaniosSection({form,sf}) {
             return (
               <div key={idx} style={{background:"#fff",borderRadius:14,padding:"16px",border:"2px solid #f5c6a0"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                  <div style={{fontSize:12,fontWeight:700,color:C.peach,letterSpacing:".1em",textTransform:"uppercase"}}>Daño {idx+1}</div>
+                  <div style={{fontSize:12,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase"}}>Daño {idx+1}</div>
                   {form.danios.length>1&&<button onClick={function(){rmDanio(idx);}} style={{background:"none",border:"none",color:C.gray,fontSize:18,cursor:"pointer",lineHeight:1}}>×</button>}
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:12}}>
@@ -4901,7 +4997,7 @@ function MultiPhotoUp({label,photos,max,accent,onAdd,onDel}) {
   return (
     <div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-        {photos.map(function(src,i){return <div key={i} style={{position:"relative",width:84,height:84,borderRadius:10,overflow:"hidden",border:"2px solid "+(accent+"30")}}><img src={src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/><button onClick={function(){onDel(i);}} style={{position:"absolute",top:3,right:3,width:20,height:20,borderRadius:"50%",border:"none",background:"rgba(0,0,0,.55)",color:"#fff",fontSize:14,cursor:"pointer",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button></div>;})}
+        {photos.map(function(src,i){return <div key={i} style={{position:"relative",width:84,height:84,borderRadius:10,overflow:"hidden",border:"2px solid color-mix(in srgb, "+accent+" 19%, transparent)"}}><img src={src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/><button onClick={function(){onDel(i);}} style={{position:"absolute",top:3,right:3,width:20,height:20,borderRadius:"50%",border:"none",background:"rgba(0,0,0,.55)",color:"#fff",fontSize:14,cursor:"pointer",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button></div>;})}
         {photos.length<max&&<button onClick={function(){if(ref.current)ref.current.click();}} style={{width:84,height:84,borderRadius:10,border:"1.5px dashed "+C.line,background:C.surface,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,cursor:"pointer",transition:"background .2s"}}><span style={{fontSize:20,color:C.earth}}>+</span><span style={{fontSize:9.5,color:C.earth,fontWeight:600,letterSpacing:".1em",textTransform:"uppercase"}}>Foto</span></button>}
       </div>
       <input ref={ref} type="file" accept="image/*" multiple style={{display:"none"}} onChange={function(e){if(e.target.files&&e.target.files.length)onAdd(e.target.files);e.target.value="";}}/>
@@ -4940,7 +5036,7 @@ function OrphanEmailLinker({reps, vendors, onSvV}) {
           Estos correos aparecen en reportes pero ya no pertenecen a ningún técnico —normalmente porque la persona cambió de correo. Asigna cada uno al técnico correcto y sus registros se ligarán a su cuenta actual.
         </div>
         {orphans.length===0
-          ? <div style={{padding:"12px 14px",borderRadius:8,background:"#EDF5EF",fontSize:12.5,color:C.green,fontWeight:600}}>✓ No hay correos sin vincular.</div>
+          ? <div style={{padding:"12px 14px",borderRadius:8,background:"#E8F2ED",fontSize:12.5,color:C.green,fontWeight:600}}>✓ No hay correos sin vincular.</div>
           : <div style={{display:"flex",flexDirection:"column",gap:12}}>
               {orphans.map(function(o){return (
                 <div key={o.email} style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"13px 15px"}}>
@@ -4963,7 +5059,7 @@ function OrphanEmailLinker({reps, vendors, onSvV}) {
               );})}
             </div>
         }
-        {msg&&<div style={{marginTop:12,padding:"10px 13px",borderRadius:8,fontSize:12.5,fontWeight:600,background:msg.ok?"#EDF5EF":"#F5EDEC",color:msg.ok?C.green:C.red,lineHeight:1.5}}>{msg.t}</div>}
+        {msg&&<div style={{marginTop:12,padding:"10px 13px",borderRadius:8,fontSize:12.5,fontWeight:600,background:msg.ok?"#E8F2ED":"#F7E7E4",color:msg.ok?C.green:C.red,lineHeight:1.5}}>{msg.t}</div>}
       </Card>
     </div>
   );
@@ -5129,13 +5225,13 @@ function RegistroPublico({tipo, company}) {
   function chg(k){ return function(e){ set(k, e.target.value); }; }
   /* Una sola columna en móvil: dos campos de 200px lado a lado apretaban el texto. */
   var G={display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,240px),1fr))",gap:14};
-  var CARD={background:"#fff",borderRadius:20,padding:"clamp(22px,5vw,30px)",boxShadow:"0 4px 16px rgba(62,63,63,.05)"};
-  var BTN={padding:"16px 22px",borderRadius:100,border:"none",fontSize:14,fontWeight:600,letterSpacing:".03em",cursor:"pointer",minHeight:54,fontFamily:"Montserrat,sans-serif"};
+  var CARD={background:"#fff",borderRadius:20,padding:"clamp(22px,5vw,30px)",boxShadow:"var(--sa-shadow-sm)"};
+  var BTN={padding:"16px 22px",borderRadius:"var(--sa-pill)",border:"none",fontSize:14,fontWeight:600,letterSpacing:".03em",cursor:"pointer",minHeight:54,fontFamily:"Montserrat,sans-serif"};
   var SERIF="'Valky','Cormorant Garamond',Georgia,serif";
 
   if(done) return (
     <div style={{minHeight:"100vh",background:C.beige,fontFamily:"Montserrat,sans-serif",display:"flex",alignItems:"center",justifyContent:"center",padding:"28px 18px"}}>
-      <div style={{background:"#fff",borderRadius:20,maxWidth:460,padding:"44px 30px",textAlign:"center",boxShadow:"0 4px 16px rgba(62,63,63,.05)"}}>
+      <div style={{background:"#fff",borderRadius:20,maxWidth:460,padding:"44px 30px",textAlign:"center",boxShadow:"var(--sa-shadow-sm)"}}>
         <div style={{display:"flex",justifyContent:"center",marginBottom:22}}><LogoWordmark width={148}/></div>
         <svg viewBox="0 0 100 100" width={26} height={26} fill={C.peach} aria-hidden="true" style={{display:"block",margin:"0 auto"}}><path d="M50 4 C 52 32, 58 42, 96 50 C 58 58, 52 68, 50 96 C 48 68, 42 58, 4 50 C 42 42, 48 32, 50 4 Z"/></svg>
         <div style={{fontFamily:SERIF,fontSize:26,color:C.black,marginTop:14,lineHeight:1.25}}>Recibimos tus datos</div>
@@ -5159,7 +5255,7 @@ function RegistroPublico({tipo, company}) {
             </div>
             <div style={{display:"flex",gap:5}}>
               {formPasos.map(function(p,i){
-                return <div key={p} style={{flex:1,height:3,borderRadius:100,background:i<=formPasos.indexOf(actual)?C.black:C.gray,transition:"background 360ms cubic-bezier(.22,.61,.36,1)"}}/>;
+                return <div key={p} style={{flex:1,height:3,borderRadius:"var(--sa-pill)",background:i<=formPasos.indexOf(actual)?C.black:C.gray,transition:"background 360ms cubic-bezier(.22,.61,.36,1)"}}/>;
               })}
             </div>
           </div>
@@ -5177,7 +5273,7 @@ function RegistroPublico({tipo, company}) {
               {REG_PITCH.map(function(p,i){
                 return (
                   <div key={i} style={{display:"flex",gap:14,alignItems:"flex-start"}}>
-                    <div style={{width:26,flexShrink:0,fontFamily:SERIF,fontSize:18,color:C.peach,lineHeight:1.3}}>{("0"+(i+1)).slice(-2)}</div>
+                    <div style={{width:26,flexShrink:0,fontFamily:SERIF,fontSize:18,color:C.earth,lineHeight:1.3}}>{("0"+(i+1)).slice(-2)}</div>
                     <div style={{minWidth:0}}>
                       <div style={{fontSize:14,fontWeight:600,color:C.black,lineHeight:1.5}}>{p[0]}</div>
                       <div style={{fontSize:13,color:C.earth,lineHeight:1.7,marginTop:4,textWrap:"pretty"}}>{p[1]}</div>
@@ -5256,7 +5352,7 @@ function RegistroPublico({tipo, company}) {
           </div>
         )}
 
-        {err&&<div style={{marginTop:13,fontSize:13,color:C.red,background:"#F5EDEC",padding:"12px 14px",borderRadius:10,lineHeight:1.6}}>{err}</div>}
+        {err&&<div style={{marginTop:13,fontSize:13,color:C.red,background:"#F7E7E4",padding:"12px 14px",borderRadius:10,lineHeight:1.6}}>{err}</div>}
 
         {actual!=="pitch"&&(
           <div style={{display:"flex",gap:10,marginTop:16,flexWrap:"wrap"}}>
@@ -5328,7 +5424,7 @@ function RegistroCfg({regSol, onSvRegSol, vendors, onSaveVendors, puedeAprobar})
                   <div style={{fontSize:13,fontWeight:600,color:C.black}}>{t.label}</div>
                   <div style={{fontSize:10.5,color:C.taupe,marginTop:2,wordBreak:"break-all"}}>{regLink(k)}</div>
                 </div>
-                <button onClick={function(){copiar(k);}} style={{padding:"9px 16px",minHeight:44,borderRadius:100,border:"none",background:copiado===k?C.green:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer",flexShrink:0}}>
+                <button onClick={function(){copiar(k);}} style={{padding:"9px 16px",minHeight:44,borderRadius:"var(--sa-pill)",border:"none",background:copiado===k?C.green:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer",flexShrink:0}}>
                   {copiado===k?"✓ Copiado":"Copiar enlace"}
                 </button>
               </div>
@@ -5364,7 +5460,7 @@ function RegistroCfg({regSol, onSvRegSol, vendors, onSaveVendors, puedeAprobar})
                         <div style={{fontSize:14,fontWeight:600,color:C.black}}>{nm||"—"}</div>
                         <div style={{fontSize:11.5,color:C.earth,marginTop:3}}>{s.perfilLabel||s.perfil} · {fmtDate(s.fecha)}</div>
                       </div>
-                      <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"3px 9px",borderRadius:100,background:"#F7EFE2",color:"#8a6320",flexShrink:0}}>Nueva</span>
+                      <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"3px 9px",borderRadius:"var(--sa-pill)",background:"#F5EBE5",color:"#9a5020",flexShrink:0}}>Nueva</span>
                     </div>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:9,marginTop:12}}>
                       {[["Correo",s.email],["Teléfono",s.phone],["Empresa",s.empresa],["Servicios",s.servicios],["DPI",s.dpi],["NIT",s.nit],["Dirección",s.direccion],["Banco",[s.banco,s.tipoCuenta,s.cuenta].filter(Boolean).join(" · ")],["A nombre de",s.titular]].filter(function(x){return String(x[1]||"").trim();}).map(function(x,i){
@@ -5385,14 +5481,14 @@ function RegistroCfg({regSol, onSvRegSol, vendors, onSaveVendors, puedeAprobar})
                             style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:10,padding:"11px 13px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",minHeight:46}}/>
                         </div>
                         <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-                          <button onClick={function(){crearUsuario(s);}} disabled={String(pass||"").trim().length<4} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:100,border:"none",background:String(pass||"").trim().length<4?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:String(pass||"").trim().length<4?"default":"pointer"}}>Crear usuario</button>
-                          <button onClick={function(){setAbierta(null);setPass("");}} style={{padding:"12px 18px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+                          <button onClick={function(){crearUsuario(s);}} disabled={String(pass||"").trim().length<4} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"none",background:String(pass||"").trim().length<4?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:String(pass||"").trim().length<4?"default":"pointer"}}>Crear usuario</button>
+                          <button onClick={function(){setAbierta(null);setPass("");}} style={{padding:"12px 18px",minHeight:46,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
                         </div>
                       </div>
                     ) : (
                       <div style={{display:"flex",gap:9,flexWrap:"wrap",marginTop:12}}>
-                        <button onClick={function(){setAbierta(s.id);setPass("");}} style={{padding:"10px 18px",minHeight:44,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>Crear usuario →</button>
-                        <button onClick={function(){rechazar(s);}} style={{padding:"10px 16px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.red,fontSize:12,fontWeight:600,cursor:"pointer"}}>Descartar</button>
+                        <button onClick={function(){setAbierta(s.id);setPass("");}} style={{padding:"10px 18px",minHeight:44,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer"}}>Crear usuario →</button>
+                        <button onClick={function(){rechazar(s);}} style={{padding:"10px 16px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.red,fontSize:12,fontWeight:600,cursor:"pointer"}}>Descartar</button>
                       </div>
                     )}
                   </div>
@@ -5471,7 +5567,7 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, re
           style={{flex:1,minWidth:200,border:"1.5px solid "+C.gray,borderRadius:9,padding:"9px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:42}}/>
         <span style={{fontSize:11,color:C.taupe,fontVariantNumeric:"tabular-nums"}}>{vendorsVis.length} de {(vendors||[]).length}</span>
         {Object.keys(abiertoV).length>0&&(
-          <button onClick={function(){setAbiertoV({});}} style={{fontSize:11,fontWeight:600,color:C.earth,background:"#fff",border:"1px solid "+C.gray,borderRadius:100,padding:"8px 13px",minHeight:38,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cerrar todo</button>
+          <button onClick={function(){setAbiertoV({});}} style={{fontSize:11,fontWeight:600,color:C.earth,background:"#fff",border:"1px solid "+C.gray,borderRadius:"var(--sa-pill)",padding:"8px 13px",minHeight:38,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cerrar todo</button>
         )}
       </div>
 
@@ -5487,12 +5583,12 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, re
               {isMe?(
                 <div style={{display:"flex",gap:6,alignItems:"center",flex:1}}>
                   <input value={editVal} onChange={function(e){setEVal(e.target.value);}} type={type||"text"} style={{flex:1,maxWidth:200,border:"1.5px solid "+C.earth,borderRadius:6,padding:"4px 9px",fontSize:12,fontFamily:"Montserrat,sans-serif",outline:"none"}}/>
-                  <button onClick={confirmEdit} style={{fontSize:11,fontWeight:700,color:C.green,background:"#EDF5EF",border:"none",borderRadius:6,padding:"4px 9px",cursor:"pointer"}}>OK</button>
+                  <button onClick={confirmEdit} style={{fontSize:11,fontWeight:700,color:C.green,background:"#E8F2ED",border:"none",borderRadius:6,padding:"4px 9px",cursor:"pointer"}}>OK</button>
                   <button onClick={cancelEdit}  style={{fontSize:11,color:C.earth,background:"none",border:"none",cursor:"pointer"}}>✕</button>
                 </div>
               ):(
                 <div style={{display:"flex",gap:8,alignItems:"center",flex:1}}>
-                  <span style={{fontSize:12,color:C.black,background:field==="tarifaLimpieza"?"#EDF5EF":C.surfaceWarm,padding:"3px 9px",borderRadius:6,fontWeight:field==="tarifaLimpieza"?700:400,color:field==="tarifaLimpieza"?C.green:C.black}}>
+                  <span style={{fontSize:12,color:C.black,background:field==="tarifaLimpieza"?"#E8F2ED":C.surfaceWarm,padding:"3px 9px",borderRadius:6,fontWeight:field==="tarifaLimpieza"?700:400,color:field==="tarifaLimpieza"?C.green:C.black}}>
                     {field==="password"?"••••••••":field==="tarifaLimpieza"?(cur?"Q"+cur:"Sin tarifa"):cur||"—"}
                   </span>
                   <button onClick={function(){startEdit(v.id,field,cur);}} style={{fontSize:11,color:C.earth,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>Editar</button>
@@ -5514,18 +5610,18 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, re
                 {v.empresa&&<div style={{fontSize:11,color:C.taupe}}>{v.empresa}</div>}
                 {!abV&&(
                   <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:6}}>
-                    {v.isAdmin&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:100,background:C.black,color:"#fff"}}>Admin</span>}
-                    {v.isSupervisor&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:100,background:"#EDF2EE",color:"#3d6b52"}}>Supervisión</span>}
-                    {v.planilla&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:100,background:C.surfaceWarm,color:C.earth,border:"1px solid "+C.line}}>Planilla</span>}
-                    {SCHED.esLimpieza(v)&&<span style={{fontSize:8.5,fontWeight:600,letterSpacing:".06em",padding:"2px 8px",borderRadius:100,background:C.surfaceWarm,color:C.earth,border:"1px solid "+C.line}}>{(v.zonas||[]).length?(v.zonas||[]).map(SCHED.zonaLabel).join(" · "):"sin zonas"}</span>}
+                    {v.isAdmin&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:"var(--sa-pill)",background:C.black,color:"#fff"}}>Admin</span>}
+                    {v.isSupervisor&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:"var(--sa-pill)",background:"#EDF2EE",color:"#3d6b52"}}>Supervisión</span>}
+                    {v.planilla&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:"var(--sa-pill)",background:C.surfaceWarm,color:C.earth,border:"1px solid "+C.line}}>Planilla</span>}
+                    {SCHED.esLimpieza(v)&&<span style={{fontSize:8.5,fontWeight:600,letterSpacing:".06em",padding:"2px 8px",borderRadius:"var(--sa-pill)",background:C.surfaceWarm,color:C.earth,border:"1px solid "+C.line}}>{(v.zonas||[]).length?(v.zonas||[]).map(SCHED.zonaLabel).join(" · "):"sin zonas"}</span>}
                   </div>
                 )}
               </div>
               </button>
               <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0,marginLeft:8}}>
-                <span style={{fontSize:10,fontWeight:700,color:v.active?C.green:C.red,background:v.active?"#EDF5EF":"#F5EDEC",padding:"3px 8px",borderRadius:100}}>{v.active?"Activo":"Inactivo"}</span>
+                <span style={{fontSize:10,fontWeight:700,color:v.active?C.green:C.attentionText,background:v.active?"#E8F2ED":"#F8ECE9",padding:"3px 8px",borderRadius:"var(--sa-pill)"}}>{v.active?"Activo":"Inactivo"}</span>
                 <button onClick={function(){var u=vendors.map(function(x){if(x.id===v.id){var r=Object.assign({},x);r.active=!x.active;return r;}return x;});onSave(u);}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11,cursor:"pointer"}}>{v.active?"Desactivar":"Activar"}</button>
-                <button onClick={function(){if(confirm("¿Eliminar a "+vendorDisplay(v)+" permanentemente?")){onSave(vendors.filter(function(x){return x.id!==v.id;}));}}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #DBC8C4",background:"#fff",color:C.red,fontSize:11,cursor:"pointer",fontWeight:600}}>Eliminar</button>
+                <button onClick={function(){if(confirm("¿Eliminar a "+vendorDisplay(v)+" permanentemente?")){onSave(vendors.filter(function(x){return x.id!==v.id;}));}}} style={{padding:"4px 10px",borderRadius:6,border:"1px solid #E9C9C2",background:"#fff",color:C.red,fontSize:11,cursor:"pointer",fontWeight:600}}>Eliminar</button>
               </div>
             </div>
             {abV&&(
@@ -5549,13 +5645,13 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, re
                 {v.tipo==="interno"?(
                   <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                     {INTERNAL_CATS.map(function(c){var s=v.categoria===c;return(
-                      <button key={c} onClick={function(){var u=vendors.map(function(x){if(x.id===v.id){var r=Object.assign({},x);r.categoria=c;return r;}return x;});onSave(u);}} style={{padding:"4px 10px",borderRadius:100,border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{c}</button>
+                      <button key={c} onClick={function(){var u=vendors.map(function(x){if(x.id===v.id){var r=Object.assign({},x);r.categoria=c;return r;}return x;});onSave(u);}} style={{padding:"4px 10px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{c}</button>
                     );})}
                   </div>
                 ):(
                   <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                     {(allExtCats||[]).map(function(c){var s=v.categoria===c;return(
-                      <button key={c} onClick={function(){var u=vendors.map(function(x){if(x.id===v.id){var r=Object.assign({},x);r.categoria=c;return r;}return x;});onSave(u);}} style={{padding:"4px 10px",borderRadius:100,border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{c}</button>
+                      <button key={c} onClick={function(){var u=vendors.map(function(x){if(x.id===v.id){var r=Object.assign({},x);r.categoria=c;return r;}return x;});onSave(u);}} style={{padding:"4px 10px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{c}</button>
                     );})}
                   </div>
                 )}
@@ -5580,8 +5676,8 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, re
                   </button>
                   {v.isSupervisor&&<span style={{fontSize:10.5,color:C.taupe}}>Revisa limpiezas del equipo y clasifica daños</span>}
                   {v.isAdmin&&(isAdminPrincipalVendor(v,vendors)
-                    ? <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"3px 9px",borderRadius:100,background:C.black,color:"#fff"}}>Admin principal</span>
-                    : <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"3px 9px",borderRadius:100,background:C.surfaceWarm,color:C.earth,border:"1px solid "+C.gray}}>Admin secundario</span>)}
+                    ? <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"3px 9px",borderRadius:"var(--sa-pill)",background:C.black,color:"#fff"}}>Admin principal</span>
+                    : <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"3px 9px",borderRadius:"var(--sa-pill)",background:C.surfaceWarm,color:C.earth,border:"1px solid "+C.gray}}>Admin secundario</span>)}
                 </div>
               )}
               {/* Programación: zonas, preferencias, tope y descansos */}
@@ -5652,7 +5748,7 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, re
         <div style={{fontSize:9.5,color:C.earth,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",marginBottom:10}}>Categorías externas guardadas</div>
         {allExtCats.length===0&&<div style={{fontSize:12,color:C.taupe,marginBottom:8}}>Ninguna aún — agrégalas abajo.</div>}
         <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
-          {allExtCats.map(function(c,i){return <span key={i} style={{padding:"4px 10px",borderRadius:100,background:C.surfaceWarm,fontSize:12,color:C.black,border:"1px solid "+C.line,display:"flex",alignItems:"center",gap:6}}>{c}<button onClick={function(){var u=allExtCats.filter(function(_,j){return j!==i;});if(onSaveExtCats)onSaveExtCats(u);}} style={{background:"none",border:"none",color:C.gray,fontSize:14,cursor:"pointer",lineHeight:1}}>×</button></span>;})}
+          {allExtCats.map(function(c,i){return <span key={i} style={{padding:"4px 10px",borderRadius:"var(--sa-pill)",background:C.surfaceWarm,fontSize:12,color:C.black,border:"1px solid "+C.line,display:"flex",alignItems:"center",gap:6}}>{c}<button onClick={function(){var u=allExtCats.filter(function(_,j){return j!==i;});if(onSaveExtCats)onSaveExtCats(u);}} style={{background:"none",border:"none",color:C.gray,fontSize:14,cursor:"pointer",lineHeight:1}}>×</button></span>;})}
         </div>
         <div style={{display:"flex",gap:8}}>
           <input placeholder="Ej. Servicios Múltiples (máx 3 palabras)" value={newExtCat} onChange={function(e){setNewExtCat(e.target.value);}} style={{flex:1,border:"1px solid "+C.gray,borderRadius:6,padding:"8px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none"}}/>
@@ -5680,12 +5776,12 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, re
               <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase",marginBottom:6}}>Categoría</div>
               {newV.tipo==="interno"?(
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                  {INTERNAL_CATS.map(function(c){var s=newV.categoria===c;return <button key={c} onClick={function(){setNewV(function(p){return Object.assign({},p,{categoria:c});});}} style={{padding:"6px 14px",borderRadius:100,border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:12,fontWeight:600,cursor:"pointer"}}>{c}</button>;})}
+                  {INTERNAL_CATS.map(function(c){var s=newV.categoria===c;return <button key={c} onClick={function(){setNewV(function(p){return Object.assign({},p,{categoria:c});});}} style={{padding:"6px 14px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:12,fontWeight:600,cursor:"pointer"}}>{c}</button>;})}
                 </div>
               ):(
                 <div>
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:6}}>
-                    {allExtCats.map(function(c){var s=newV.categoria===c;return <button key={c} onClick={function(){setNewV(function(p){return Object.assign({},p,{categoria:c});});}} style={{padding:"6px 14px",borderRadius:100,border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:12,fontWeight:600,cursor:"pointer"}}>{c}</button>;})}
+                    {allExtCats.map(function(c){var s=newV.categoria===c;return <button key={c} onClick={function(){setNewV(function(p){return Object.assign({},p,{categoria:c});});}} style={{padding:"6px 14px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:12,fontWeight:600,cursor:"pointer"}}>{c}</button>;})}
                   </div>
                   {allExtCats.length===0&&<div style={{fontSize:12,color:C.taupe}}>Agrega primero una categoría externa arriba.</div>}
                 </div>
@@ -5716,7 +5812,7 @@ function PropList({props, onSave}) {
         if(p.hidden) return null;
         var isConfirming = confirmId===p.id;
         return (
-          <div key={p.id} style={{background:"#fff",borderRadius:10,padding:"12px 16px",border:"1px solid "+(isConfirming?"#DBC8C4":C.line)}}>
+          <div key={p.id} style={{background:"#fff",borderRadius:10,padding:"12px 16px",border:"1px solid "+(isConfirming?"#E9C9C2":C.line)}}>
             {/* Name + delete area */}
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:isConfirming?10:8}}>
               <span style={{fontSize:13.5,fontWeight:500,color:C.black,flex:1}}>{p.name}</span>
@@ -5725,7 +5821,7 @@ function PropList({props, onSave}) {
                   <button onClick={function(){onSave(props.map(function(x){return x.id===p.id?Object.assign({},x,{hidden:true}):x;}));}} style={{padding:"5px 12px",borderRadius:6,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
                     Ocultar
                   </button>
-                  <button onClick={function(){setConfirmId(p.id);}} style={{padding:"5px 12px",borderRadius:6,border:"1px solid #DBC8C4",background:"#FFF9F9",color:C.red,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  <button onClick={function(){setConfirmId(p.id);}} style={{padding:"5px 12px",borderRadius:6,border:"1px solid #E9C9C2",background:"#FFF9F9",color:C.red,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
                     Eliminar
                   </button>
                 </div>
@@ -5765,7 +5861,7 @@ function PropList({props, onSave}) {
               <div style={{marginTop:10,borderTop:"1px solid "+C.gray,paddingTop:10}}>
                 <label style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".12em",textTransform:"uppercase",display:"block",marginBottom:4}}>Enlace del anuncio (referencia)</label>
                 <input type="url" placeholder="https://… (Airbnb / Hospitable)" value={p.listingUrl||""} onChange={function(e){var v=e.target.value;onSave(props.map(function(x,j){if(j!==i)return x;return Object.assign({},x,{listingUrl:v});}));}} style={{width:"100%",border:"1px solid "+C.gray,borderRadius:6,padding:"6px 10px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",boxSizing:"border-box"}}/>
-                <div style={{fontSize:10.5,color:C.taupe,marginTop:5,lineHeight:1.5}}>El técnico verá este enlace como referencia antes de fotografiar cada espacio. Opcionalmente sube fotos de referencia por espacio:</div>
+                <div style={{fontSize:12,color:C.taupe,marginTop:5,lineHeight:1.5}}>El técnico verá este enlace como referencia antes de fotografiar cada espacio. Opcionalmente sube fotos de referencia por espacio:</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginTop:8}}>
                   {[["habitacion","Habitación"],["cocina","Cocina"],["sala","Sala"]].map(function(rk){
                     var key=rk[0]; var img=(p.refImagenes||{})[key];
@@ -5841,7 +5937,7 @@ function DupAvisoModal({conflictos, propiedad, fecha, onContinuar, onDesistir}){
   var uno=conflictos.length===1;
   return (
     <div style={{position:"fixed",inset:0,zIndex:960,background:"rgba(62,63,63,.42)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-      <div style={{width:"100%",maxWidth:430,background:"#fff",borderRadius:20,padding:"22px 22px 24px",fontFamily:"Montserrat,sans-serif",boxShadow:"0 28px 80px rgba(62,63,63,.16)",maxHeight:"88vh",overflowY:"auto"}}>
+      <div style={{width:"100%",maxWidth:430,background:"#fff",borderRadius:20,padding:"22px 22px 24px",fontFamily:"Montserrat,sans-serif",boxShadow:"var(--sa-shadow-lg)",maxHeight:"88vh",overflowY:"auto"}}>
         <div style={{fontSize:9.5,fontWeight:700,color:C.orange,letterSpacing:".22em",textTransform:"uppercase",marginBottom:7}}>Ya hay un formulario</div>
         <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,color:C.black,lineHeight:1.25,marginBottom:11,textWrap:"balance"}}>
           {uno?"Este apartamento ya tiene un formulario de este día":"Este apartamento ya tiene formularios de este día"}
@@ -5859,7 +5955,7 @@ function DupAvisoModal({conflictos, propiedad, fecha, onContinuar, onDesistir}){
             );
           })}
         </div>
-        <div style={{background:"#F5EDEC",border:"1px solid #E7D3CE",borderRadius:12,padding:"12px 13px",fontSize:12,color:"#8a4a44",lineHeight:1.65,marginBottom:16,textWrap:"pretty"}}>
+        <div style={{background:"#F7E7E4",border:"1px solid #E9C9C2",borderRadius:12,padding:"12px 13px",fontSize:12,color:"#C0392B",lineHeight:1.65,marginBottom:16,textWrap:"pretty"}}>
           Si subes otro, {uno?"el anterior se borrará automáticamente":"los anteriores se borrarán automáticamente"}. Solo se paga una limpieza por apartamento por día.
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:9}}>
@@ -6066,7 +6162,7 @@ function WifiFicha({dato, nombre, vendorEmail}){
     </div>
   );
   if(listo) return (
-    <div style={{background:"#EDF5EF",border:"1px solid #CFE3D6",borderRadius:12,padding:"16px",fontSize:12.5,color:C.green,fontWeight:600,lineHeight:1.6,textWrap:"pretty"}}>
+    <div style={{background:"#E8F2ED",border:"1px solid #CFE3D6",borderRadius:12,padding:"16px",fontSize:12.5,color:C.green,fontWeight:600,lineHeight:1.6,textWrap:"pretty"}}>
       ✓ Reporte enviado con la foto del sticker. La administración se encarga del cambio.
     </div>
   );
@@ -6086,7 +6182,7 @@ function WifiFicha({dato, nombre, vendorEmail}){
         <Icon name="wifi" size={17} stroke="#fff"/>Conexión rápida
       </button>
       <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-        <button onClick={copiar} style={Object.assign({},BTN2,copiado?{border:"1px solid "+C.green,background:"#EDF5EF",color:C.green}:{})}>{copiado?"✓ Contraseña copiada":"Copiar contraseña"}</button>
+        <button onClick={copiar} style={Object.assign({},BTN2,copiado?{border:"1px solid "+C.green,background:"#E8F2ED",color:C.green}:{})}>{copiado?"✓ Contraseña copiada":"Copiar contraseña"}</button>
         <button onClick={function(){setRep(!rep);}} style={Object.assign({},BTN2,rep?{border:"1px solid "+C.black,color:C.black}:{})}>Reportar un problema</button>
       </div>
       {paso&&<div style={{fontSize:11.5,color:C.earth,background:C.surfaceWarm,borderRadius:10,padding:"10px 12px",lineHeight:1.6,textWrap:"pretty"}}>{paso}</div>}
@@ -6107,7 +6203,7 @@ function WifiFicha({dato, nombre, vendorEmail}){
               );
             })}
           </div>
-          <div style={{fontSize:11,fontWeight:700,color:C.black,marginBottom:6}}>Foto del sticker del router <span style={{color:C.red}}>· obligatoria</span></div>
+          <div style={{fontSize:11,fontWeight:700,color:C.black,marginBottom:6}}>Foto del sticker del router <span style={{color:C.attentionText}}>· obligatoria</span></div>
           <div style={{fontSize:11,color:C.earth,lineHeight:1.6,marginBottom:9,textWrap:"pretty"}}>
             Es la etiqueta pegada en la parte de atrás del router: ahí vienen el nombre de la red y la clave de fábrica. Con esa foto la administración puede resolverlo sin volver a la propiedad.
           </div>
@@ -6183,12 +6279,12 @@ function WifiAviso({propiedad, props, vendorEmail}){
     <>
       {!oculto&&!abierto&&(
         <div style={{position:"fixed",left:12,right:12,bottom:14,zIndex:880,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
-          <div style={{pointerEvents:"auto",display:"flex",alignItems:"center",gap:10,maxWidth:440,width:"100%",background:"#3E3F3F",borderRadius:100,padding:"9px 10px 9px 15px",boxShadow:"0 14px 40px rgba(62,63,63,.28)"}}>
+          <div style={{pointerEvents:"auto",display:"flex",alignItems:"center",gap:10,maxWidth:440,width:"100%",background:"#3E3F3F",borderRadius:"var(--sa-pill)",padding:"9px 10px 9px 15px",boxShadow:"var(--sa-shadow-md)"}}>
             <Icon name="wifi" size={15} stroke="rgba(255,255,255,.75)"/>
             <div style={{flex:1,minWidth:0,fontSize:11.5,color:"#fff",lineHeight:1.4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
               Wi-Fi de {aptoCorto(p)} disponible
             </div>
-            <button onClick={function(){setAbierto(true);}} style={{flexShrink:0,padding:"7px 13px",minHeight:34,borderRadius:100,border:"none",background:"#fff",color:C.black,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Conectarme</button>
+            <button onClick={function(){setAbierto(true);}} style={{flexShrink:0,padding:"7px 13px",minHeight:34,borderRadius:"var(--sa-pill)",border:"none",background:"#fff",color:C.black,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Conectarme</button>
             <button onClick={function(){setOculto(true);}} title="Cerrar" style={{flexShrink:0,width:30,height:30,borderRadius:"50%",border:"none",background:"transparent",color:"rgba(255,255,255,.6)",fontSize:13,cursor:"pointer",lineHeight:1}}>✕</button>
           </div>
         </div>
@@ -6204,7 +6300,7 @@ function WifiBtn({props, isMobile, vendorEmail}){
   return (
     <>
       <button onClick={function(){setOpen(true);}} title="Wi-Fi de las propiedades"
-        style={{display:"flex",alignItems:"center",gap:6,background:"transparent",border:"1px solid "+C.line,borderRadius:100,color:C.earth,cursor:"pointer",padding:isMobile?"7px 9px":"7px 13px",fontSize:11.5,fontWeight:600,letterSpacing:".04em",fontFamily:"Montserrat,sans-serif"}}>
+        style={{display:"flex",alignItems:"center",gap:6,background:"transparent",border:"1.5px solid "+C.gray,borderRadius:"var(--sa-pill)",color:C.earth,cursor:"pointer",minHeight:44,padding:isMobile?"0 11px":"0 15px",fontSize:11.5,fontWeight:600,letterSpacing:".04em",fontFamily:"Montserrat,sans-serif"}}>
         <Icon name="wifi" size={16} stroke={C.earth}/>{!isMobile&&"Wi-Fi"}
       </button>
       {open&&<WifiSheet props={props} vendorEmail={vendorEmail} onClose={function(){setOpen(false);}}/>}
@@ -6216,7 +6312,7 @@ function VBlock({title,hint,children}){
   return (
     <div style={{marginTop:14}}>
       <div style={{fontSize:11,fontWeight:700,color:C.black,marginBottom:hint?3:8}}>{title}</div>
-      {hint&&<div style={{fontSize:10.5,color:C.taupe,lineHeight:1.5,marginBottom:8}}>{hint}</div>}
+      {hint&&<div style={{fontSize:12,color:C.taupe,lineHeight:1.5,marginBottom:8}}>{hint}</div>}
       <div style={{display:"flex",flexDirection:"column",gap:7}}>{children}</div>
     </div>
   );
@@ -6257,7 +6353,7 @@ function ZonasPicker({v, vendors, onSave, props, reps}){
   );
   return (
     <div>
-      <div style={{fontSize:10.5,color:C.taupe,lineHeight:1.6,marginBottom:8,textWrap:"pretty"}}>Toca una zona para asignarla. Toca de nuevo una asignada para marcarla como preferida por cercanía. Doble toque la quita.</div>
+      <div style={{fontSize:12,color:C.taupe,lineHeight:1.6,marginBottom:8,textWrap:"pretty"}}>Toca una zona para asignarla. Toca de nuevo una asignada para marcarla como preferida por cercanía. Doble toque la quita.</div>
       <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
         {visibles.map(function(z){
           var on=asignadas.indexOf(z)>=0, pf=pref.indexOf(z)>=0;
@@ -6265,7 +6361,7 @@ function ZonasPicker({v, vendors, onSave, props, reps}){
             <button key={z} onClick={function(){ if(!on) toggle(z); else togglePref(z); }}
               onDoubleClick={function(){ if(on) toggle(z); }}
               title={pf?"Preferida":on?"Asignada":"Sin asignar"}
-              style={{padding:"5px 10px",borderRadius:100,fontSize:10.5,fontWeight:600,cursor:"pointer",
+              style={{padding:"5px 10px",borderRadius:"var(--sa-pill)",fontSize:10.5,fontWeight:600,cursor:"pointer",
                 border:"1.5px solid "+(pf?C.peach:on?C.black:C.gray),
                 background:pf?C.peach:on?C.black:"#fff",
                 color:(pf||on)?"#fff":C.taupe}}>
@@ -6276,20 +6372,20 @@ function ZonasPicker({v, vendors, onSave, props, reps}){
       </div>
       {hist.total>0&&(
         <div style={{marginTop:9,background:C.surfaceWarm,borderRadius:9,padding:"9px 11px"}}>
-          <div style={{fontSize:10.5,color:C.earth,lineHeight:1.6}}>
+          <div style={{fontSize:12,color:C.earth,lineHeight:1.6}}>
             Ya ha trabajado en {hist.orden.slice(0,5).map(function(z){ return SCHED.zonaLabel(z)+" ("+hist.cuenta[z]+")"; }).join(" · ")}
           </div>
           <button onClick={function(){
             var top=hist.orden.slice(0,4);
             onSave(vendors.map(function(x){ return x.id===v.id?Object.assign({},x,{zonas:top,zonasPref:hist.orden.slice(0,2)}):x; }));
-          }} style={{marginTop:8,padding:"6px 12px",minHeight:34,borderRadius:100,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:10.5,fontWeight:600,cursor:"pointer"}}>
+          }} style={{marginTop:8,padding:"6px 12px",minHeight:34,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:10.5,fontWeight:600,cursor:"pointer"}}>
             Usar su historial como zonas
           </button>
         </div>
       )}
       {asignadas.length===0
         ? <div style={{fontSize:10.5,color:C.orange,marginTop:7,fontWeight:600}}>Sin zonas marcadas no recibirá ninguna limpieza automática.</div>
-        : <div style={{fontSize:10.5,color:C.earth,marginTop:7,lineHeight:1.6,textWrap:"pretty"}}>El motor solo le asigna limpiezas en estas zonas. Fuera de ellas, únicamente por asignación manual.</div>}
+        : <div style={{fontSize:12,color:C.earth,marginTop:7,lineHeight:1.6,textWrap:"pretty"}}>El motor solo le asigna limpiezas en estas zonas. Fuera de ellas, únicamente por asignación manual.</div>}
       {asignadas.length>0&&<div style={{fontSize:10.5,color:C.earth,marginTop:7}}>{asignadas.length} zona{asignadas.length===1?"":"s"}{pref.length?" · prefiere "+pref.map(SCHED.zonaLabel).join(", "):""}</div>}
     </div>
   );
@@ -6348,7 +6444,7 @@ function PropsCfg({props,onSave}) {
         <div style={{background:C.beige,borderRadius:10,padding:"11px 14px",marginBottom:12,fontSize:12,color:C.earth,fontFamily:"monospace",lineHeight:1.8}}>Narama – Apto 725<br/>Casa San Ignacio – Apto 506</div>
         <button onClick={function(){if(ref.current)ref.current.click();}} style={{padding:"11px 18px",borderRadius:10,border:"1.5px solid "+C.gray,background:C.black,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer"}}>📄 Seleccionar .txt</button>
         <input ref={ref} type="file" accept=".txt,text/plain" style={{display:"none"}} onChange={handleTxt}/>
-        {msg&&<div style={{marginTop:10,fontSize:13,fontWeight:600,color:C.green,background:"#EDF5EF",padding:"9px 13px",borderRadius:9}}>{msg}</div>}
+        {msg&&<div style={{marginTop:10,fontSize:13,fontWeight:600,color:C.green,background:"#E8F2ED",padding:"9px 13px",borderRadius:9}}>{msg}</div>}
       </div>
       <div style={{fontSize:10.5,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",paddingLeft:2}}>Lista — {visibleProps(props).length} propiedades</div>
       <div style={{background:"#fff",borderRadius:12,padding:14,border:"1px solid "+C.line}}>
@@ -6359,7 +6455,7 @@ function PropsCfg({props,onSave}) {
           </div>
           <button onClick={syncFromHospitable} disabled={hospBusy} style={{padding:"10px 16px",borderRadius:9,border:"none",background:hospBusy?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:hospBusy?"wait":"pointer",flexShrink:0}}>{hospBusy?"Sincronizando…":"⟳ Sincronizar con Hospitable"}</button>
         </div>
-        {hospMsg&&<div style={{marginTop:10,fontSize:12.5,fontWeight:600,color:hospMsg.indexOf("No se")===0?C.red:C.green,background:hospMsg.indexOf("No se")===0?"#F5EDEC":"#EDF5EF",padding:"9px 13px",borderRadius:9,lineHeight:1.5}}>{hospMsg}</div>}
+        {hospMsg&&<div style={{marginTop:10,fontSize:12.5,fontWeight:600,color:hospMsg.indexOf("No se")===0?C.red:C.green,background:hospMsg.indexOf("No se")===0?"#F7E7E4":"#E8F2ED",padding:"9px 13px",borderRadius:9,lineHeight:1.5}}>{hospMsg}</div>}
       </div>
 
       {/* ── VERIFICACIÓN 1 — Hospitable ↔ Dashboard de propietarios ── */}
@@ -6475,7 +6571,7 @@ function PropsCfg({props,onSave}) {
         return (
           <div style={{background:"#FFF9F2",borderRadius:12,padding:14,border:"1px solid #E6C9A8"}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-              <span style={{fontSize:13,fontWeight:700,color:"#9a6b2f"}}>⚠ Propiedades por completar ({problemas.length})</span>
+              <span style={{fontSize:13,fontWeight:700,color:"#9a5020"}}>⚠ Propiedades por completar ({problemas.length})</span>
             </div>
             <div style={{fontSize:11.5,color:C.earth,lineHeight:1.55,marginBottom:10}}>Estas propiedades aún no tienen enlace de anuncio o foto de referencia. Sin esto, el técnico no ve la referencia al limpiar. Resuélvelo sincronizando con Hospitable o subiendo las fotos en cada propiedad.</div>
             <div style={{display:"flex",flexDirection:"column",gap:6}}>
@@ -6483,7 +6579,7 @@ function PropsCfg({props,onSave}) {
                 var falta=[]; if(!p.listingUrl)falta.push("enlace del anuncio"); if(refPhotosOf(p).length===0)falta.push("foto de referencia");
                 return <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:"#fff",borderRadius:8,padding:"8px 12px",border:"1px solid "+C.line}}>
                   <span style={{fontSize:12.5,fontWeight:600,color:C.black}}>{p.name}</span>
-                  <span style={{fontSize:10.5,fontWeight:700,color:"#9a6b2f",letterSpacing:".04em",textAlign:"right"}}>Falta: {falta.join(" + ")}</span>
+                  <span style={{fontSize:10.5,fontWeight:700,color:"#9a5020",letterSpacing:".04em",textAlign:"right"}}>Falta: {falta.join(" + ")}</span>
                 </div>;
               })}
             </div>
@@ -6535,7 +6631,7 @@ function CompanyCfg({company,onSave}) {
         <div style={{fontSize:13,color:C.earth,lineHeight:1.6,background:C.beige,padding:"12px 14px",borderRadius:10}}>Estos datos aparecen en la nota de facturación del formulario.</div>
         <F label="Nombre de la empresa"><input placeholder="Spacio AM S.A." value={name} onChange={function(e){setName(e.target.value);}}/></F>
         <F label="NIT"><input placeholder="118287796" value={nit} onChange={function(e){setNit(e.target.value);}}/></F>
-        {ok&&<div style={{padding:"10px 13px",borderRadius:9,fontSize:13,fontWeight:600,background:"#EDF5EF",color:C.green}}>✓ Datos actualizados.</div>}
+        {ok&&<div style={{padding:"10px 13px",borderRadius:9,fontSize:13,fontWeight:600,background:"#E8F2ED",color:C.green}}>✓ Datos actualizados.</div>}
         <BigBtn onClick={save} dis={!name||!nit}>Guardar →</BigBtn>
       </div>
     </Card>
@@ -6561,7 +6657,7 @@ function SecurityCfg({adminPin,onSave}) {
         <div style={{height:1,background:C.gray}}/>
         <F label="Nuevo PIN"><input type="password" placeholder="Mínimo 4 caracteres" value={np} onChange={function(e){setNp(e.target.value);}}/></F>
         <F label="Confirmar nuevo PIN"><input type="password" placeholder="Repite el PIN" value={cp} onChange={function(e){setCp(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")save();}}/></F>
-        {msg&&<div style={{padding:"10px 13px",borderRadius:9,fontSize:13,fontWeight:600,background:msg.ok?"#EDF5EF":"#F5EDEC",color:msg.ok?C.green:C.red}}>{msg.t}</div>}
+        {msg&&<div style={{padding:"10px 13px",borderRadius:9,fontSize:13,fontWeight:600,background:msg.ok?"#E8F2ED":"#F7E7E4",color:msg.ok?C.green:C.red}}>{msg.t}</div>}
         <BigBtn onClick={save} dis={!cur||!np||!cp}>Actualizar PIN →</BigBtn>
       </div>
     </Card>
@@ -6647,12 +6743,12 @@ function ProgramarMantenimiento({rep, vendors, props, reservas, schedules, onSvS
   if(yaProg&&!abierto){
     var vy=(vendors||[]).find(function(x){ return String(x.email||"").toLowerCase()===String(yaProg.vendorEmail||"").toLowerCase(); });
     return (
-      <div style={{background:"#EDF5EF",border:"1px solid #CFE3D6",borderRadius:10,padding:"12px 14px",display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+      <div style={{background:"#E8F2ED",border:"1px solid #CFE3D6",borderRadius:10,padding:"12px 14px",display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap"}}>
         <div style={{minWidth:0}}>
           <div style={{fontSize:12.5,fontWeight:700,color:C.green}}>Reparación programada</div>
           <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6}}>{(vy?vendorDisplay(vy):yaProg.vendorEmail)} · {fmtDate(yaProg.fecha)} — ya recibió el correo con el resumen del daño.</div>
         </div>
-        <button onClick={function(){setAbierto(true);}} style={{flexShrink:0,padding:"8px 14px",minHeight:38,borderRadius:100,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11,fontWeight:600,cursor:"pointer"}}>Programar otra</button>
+        <button onClick={function(){setAbierto(true);}} style={{flexShrink:0,padding:"8px 14px",minHeight:38,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11,fontWeight:600,cursor:"pointer"}}>Programar otra</button>
       </div>
     );
   }
@@ -6660,7 +6756,7 @@ function ProgramarMantenimiento({rep, vendors, props, reservas, schedules, onSvS
   if(!abierto) return (
     <div>
       {enviado&&<div style={{fontSize:11.5,color:C.green,fontWeight:600,marginBottom:8}}>✓ Enviado a {enviado}</div>}
-      <button onClick={function(){setAbierto(true); setFecha(salidas[0]||"");}} style={{width:"100%",padding:"12px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Programar mantenimiento →</button>
+      <button onClick={function(){setAbierto(true); setFecha(salidas[0]||"");}} style={{width:"100%",padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Programar mantenimiento →</button>
     </div>
   );
 
@@ -6688,7 +6784,7 @@ function ProgramarMantenimiento({rep, vendors, props, reservas, schedules, onSvS
           ? <div style={{display:"flex",gap:7,flexWrap:"wrap",marginBottom:9}}>
               {salidas.map(function(f){
                 var sel=fecha===f;
-                return <button key={f} onClick={function(){setFecha(f);}} style={{padding:"9px 13px",minHeight:42,borderRadius:100,border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{schedDiaNombre(f).slice(0,3)} {fmtDate(f)}</button>;
+                return <button key={f} onClick={function(){setFecha(f);}} style={{padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{schedDiaNombre(f).slice(0,3)} {fmtDate(f)}</button>;
               })}
             </div>
           : <div style={{fontSize:11,color:C.taupe,marginBottom:9,lineHeight:1.6,textWrap:"pretty"}}>No hay checkouts próximos sincronizados para esta propiedad. Elige la fecha a mano.</div>}
@@ -6702,8 +6798,8 @@ function ProgramarMantenimiento({rep, vendors, props, reservas, schedules, onSvS
       </div>
 
       <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-        <button onClick={programar} disabled={!tec||!fecha} style={{flex:1,minWidth:170,padding:"12px",minHeight:46,borderRadius:100,border:"none",background:(!tec||!fecha)?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:(!tec||!fecha)?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>Programar y avisar al técnico →</button>
-        <button onClick={function(){setAbierto(false);}} style={{padding:"12px 18px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cancelar</button>
+        <button onClick={programar} disabled={!tec||!fecha} style={{flex:1,minWidth:170,padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"none",background:(!tec||!fecha)?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:(!tec||!fecha)?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>Programar y avisar al técnico →</button>
+        <button onClick={function(){setAbierto(false);}} style={{padding:"12px 18px",minHeight:46,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cancelar</button>
       </div>
     </div>
   );
@@ -6760,7 +6856,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
 
   return (
     <Overlay onClick={onClose}>
-      <div style={{background:"#fff",borderRadius:scDM.mobile?"18px 18px 0 0":20,width:"100%",maxWidth:580,maxHeight:scDM.mobile?"92vh":"90vh",overflow:"auto",boxShadow:"0 32px 80px rgba(0,0,0,.22)",alignSelf:scDM.mobile?"flex-end":"center",marginBottom:scDM.mobile?-16:0}} onClick={function(e){e.stopPropagation();}}>
+      <div style={{background:"#fff",borderRadius:scDM.mobile?"18px 18px 0 0":20,width:"100%",maxWidth:580,maxHeight:scDM.mobile?"92vh":"90vh",overflow:"auto",boxShadow:"var(--sa-shadow-lg)",alignSelf:scDM.mobile?"flex-end":"center",marginBottom:scDM.mobile?-16:0}} onClick={function(e){e.stopPropagation();}}>
 
         {/* Header */}
         <div style={{padding:scDM.mobile?"14px 16px":"18px 24px",borderBottom:"1px solid "+C.gray,display:"flex",justifyContent:"space-between",alignItems:scDM.mobile?"flex-start":"center",gap:12,flexWrap:"wrap",position:"sticky",top:0,background:"#fff",zIndex:10}}>
@@ -6769,7 +6865,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
             <div style={{fontSize:15,fontWeight:600,color:C.black,lineHeight:1.35,textWrap:"pretty"}}>{rep.propiedad}</div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            {saved&&<span style={{fontSize:11,fontWeight:700,color:C.green,background:"#EDF5EF",padding:"4px 10px",borderRadius:100}}>✓ Guardado</span>}
+            {saved&&<span style={{fontSize:11,fontWeight:700,color:C.green,background:"#E8F2ED",padding:"4px 10px",borderRadius:"var(--sa-pill)"}}>✓ Guardado</span>}
             {!editing&&!readOnly&&<button onClick={function(){setEditing(true);}} style={{padding:"7px 13px",borderRadius:8,border:"1.5px solid "+C.earth,background:"none",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer"}}>✏ Editar</button>}
             {!editing&&!readOnly&&<button onClick={onDelete} style={{padding:"7px 13px",borderRadius:8,border:"1.5px solid #e0cece",background:"none",color:C.red,fontSize:12,fontWeight:600,cursor:"pointer"}}>Eliminar</button>}
             {editing&&<button onClick={function(){setEditing(false);resetForm();}} style={{padding:"7px 13px",borderRadius:8,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer"}}>Cancelar</button>}
@@ -6783,7 +6879,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
           {/* ── EDIT MODE ── */}
           {editing&&(
             <div style={{display:"flex",flexDirection:"column",gap:14}}>
-              <div style={{background:"#FEF0EC",borderRadius:10,padding:"10px 14px",fontSize:12.5,color:C.peach,fontWeight:600}}>✏ Editando registro — los cambios se guardan al presionar "Guardar cambios"</div>
+              <div style={{background:"#FEF0EC",borderLeft:"3px solid "+C.attention,borderRadius:10,padding:"10px 14px",fontSize:12.5,color:C.black,fontWeight:600}}>✏ Editando registro — los cambios se guardan al presionar "Guardar cambios"</div>
 
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
                 <F label="Propiedad">
@@ -6812,7 +6908,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
               <div>
                 <div style={{fontSize:10.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>Categoría</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-                  {CATS.map(function(c){var bx=BADGE[c];var s=form.categoria===c;return <button key={c} onClick={function(){setF("categoria",c);}} style={{padding:"7px 14px",borderRadius:100,cursor:"pointer",border:"1.5px solid "+(s?bx.tx:C.gray),background:s?bx.bg:"#fff",color:s?bx.tx:C.earth,fontSize:12.5,fontWeight:600,transition:"all .18s"}}>{c}</button>;})}
+                  {CATS.map(function(c){var bx=BADGE[c];var s=form.categoria===c;return <button key={c} onClick={function(){setF("categoria",c);}} style={{padding:"7px 14px",borderRadius:"var(--sa-pill)",cursor:"pointer",border:"1.5px solid "+(s?bx.tx:C.gray),background:s?bx.bg:"#fff",color:s?bx.tx:C.earth,fontSize:12.5,fontWeight:600,transition:"all .18s"}}>{c}</button>;})}
                 </div>
               </div>
 
@@ -6833,8 +6929,8 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
                       {at.locked&&<span style={{fontSize:10,color:C.green,fontWeight:600}}>Tarifa fija: Q{at.tarifa}</span>}
                     </div>
                     <input type="number" placeholder="Ej. 850" value={form.total} onChange={function(e){setF("total",e.target.value);}}
-                      style={{border:"1.5px solid "+(at.locked&&form.total===at.tarifa?"#c8dfc8":C.gray),borderRadius:8,padding:"10px 14px",fontSize:14,fontFamily:"Montserrat,sans-serif",outline:"none",fontWeight:at.locked&&form.total===at.tarifa?700:400,color:at.locked&&form.total===at.tarifa?C.green:C.black}}/>
-                    {at.locked&&form.total!==at.tarifa&&form.total!==""&&<div style={{fontSize:11,color:"#7a6000"}}>⚠ Modificado — tarifa fija es Q{at.tarifa}</div>}
+                      style={{border:"1.5px solid "+(at.locked&&form.total===at.tarifa?"#CFE3D6":C.gray),borderRadius:8,padding:"10px 14px",fontSize:14,fontFamily:"Montserrat,sans-serif",outline:"none",fontWeight:at.locked&&form.total===at.tarifa?700:400,color:at.locked&&form.total===at.tarifa?C.green:C.black}}/>
+                    {at.locked&&form.total!==at.tarifa&&form.total!==""&&<div style={{fontSize:11,color:"#9a5020"}}>⚠ Modificado — tarifa fija es Q{at.tarifa}</div>}
                   </div>
                 );
               })()}
@@ -6843,11 +6939,11 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
                 <div style={{fontSize:10.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>¿Quién paga este trabajo?</div>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                   {["Spacio AM","Dueño"].map(function(v){
-                    var colors={"Spacio AM":{bg:"#EEF3FA",tx:"#4a7fa5",bd:"#4a7fa5"},"Dueño":{bg:"#FEF0EC",tx:"#E9826A",bd:"#E9826A"}};
+                    var colors={"Spacio AM":{bg:"#E8EDF3",tx:"#3B6691",bd:"#3B6691"},"Dueño":{bg:"#FEF0EC",tx:"#E9826A",bd:"#E9826A"}};
                     var cx=colors[v]; var s=form.pagadoPor===v;
-                    return <button key={v} onClick={function(){setF("pagadoPor",s?"":v);}} style={{padding:"8px 18px",borderRadius:100,cursor:"pointer",border:"1.5px solid "+(s?cx.bd:C.gray),background:s?cx.bg:"#fff",color:s?cx.tx:C.earth,fontSize:13,fontWeight:600,transition:"all .18s"}}>{s?"✓ ":""}{v}</button>;
+                    return <button key={v} onClick={function(){setF("pagadoPor",s?"":v);}} style={{padding:"8px 18px",borderRadius:"var(--sa-pill)",cursor:"pointer",border:"1.5px solid "+(s?cx.bd:C.gray),background:s?cx.bg:"#fff",color:s?cx.tx:C.earth,fontSize:13,fontWeight:600,transition:"all .18s"}}>{s?"✓ ":""}{v}</button>;
                   })}
-                  {form.pagadoPor&&<button onClick={function(){setF("pagadoPor","");}} style={{padding:"8px 14px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.gray,fontSize:12,cursor:"pointer"}}>✕ Sin clasificar</button>}
+                  {form.pagadoPor&&<button onClick={function(){setF("pagadoPor","");}} style={{padding:"8px 14px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.gray,fontSize:12,cursor:"pointer"}}>✕ Sin clasificar</button>}
                 </div>
               </div>
 
@@ -6885,7 +6981,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
             <div style={{display:"flex",flexDirection:"column",gap:18}}>
               {al&&<div style={{background:ALT[al].bg,borderRadius:10,padding:"10px 14px",fontSize:13,fontWeight:600,color:ALT[al].clr}}>⚠ {ALT[al].label}</div>}
               <ExecSummary rep={rep} vendors={vendors}/>
-              <div><div style={{fontSize:10,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Categoría</div><span style={{padding:"5px 13px",borderRadius:100,fontSize:12,fontWeight:700,background:b.bg,color:b.tx}}>{rep.categoria}</span></div>
+              <div><div style={{fontSize:10,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Categoría</div><span style={{padding:"5px 13px",borderRadius:"var(--sa-pill)",fontSize:12,fontWeight:700,background:b.bg,color:b.tx}}>{rep.categoria}</span></div>
               <div><div style={{fontSize:10,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Trabajo realizado</div><div style={{fontSize:14,color:C.black,lineHeight:1.65,background:C.beige,padding:"13px 15px",borderRadius:10}}>{rep.descripcion}</div></div>
               {rep.comentarios&&<div><div style={{fontSize:10,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Notas / Comentarios</div><div style={{fontSize:13.5,color:C.earth,lineHeight:1.65,background:C.beige,padding:"11px 14px",borderRadius:10}}>{rep.comentarios}</div></div>}
               {/* ── Cleaning: full photo gallery organized by section */}
@@ -6902,12 +6998,12 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
                   <DamageSummary danios={rep.danios}/>
                   {hasLinkedDmg
-                    ? <div style={{padding:"9px 13px",borderRadius:8,background:"#EDF5EF",fontSize:12,color:C.green,fontWeight:600}}>✓ Ya existe un reporte de daños independiente para este trabajo</div>
-                    : (onExtract&&!readOnly&&<button onClick={function(){onExtract(rep);}} style={{padding:"11px 14px",borderRadius:10,border:"1.5px solid #DBC8C4",background:"#fff",color:C.red,fontSize:12.5,fontWeight:700,cursor:"pointer"}}>↪ Extraer daños como reporte independiente →</button>)}
+                    ? <div style={{padding:"9px 13px",borderRadius:8,background:"#E8F2ED",fontSize:12,color:C.green,fontWeight:600}}>✓ Ya existe un reporte de daños independiente para este trabajo</div>
+                    : (onExtract&&!readOnly&&<button onClick={function(){onExtract(rep);}} style={{padding:"11px 14px",borderRadius:10,border:"1.5px solid #E9C9C2",background:"#fff",color:C.red,fontSize:12.5,fontWeight:700,cursor:"pointer"}}>↪ Extraer daños como reporte independiente →</button>)}
                 </div>
               )}
               {isCleaning(rep.categoria)&&!rep.hayDanios&&(
-                <div style={{padding:"10px 14px",borderRadius:8,background:"#EDF5EF",fontSize:13,color:C.green,fontWeight:600}}>✓ Sin daños reportados</div>
+                <div style={{padding:"10px 14px",borderRadius:8,background:"#E8F2ED",fontSize:13,color:C.green,fontWeight:600}}>✓ Sin daños reportados</div>
               )}
               {rep.factura ? (
                 <div>
@@ -6931,16 +7027,16 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
                 <div style={{borderTop:"1px solid "+C.gray,paddingTop:16}}>
                   <div style={{fontSize:10,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>Estado de pago</div>
                   <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:12}}>
-                    <div style={{flex:1,padding:"11px 14px",borderRadius:10,background:rep.paid?"#EDF5EF":"#F5EDEC",fontSize:14,fontWeight:700,color:rep.paid?C.green:C.red}}>{rep.paid?"✓ Pagado":"● Pendiente"}</div>
+                    <div style={{flex:1,padding:"11px 14px",borderRadius:10,background:rep.paid?"#E8F2ED":"#F8ECE9",fontSize:14,fontWeight:700,color:rep.paid?C.green:C.attentionText}}>{rep.paid?"✓ Pagado":"● Pendiente"}</div>
                     <button onClick={function(){onMarkPaid(!rep.paid);}} style={{padding:"11px 16px",borderRadius:10,border:"1.5px solid "+C.gray,background:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",color:C.black,whiteSpace:"nowrap"}}>{rep.paid?"Marcar pendiente":"Marcar pagado ✓"}</button>
                   </div>
                   <div style={{marginBottom:12}}>
                     <div style={{fontSize:10,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>¿Quién paga este trabajo?</div>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                       {["Spacio AM","Dueño"].map(function(v){
-                        var colors={"Spacio AM":{bg:"#EEF3FA",tx:"#4a7fa5"},"Dueño":{bg:"#FEF0EC",tx:"#E9826A"}};
+                        var colors={"Spacio AM":{bg:"#E8EDF3",tx:"#3B6691"},"Dueño":{bg:"#FEF0EC",tx:"#E9826A"}};
                         var cx=colors[v]; var s=rep.pagadoPor===v;
-                        return <button key={v} onClick={function(){onSave(Object.assign({},rep,{pagadoPor:s?"":v}));}} style={{padding:"7px 16px",borderRadius:100,cursor:"pointer",border:"1.5px solid "+(s?cx.tx:C.gray),background:s?cx.bg:"#fff",color:s?cx.tx:C.earth,fontSize:12.5,fontWeight:600,transition:"all .18s"}}>{s?"✓ ":""}{v}</button>;
+                        return <button key={v} onClick={function(){onSave(Object.assign({},rep,{pagadoPor:s?"":v}));}} style={{padding:"7px 16px",borderRadius:"var(--sa-pill)",cursor:"pointer",border:"1.5px solid "+(s?cx.tx:C.gray),background:s?cx.bg:"#fff",color:s?cx.tx:C.earth,fontSize:12.5,fontWeight:600,transition:"all .18s"}}>{s?"✓ ":""}{v}</button>;
                       })}
                     </div>
                     {!rep.pagadoPor&&<div style={{fontSize:11,color:C.earth,marginTop:6}}>Sin clasificar — selecciona quién cubre este trabajo.</div>}
@@ -6979,7 +7075,6 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codig
       <GS/>
       <ResponsiveHeader
         tab={view} setTab={setView}
-        alertCount={0}
         navItems={(function(){
     var isInternal = vendor.tipo==="interno";
     var navItems = [["jobs","Mis trabajos","list"],["new","Nuevo reporte","edit"]];
@@ -7082,7 +7177,7 @@ function VendorJobsView({reps, tot, cob, pnd, adelantos, pendingCorrections, onN
 
       {/* Correction alert */}
       {pendingCorrections>0&&(
-        <div style={{background:"#F5EDEC",padding:"13px 16px",borderBottom:"1.5px solid #DBC8C4"}}>
+        <div style={{background:"#F7E7E4",padding:"13px 16px",borderBottom:"1.5px solid #E9C9C2"}}>
           <div style={{fontSize:13,fontWeight:700,color:C.red,marginBottom:3}}>⚠ {pendingCorrections} limpieza{pendingCorrections!==1?"s":""} requiere{pendingCorrections===1?"":"n"} corrección</div>
           <div style={{fontSize:11.5,color:C.earth}}>Revisa la pestaña ★ Calidad para responder.</div>
         </div>
@@ -7151,10 +7246,10 @@ function VendorJobsView({reps, tot, cob, pnd, adelantos, pendingCorrections, onN
         {shown.map(function(r) {
           var b  = BADGE[r.categoria]||BADGE["Mantenimiento"];
           var qa = r.qaStatus;
-          var qaColors = {correccion:{bg:"#F5EDEC",tx:C.red,label:"⚠ Corrección"},aprobada:{bg:"#EDF5EF",tx:C.green,label:"✓ Aprobada"},pendiente:{bg:"#F0F0EE",tx:C.taupe,label:"En revisión"}};
+          var qaColors = {correccion:{bg:"#F7E7E4",tx:C.red,label:"⚠ Corrección"},aprobada:{bg:"#E8F2ED",tx:C.green,label:"✓ Aprobada"},pendiente:{bg:"#F0F0EE",tx:C.taupe,label:"En revisión"}};
           var qac = isCleaning(r.categoria)&&qa ? qaColors[qa]||null : null;
           return (
-            <div key={r.id} style={{background:"#fff",borderRadius:10,padding:"15px 16px",border:"1px solid "+(qa==="correccion"?"#DBC8C4":C.line),boxShadow:qa==="correccion"?"0 2px 8px rgba(155,58,58,.06)":"none"}}>
+            <div key={r.id} style={{background:"#fff",borderRadius:10,padding:"15px 16px",border:"1px solid "+(qa==="correccion"?"#E9C9C2":C.line),boxShadow:qa==="correccion"?"0 2px 8px rgba(155,58,58,.06)":"none"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",marginBottom:8}}>
                 <div>
                   <div style={{fontSize:14,fontWeight:600,color:C.black,marginBottom:4}}>{r.propiedad}</div>
@@ -7163,7 +7258,7 @@ function VendorJobsView({reps, tot, cob, pnd, adelantos, pendingCorrections, onN
                 </div>
                 <div style={{textAlign:"right",flexShrink:0,marginLeft:12}}>
                   <div style={{fontSize:15,fontWeight:700,color:r.total&&!isDanos(r.categoria)?C.black:C.gray}}>{isDanos(r.categoria)?"—":(r.total?"Q"+r.total:"—")}</div>
-                  {r.total&&!isDanos(r.categoria)&&<div style={{fontSize:10,fontWeight:700,marginTop:4,padding:"2px 8px",borderRadius:5,background:r.paid?"#EDF5EF":"#F5EDEC",color:r.paid?C.green:C.red}}>{r.paid?"✓ Pagado":"● Pendiente"}</div>}
+                  {r.total&&!isDanos(r.categoria)&&<div style={{fontSize:10,fontWeight:700,marginTop:4,padding:"2px 8px",borderRadius:5,background:r.paid?"#E8F2ED":"#F8ECE9",color:r.paid?C.green:C.attentionText}}>{r.paid?"✓ Pagado":"● Pendiente"}</div>}
                 </div>
               </div>
               <div style={{fontSize:12.5,color:C.earth,lineHeight:1.5,marginBottom:5}}>{r.descripcion&&r.descripcion.slice(0,80)}{r.descripcion&&r.descripcion.length>80?"…":""}</div>
@@ -7196,7 +7291,7 @@ function SuggestionBox({vendor, onSaveFeedback}) {
       <div style={{fontSize:9.5,color:C.earth,fontWeight:700,letterSpacing:".18em",textTransform:"uppercase",marginBottom:6}}>💡 Tu opinión nos ayuda</div>
       <div style={{fontSize:12,color:C.earth,lineHeight:1.5,marginBottom:10}}>¿Qué mejorarías de la plataforma? Deja tus comentarios y sugerencias — el administrador los revisa todos.</div>
       {sent
-        ? <div style={{padding:"10px 14px",borderRadius:8,background:"#EDF5EF",fontSize:12.5,fontWeight:700,color:C.green}}>✓ ¡Gracias! Tu sugerencia fue enviada.</div>
+        ? <div style={{padding:"10px 14px",borderRadius:8,background:"#E8F2ED",fontSize:12.5,fontWeight:700,color:C.green}}>✓ ¡Gracias! Tu sugerencia fue enviada.</div>
         : <div style={{display:"flex",flexDirection:"column",gap:8}}>
             <textarea rows={2} placeholder="Escribe tu sugerencia de mejora…" value={text} onChange={function(e){setText(e.target.value);}} style={{width:"100%",border:"1px solid "+C.gray,borderRadius:8,padding:"9px 11px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",resize:"none",boxSizing:"border-box"}}/>
             <button onClick={send} disabled={!text.trim()} style={{alignSelf:"flex-end",padding:"9px 18px",borderRadius:7,border:"none",background:text.trim()?C.black:C.gray,color:"#fff",fontSize:12,fontWeight:700,cursor:text.trim()?"pointer":"default"}}>Enviar →</button>
@@ -7214,9 +7309,9 @@ function VendorHistory({reps, onRespond, vendor, onSaveFeedback, reviews, allRep
 
   var qaLabel = {
     pendiente:  {label:"En revisión", bg:"#F0F0EE", tx:C.taupe},
-    aprobada:   {label:"✓ Aprobada",  bg:"#EDF5EF", tx:C.green},
-    correccion: {label:"⚠ Corrección",bg:"#F5EDEC", tx:C.red},
-    corregido:  {label:"✓ Corregida", bg:"#EDF5EF", tx:C.green},
+    aprobada:   {label:"✓ Aprobada",  bg:"#E8F2ED", tx:C.green},
+    correccion: {label:"⚠ Corrección",bg:"#F7E7E4", tx:C.red},
+    corregido:  {label:"✓ Corregida", bg:"#E8F2ED", tx:C.green},
     futuro:     {label:"→ A futuro",  bg:"#EDEAE3", tx:C.taupe},
   };
 
@@ -7231,7 +7326,7 @@ function VendorHistory({reps, onRespond, vendor, onSaveFeedback, reviews, allRep
       <SuggestionBox vendor={vendor} onSaveFeedback={onSaveFeedback}/>
 
       {pendCnt>0&&(
-        <div style={{background:"#F5EDEC",borderRadius:8,padding:"14px 16px",marginBottom:18,border:"1.5px solid #DBC8C4"}}>
+        <div style={{background:"#F7E7E4",borderRadius:8,padding:"14px 16px",marginBottom:18,border:"1.5px solid #E9C9C2"}}>
           <div style={{fontSize:13,fontWeight:700,color:C.red,marginBottom:4}}>⚠ {pendCnt} corrección{pendCnt!==1?"es":""} pendiente{pendCnt!==1?"s":""}</div>
           <div style={{fontSize:12,color:C.earth}}>Responde a los comentarios del administrador abajo.</div>
         </div>
@@ -7249,14 +7344,14 @@ function VendorHistory({reps, onRespond, vendor, onSaveFeedback, reviews, allRep
           var isCorr = r.qaStatus==="correccion";
           var isInm  = isCorr && r.qaTipo!=="futuro";
           return (
-            <div key={r.id} style={{background:"#fff",borderRadius:10,border:"1.5px solid "+(isCorr?"#DBC8C4":C.line),overflow:"hidden",boxShadow:isCorr?"0 2px 8px rgba(155,58,58,.08)":"none"}}>
+            <div key={r.id} style={{background:"#fff",borderRadius:10,border:"1.5px solid "+(isCorr?"#E9C9C2":C.line),overflow:"hidden",boxShadow:isCorr?"0 2px 8px rgba(155,58,58,.08)":"none"}}>
               {/* Header row */}
               <div style={{padding:"13px 16px",borderBottom:"1px solid "+C.line,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
                 <div>
                   <div style={{fontSize:13.5,fontWeight:600,color:C.black}}>{r.propiedad}</div>
                   <div style={{fontSize:11,color:C.taupe,marginTop:2}}>{fmtDate(r.fecha)} · {r.categoria}</div>
                 </div>
-                <span style={{padding:"4px 10px",borderRadius:100,fontSize:11,fontWeight:700,background:ql.bg,color:ql.tx}}>{isCorr?(isInm?"🔴 Corrección INMEDIATA":"→ Corrección a futuro"):ql.label}</span>
+                <span style={{padding:"4px 10px",borderRadius:"var(--sa-pill)",fontSize:11,fontWeight:700,background:ql.bg,color:ql.tx}}>{isCorr?(isInm?"🔴 Corrección INMEDIATA":"→ Corrección a futuro"):ql.label}</span>
               </div>
 
               {/* Admin comment */}
@@ -7355,7 +7450,7 @@ function VendorAccount({vendor,allVendors,allReps,onSvV}) {
           <F label="WhatsApp / Teléfono">
             <input type="tel" placeholder="+502 9999 9999" value={phone} onChange={function(e){setPhone(e.target.value);}}/>
           </F>
-          {ctMsg&&<div style={{padding:"10px 13px",borderRadius:8,fontSize:13,fontWeight:600,background:ctMsg.ok?"#EDF5EF":"#F5EDEC",color:ctMsg.ok?C.green:C.red}}>{ctMsg.t}</div>}
+          {ctMsg&&<div style={{padding:"10px 13px",borderRadius:8,fontSize:13,fontWeight:600,background:ctMsg.ok?"#E8F2ED":"#F7E7E4",color:ctMsg.ok?C.green:C.red}}>{ctMsg.t}</div>}
           <BigBtn onClick={saveContact} dis={!email.trim()}>Guardar datos de contacto →</BigBtn>
         </div>
       </Card>
@@ -7367,7 +7462,7 @@ function VendorAccount({vendor,allVendors,allReps,onSvV}) {
           <div style={{height:1,background:C.gray}}/>
           <F label="Nueva contraseña"><input type="password" placeholder="Mínimo 6 caracteres" value={np} onChange={function(e){setNp(e.target.value);}}/></F>
           <F label="Confirmar nueva contraseña"><input type="password" placeholder="Repite la contraseña" value={cp} onChange={function(e){setCp(e.target.value);}} onKeyDown={function(e){if(e.key==="Enter")savePass();}}/></F>
-          {pwMsg&&<div style={{padding:"10px 13px",borderRadius:8,fontSize:13,fontWeight:600,background:pwMsg.ok?"#EDF5EF":"#F5EDEC",color:pwMsg.ok?C.green:C.red}}>{pwMsg.t}</div>}
+          {pwMsg&&<div style={{padding:"10px 13px",borderRadius:8,fontSize:13,fontWeight:600,background:pwMsg.ok?"#E8F2ED":"#F7E7E4",color:pwMsg.ok?C.green:C.red}}>{pwMsg.t}</div>}
           <BigBtn onClick={savePass} dis={!cur||!np||!cp}>Actualizar contraseña →</BigBtn>
         </div>
       </Card>
@@ -7409,7 +7504,7 @@ function LinkPrevEmail({vendor,allVendors,allReps,onSvV}) {
       {open
         ? <div style={{display:"flex",flexDirection:"column",gap:12}}>
             <F label="Tu correo anterior"><input type="email" placeholder="correo.anterior@ejemplo.com" value={val} onChange={function(e){setVal(e.target.value);setMsg(null);}} onKeyDown={function(e){if(e.key==="Enter")link();}}/></F>
-            {msg&&<div style={{padding:"10px 13px",borderRadius:8,fontSize:12.5,fontWeight:600,background:msg.ok?"#EDF5EF":"#F5EDEC",color:msg.ok?C.green:C.red,lineHeight:1.5}}>{msg.t}</div>}
+            {msg&&<div style={{padding:"10px 13px",borderRadius:8,fontSize:12.5,fontWeight:600,background:msg.ok?"#E8F2ED":"#F7E7E4",color:msg.ok?C.green:C.red,lineHeight:1.5}}>{msg.t}</div>}
             <BigBtn onClick={link} dis={!val.trim()}>Vincular y recuperar →</BigBtn>
           </div>
         : <div style={{marginTop:14}}><button onClick={function(){setOpen(true);}} style={{width:"100%",padding:"12px",borderRadius:12,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:13,fontWeight:600,cursor:"pointer"}}>Vincular un correo anterior</button></div>
@@ -7484,7 +7579,10 @@ var ICONS = {
   logout:"M9 21H5a1.5 1.5 0 01-1.5-1.5v-15A1.5 1.5 0 015 3h4M16 17l5-5-5-5M21 12H9",
   search:"M11 19a8 8 0 100-16 8 8 0 000 16zM21 21l-4.3-4.3",
   arrowRight:"M5 12h14M13 6l6 6-6 6",
+  chevronUp:"M6 15l6-6 6 6",
   chevronDown:"M6 9l6 6 6-6",
+  arrowUpRight:"M7 17L17 7M9 7h8v8",
+  dots:"M5 12h.01M12 12h.01M19 12h.01",
   chevronLeft:"M15 6l-6 6 6 6",
   chevronRight:"M9 6l6 6-6 6",
   camera:"M4 8h3l1.5-2h7L17 8h3a1 1 0 011 1v9a1 1 0 01-1 1H4a1 1 0 01-1-1V9a1 1 0 011-1zM12 17a3.5 3.5 0 100-7 3.5 3.5 0 000 7z",
@@ -7528,7 +7626,7 @@ function DateRangePicker({from,to,onChange,activeStyle,baseStyle}){
         <Icon name="chevronDown" size={13} stroke={C.earth} style={{transform:open?"rotate(180deg)":"none",transition:"transform .18s"}}/>
       </button>
       {open&&(
-        <div style={{position:"absolute",top:"calc(100% + 8px)",left:0,zIndex:80,background:"#fff",border:"1px solid "+C.line,borderRadius:16,boxShadow:"0 12px 40px rgba(62,63,63,.14)",padding:14,width:268}}>
+        <div style={{position:"absolute",top:"calc(100% + 8px)",left:0,zIndex:80,background:"#fff",border:"1px solid "+C.line,borderRadius:16,boxShadow:"var(--sa-shadow-md)",padding:14,width:268}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
             <button onClick={function(){setMonth(new Date(yr,mo-1,1));}} style={{background:C.surfaceWarm,border:"none",borderRadius:8,width:30,height:30,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="chevronLeft" size={16} stroke={C.black}/></button>
             <span style={{fontSize:12.5,fontWeight:600,color:C.black,textTransform:"capitalize"}}>{month.toLocaleDateString("es-GT",{month:"long",year:"numeric"})}</span>
@@ -7547,7 +7645,7 @@ function DateRangePicker({from,to,onChange,activeStyle,baseStyle}){
           </div>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10,paddingTop:10,borderTop:"1px solid "+C.line}}>
             <button onClick={function(){onChange("","");}} style={{background:"none",border:"none",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Limpiar</button>
-            <button onClick={function(){setOpen(false);}} style={{background:C.black,border:"none",color:"#fff",fontSize:11.5,fontWeight:600,borderRadius:100,padding:"6px 16px",cursor:"pointer"}}>Listo</button>
+            <button onClick={function(){setOpen(false);}} style={{background:C.black,border:"none",color:"#fff",fontSize:11.5,fontWeight:600,borderRadius:"var(--sa-pill)",padding:"6px 16px",cursor:"pointer"}}>Listo</button>
           </div>
         </div>
       )}
@@ -7573,14 +7671,14 @@ function HeaderFeedback({vendor, onSaveFeedback, isMobile}) {
     : {position:"relative"};
   return (
     <div style={wrap}>
-      <button onClick={function(){setOpen(function(o){return !o;});setSent(false);}} aria-label="Enviar un comentario" style={{display:"flex",alignItems:"center",gap:7,padding:"7px 13px",borderRadius:100,background:open?C.black:C.surfaceWarm,border:"1px solid "+(open?C.black:C.line),color:open?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",letterSpacing:".02em"}}>
-        <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+      <button onClick={function(){setOpen(function(o){return !o;});setSent(false);}} aria-label="Enviar un comentario" style={{display:"flex",alignItems:"center",gap:7,padding:"7px 13px",borderRadius:"var(--sa-pill)",background:open?C.black:C.surfaceWarm,border:"1px solid "+(open?C.black:C.line),color:open?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",letterSpacing:".02em"}}>
+        <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
         Comentario
       </button>
       {open&&(
         <>
           <div onClick={function(){setOpen(false);}} style={{position:"fixed",inset:0,zIndex:60}}></div>
-          <div style={{position:"fixed",top:isMobile?60:70,left:"50%",transform:"translateX(-50%)",zIndex:61,width:"min(340px,calc(100vw - 32px))",background:"#fff",borderRadius:16,padding:"16px",boxShadow:"0 18px 50px rgba(62,63,63,.20)",border:"1px solid "+C.line,fontFamily:"Montserrat,sans-serif"}}>
+          <div style={{position:"fixed",top:isMobile?60:70,left:"50%",transform:"translateX(-50%)",zIndex:61,width:"min(340px,calc(100vw - 32px))",background:"#fff",borderRadius:16,padding:"16px",boxShadow:"var(--sa-shadow-md)",border:"1px solid "+C.line,fontFamily:"Montserrat,sans-serif"}}>
             {sent
               ? <div style={{padding:"14px 6px",textAlign:"center",fontSize:13,fontWeight:700,color:C.green}}>✓ ¡Gracias! Tu comentario fue enviado.</div>
               : <>
@@ -7603,24 +7701,45 @@ function HeaderFeedback({vendor, onSaveFeedback, isMobile}) {
 }
 
 /* ─── Responsive Header Component */
-function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogout, onConfig, configActive, role, sheetsOk, adminLabel, feedbackVendor, onSaveFeedback, wifiProps, wifiVendor}) {
+function ResponsiveHeader({tab, setTab, alertDanos, alertReviews, alertProfundas, onAlert, navItems, onLogout, onConfig, configActive, role, sheetsOk, adminLabel, feedbackVendor, onSaveFeedback, wifiProps, wifiVendor}) {
   var sc = useScreen();
   var isMobile = sc.mobile;
+  /* El encabezado completo —etiqueta de admin, contadores, 5 pestañas, Wi-Fi,
+     Configuración y Salir— solo cabe a partir de ~1130px, pero se renderiza
+     desde 640. En esa franja el grupo derecho se salía de la pantalla.
+     Entre 640 y 1130 las pestañas y los botones van compactos: solo ícono,
+     con el nombre en el tooltip. */
+  var compacto = sc.w < 1220;
 
   return (
     <>
       {/* Top bar */}
-      <header style={{background:"#fff",height:isMobile?54:62,display:"flex",alignItems:"center",justifyContent:"space-between",padding:isMobile?"0 16px":"0 24px",position:"sticky",top:0,zIndex:50,borderBottom:"1px solid "+C.line}}>
+      <header style={{background:"#fff",height:isMobile?54:62,display:"flex",alignItems:"center",justifyContent:"space-between",gap:isMobile?8:12,padding:isMobile?"0 16px":"0 24px",position:"sticky",top:0,zIndex:50,borderBottom:"1px solid "+C.line}}>
         {/* Logo */}
-        <div style={{display:"flex",alignItems:"center",gap:isMobile?8:12}}>
+        <div style={{display:"flex",alignItems:"center",minWidth:0,gap:isMobile?8:12}}>
           <img src={LOGO_STAMP} alt="Spacio AM" style={{width:isMobile?38:44,height:isMobile?38:44,objectFit:"contain",display:"block",flexShrink:0}}/>
           {IS_CLAUDE_SANDBOX&&<span style={{fontSize:9,fontWeight:700,background:"#F0EDE8",color:"#938B8A",padding:"2px 6px",borderRadius:4,letterSpacing:".08em",display:isMobile?"none":"block"}}>LOCAL</span>}
           
           {!isMobile&&<div style={{width:1,height:20,background:C.line,margin:"0 6px"}}/>}
-          {!isMobile&&<span style={{fontSize:11,color:C.taupe,letterSpacing:".06em"}}>{adminLabel||role}</span>}
-          {sheetsOk===false&&!isMobile&&<span style={{fontSize:9,fontWeight:700,background:"#F5EDEC",color:C.red,padding:"2px 6px",borderRadius:4,letterSpacing:".06em"}}>SIN SHEETS</span>}
-          {sheetsOk===true&&!isMobile&&<span style={{fontSize:9,fontWeight:700,background:"#EDF5EF",color:C.green,padding:"2px 6px",borderRadius:4,letterSpacing:".06em"}}>● SHEETS</span>}
-          {alertCount>0&&<button onClick={function(e){e.stopPropagation();setTab&&setTab("dash");}} title={alertCount+" trabajo"+(alertCount!==1?"s":"")+" con pago pendiente"} style={{background:C.red,color:"#fff",fontSize:9,fontWeight:700,borderRadius:100,padding:"2px 6px",border:"none",cursor:"pointer",lineHeight:1.4}}>{"⚠ "+alertCount}</button>}{pendingQA>0&&<button onClick={function(e){e.stopPropagation();setTab&&setTab("qa");}} title={pendingQA+" limpieza"+(pendingQA!==1?"s":"")+" pendiente"+(pendingQA!==1?"s":"")+" de revisión QA"} style={{background:"#4a5a7a",color:"#fff",fontSize:9,fontWeight:700,borderRadius:100,padding:"2px 6px",marginLeft:2,border:"none",cursor:"pointer",lineHeight:1.4}}>{"★ "+pendingQA}</button>}
+          {!isMobile&&<span style={{fontSize:11,color:C.taupe,letterSpacing:".06em",minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{adminLabel||role}</span>}
+          {sheetsOk===false&&!compacto&&<span style={{fontSize:9,fontWeight:700,background:"#F7E7E4",color:C.red,padding:"2px 6px",borderRadius:4,letterSpacing:".06em"}}>SIN SHEETS</span>}
+          {sheetsOk===true&&!compacto&&<span style={{fontSize:9,fontWeight:700,background:"#E8F2ED",color:C.green,padding:"2px 6px",borderRadius:4,letterSpacing:".06em"}}>● SHEETS</span>}
+          {/* Tres alertas, cada una un pendiente que se resuelve hoy. Van con
+              ícono del set y no con letras: el espacio no da para el rótulo. */}
+          {[["dano","alert",alertDanos,C.red,"#F7E7E4",
+             (alertDanos===1?"1 propiedad":alertDanos+" propiedades")+" con un daño sin programar hace más de una semana"],
+            ["rev","star",alertReviews,C.attentionText,"#F8ECE9",
+             (alertReviews===1?"1 solicitud":alertReviews+" solicitudes")+" de revisión de calificación sin responder"],
+            ["prof","refresh",alertProfundas,C.attentionText,"#F8ECE9",
+             (alertProfundas===1?"1 propiedad":alertProfundas+" propiedades")+" sin limpieza profunda en más de 60 días"]
+          ].map(function(it){
+            var k=it[0], ic=it[1], n=it[2], cl=it[3], bg=it[4], ttl=it[5];
+            if(!n) return null;
+            return <button key={k} onClick={function(e){e.stopPropagation();onAlert&&onAlert(k);}} title={ttl}
+              style={{display:"inline-flex",alignItems:"center",gap:5,background:bg,border:"1px solid "+cl,color:cl,borderRadius:"var(--sa-pill)",padding:"3px 9px",minHeight:26,fontSize:11,fontWeight:700,fontVariantNumeric:"tabular-nums",cursor:"pointer",fontFamily:"Montserrat,sans-serif",flexShrink:0}}>
+              <Icon name={ic} size={12} stroke={cl}/>{n}
+            </button>;
+          })}
         </div>
 
         {/* Comentario — barra superior, no invasivo (antes burbuja flotante) */}
@@ -7628,17 +7747,17 @@ function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogou
 
         {/* Desktop nav */}
         {!isMobile&&(
-          <nav style={{display:"flex",background:C.surfaceWarm,borderRadius:100,padding:3,gap:2,border:"1px solid "+C.line}}>
+          <nav style={{display:"flex",flexShrink:0,background:C.surfaceWarm,borderRadius:"var(--sa-pill)",padding:3,gap:2,border:"1px solid "+C.line}}>
             {navItems.map(function(it){ var k=it[0],l=it[1],ic=it[2]; return (
-              <button key={k} onClick={function(){setTab(k);}} style={{display:"flex",alignItems:"center",gap:7,padding:"8px 15px",borderRadius:100,border:"none",fontSize:11.5,fontWeight:600,letterSpacing:".04em",cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,transition:"all .2s"}}><Icon name={ic} size={15} stroke={tab===k?"#fff":C.taupe}/>{l}</button>
+              <button key={k} title={l} onClick={function(){setTab(k);}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:compacto?0:7,padding:compacto?"0 12px":"0 13px",borderRadius:"var(--sa-pill)",minHeight:44,border:"none",fontSize:11.5,fontWeight:600,letterSpacing:".04em",cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,transition:"all .2s"}}><Icon name={ic} size={compacto?17:15} stroke={tab===k?"#fff":C.taupe}/>{!compacto&&l}</button>
             ); })}
           </nav>
         )}
 
         {/* Configuración + Salir */}
-        <div style={{display:"flex",alignItems:"center",gap:isMobile?4:8}}>
-          <WifiBtn props={wifiProps||[]} isMobile={isMobile} vendorEmail={wifiVendor||""}/>
-          {onConfig&&<button onClick={onConfig} title="Configuración" style={{display:"flex",alignItems:"center",gap:6,background:configActive?C.black:"transparent",border:"1px solid "+(configActive?C.black:C.line),borderRadius:100,color:configActive?"#fff":C.earth,cursor:"pointer",padding:isMobile?"7px 9px":"7px 13px",fontSize:11.5,fontWeight:600,letterSpacing:".04em"}}><Icon name="settings" size={16} stroke={configActive?"#fff":C.earth}/>{!isMobile&&"Configuración"}</button>}
+        <div style={{display:"flex",alignItems:"center",flexShrink:0,gap:isMobile?4:8}}>
+          <WifiBtn props={wifiProps||[]} isMobile={compacto} vendorEmail={wifiVendor||""}/>
+          {onConfig&&<button onClick={onConfig} title="Configuración" style={{display:"flex",alignItems:"center",gap:6,background:configActive?C.black:"transparent",border:"1.5px solid "+(configActive?C.black:C.gray),borderRadius:"var(--sa-pill)",color:configActive?"#fff":C.earth,cursor:"pointer",minHeight:44,padding:compacto?"0 11px":"0 15px",fontSize:11.5,fontWeight:600,letterSpacing:".04em"}}><Icon name="settings" size={16} stroke={configActive?"#fff":C.earth}/>{!compacto&&"Configuración"}</button>}
           <button onClick={onLogout} style={{background:"none",border:"none",color:C.earth,fontSize:isMobile?12:11.5,cursor:"pointer",fontWeight:500,letterSpacing:".04em",padding:"8px 4px"}}>Salir</button>
         </div>
       </header>
@@ -7649,7 +7768,7 @@ function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogou
           <button key={k} onClick={function(){setTab(k);}} style={{flex:1,position:"relative",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,border:"none",background:"transparent",cursor:"pointer",padding:"6px 0"}}>
             <Icon name={ic} size={20} stroke={tab===k?C.black:C.taupe}/>
             <span style={{fontSize:9,fontWeight:tab===k?700:500,letterSpacing:".06em",color:tab===k?C.black:C.taupe,textTransform:"uppercase"}}>{l.split(" ")[0]}</span>
-            {tab===k&&<div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:24,height:2,background:C.black,borderRadius:100}}/>}
+            {tab===k&&<div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:24,height:2,background:C.black,borderRadius:"var(--sa-pill)"}}/>}
           </button>
         ); }
         function bar(children){ return <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:50,background:"#fff",borderTop:"1px solid "+C.line,display:"flex",alignItems:"stretch",height:60,paddingBottom:"env(safe-area-inset-bottom)"}}>{children}</div>; }
@@ -7660,7 +7779,7 @@ function ResponsiveHeader({tab, setTab, alertCount, pendingQA, navItems, onLogou
         var dashBtn=(
           <div key="__dash" style={{flex:"0 0 auto",width:76,display:"flex",alignItems:"flex-start",justifyContent:"center"}}>
             <button onClick={function(){setTab("dash");}} aria-label="Dashboard" style={{marginTop:-20,width:62,height:62,borderRadius:"50%",border:"4px solid #fff",background:C.peach,boxShadow:"0 6px 18px rgba(233,130,106,.35)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",outline:"none"}}>
-              <Icon name="dash" size={26} stroke="#fff"/>
+              <Icon name="home" size={26} stroke="#fff"/>
             </button>
           </div>
         );
@@ -7701,7 +7820,7 @@ function InventorySummary({inventario}) {
           )}
         </div>
       );})}
-      {issues.length===0&&<div style={{padding:"8px 14px",borderRadius:8,background:"#EDF5EF",fontSize:12,color:C.green,fontWeight:600}}>✓ Todo en buen estado</div>}
+      {issues.length===0&&<div style={{padding:"8px 14px",borderRadius:8,background:"#E8F2ED",fontSize:12,color:C.green,fontWeight:600}}>✓ Todo en buen estado</div>}
       {/* Full list only when expanded */}
       {expanded&&ok.map(function(item,i){return (
         <div key={i} style={{padding:"9px 14px",borderRadius:8,background:C.surfaceWarm,border:"1px solid "+C.line,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -7719,7 +7838,7 @@ function DamageSummary({danios}) {
     <div style={{display:"flex",flexDirection:"column",gap:8}}>
       <div style={{fontSize:10,fontWeight:700,color:C.red,letterSpacing:".18em",textTransform:"uppercase"}}>⚠ Daños reportados ({danios.length})</div>
       {(danios||[]).map(function(d,i){return (
-        <div key={i} style={{padding:"12px 14px",borderRadius:8,background:"#F5EDEC",border:"1px solid #DBC8C4",display:"flex",flexDirection:"column",gap:6}}>
+        <div key={i} style={{padding:"12px 14px",borderRadius:8,background:"#F7E7E4",border:"1px solid #E9C9C2",display:"flex",flexDirection:"column",gap:6}}>
           <div style={{fontSize:13,fontWeight:700,color:C.red}}>Daño {i+1}: {d.desc||d.tipo||"Sin descripción"}</div>
           {d.origen&&<div style={{fontSize:12,color:C.earth}}>Origen: {d.origen}</div>}
           {d.quienPaga&&<div style={{fontSize:12,color:C.earth}}>Cubre: {d.quienPaga}</div>}
@@ -8007,7 +8126,7 @@ function ExecSummary({rep, vendors}) {
     function gallery(cells){ return cells?"<div class='grid'>"+cells+"</div>":""; }
     function sec(title,html){return "<h2 style='font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:#8C8C8A;margin:24px 0 8px;border-bottom:1px solid #E2E2E0;padding-bottom:5px'>"+title+"</h2>"+html;}
     function row(label,val){return "<div style='display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #F4F4F2;font-size:13px'><span style='color:#8C8C8A'>"+label+"</span><span>"+val+"</span></div>";}
-    function badge(txt,green){return "<span style='padding:2px 10px;border-radius:100px;font-size:11px;font-weight:600;background:"+(green?"#EDF5EF":"#F5EDEC")+";color:"+(green?"#3d6b52":"#8a3030")+"'>"+txt+"</span>";}
+    function badge(txt,green){return "<span style='padding:2px 10px;border-radius:100px;font-size:11px;font-weight:600;background:"+(green?"#E8F2ED":"#F7E7E4")+";color:"+(green?"#3d6b52":"#C0392B")+"'>"+txt+"</span>";}
     function photoRow(arr,cap){if(!arr||!arr.length)return "";return gallery(arr.map(function(x,i){return cell(x,(cap||"")+((cap&&arr.length>1)?(" "+(i+1)):""));}).join(""));}
     /* Devuelve CELDAS, no un bloque: así todas las fotos del reporte caen en una
        sola rejilla continua en vez de abrir una fila nueva por cada rótulo. */
@@ -8052,7 +8171,7 @@ function ExecSummary({rep, vendors}) {
       var invHtml="";
       inv.forEach(function(x){
         var ok=x.estado==="ok";
-        invHtml+=row(x.name,"<span style='color:"+(ok?"#3d6b52":"#8a3030")+";font-weight:600'>"+(ok?"✓ OK":"✗ Falta")+(x.cantidad>0?" ("+x.cantidad+")":"")+"</span>");
+        invHtml+=row(x.name,"<span style='color:"+(ok?"#3d6b52":"#C0392B")+";font-weight:600'>"+(ok?"✓ OK":"✗ Falta")+(x.cantidad>0?" ("+x.cantidad+")":"")+"</span>");
         if(isP(x.foto))invHtml+=photoRow([x.foto],x.name);
       });
       L.push(sec("Inventario ("+inv.length+" ítems)",invHtml));
@@ -8063,7 +8182,7 @@ function ExecSummary({rep, vendors}) {
       var dmgHtml="";
       danios.forEach(function(d,i){
         dmgHtml+="<div class='no-break' style='background:#FFF5F5;border:1px solid #e8d0d0;border-radius:6px;padding:12px;margin-bottom:10px'>";
-        dmgHtml+="<div style='color:#8a3030;font-weight:700;margin-bottom:4px'>Daño "+(i+1)+": "+d.desc+"</div>";
+        dmgHtml+="<div style='color:#C0392B;font-weight:700;margin-bottom:4px'>Daño "+(i+1)+": "+d.desc+"</div>";
         if(d.origen)dmgHtml+=row("Origen",d.origen);
         if(d.reparacion)dmgHtml+=row("Reparación",d.reparacion);
         if(d.quienPaga)dmgHtml+=row("Cubre",d.quienPaga);
@@ -8107,8 +8226,8 @@ function ExecSummary({rep, vendors}) {
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:13}}>
         <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Resumen del trabajo</div>
         <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-          <button onClick={exportPDF} style={{padding:"7px 13px",minHeight:36,borderRadius:100,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11.5,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>PDF completo</button>
-          {claimable&&<button onClick={function(){airbnbClaimPDF(rep,vendors);}} title="Genera un reporte en inglés, listo para adjuntar a un caso de Airbnb" style={{padding:"7px 13px",minHeight:36,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>Reporte Airbnb (EN)</button>}
+          <button onClick={exportPDF} style={{padding:"7px 13px",minHeight:36,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11.5,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>PDF completo</button>
+          {claimable&&<button onClick={function(){airbnbClaimPDF(rep,vendors);}} title="Genera un reporte en inglés, listo para adjuntar a un caso de Airbnb" style={{padding:"7px 13px",minHeight:36,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>Reporte Airbnb (EN)</button>}
         </div>
       </div>
 
@@ -8119,7 +8238,7 @@ function ExecSummary({rep, vendors}) {
           <div style={{fontSize:9,color:C.taupe,fontWeight:700,letterSpacing:".18em",textTransform:"uppercase"}}>{esDanio?"Seguimiento":"Total"}</div>
           <div style={{fontSize:23,fontWeight:700,color:esDanio?C.taupe:C.black,marginTop:3,fontVariantNumeric:"tabular-nums",lineHeight:1.1}}>{esDanio?"Sin pago":(rep.total?"Q"+rep.total:"—")}</div>
         </div>
-        <span style={{padding:"6px 13px",borderRadius:100,fontSize:11.5,fontWeight:700,background:esDanio?"#F0EDE8":(rep.paid?"#EDF5EF":"#F5EDEC"),color:esDanio?C.earth:(rep.paid?C.green:C.red),whiteSpace:"nowrap"}}>{esDanio?"No aplica":(rep.paid?"✓ Pagado":"● Pendiente")}</span>
+        <span style={{padding:"6px 13px",borderRadius:"var(--sa-pill)",fontSize:11.5,fontWeight:700,background:esDanio?"#F0EDE8":(rep.paid?"#E8F2ED":"#F8ECE9"),color:esDanio?C.earth:(rep.paid?C.green:C.attentionText),whiteSpace:"nowrap"}}>{esDanio?"No aplica":(rep.paid?"✓ Pagado":"● Pendiente")}</span>
       </div>
       <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"4px 14px",marginBottom:isCl&&inv.length>0?12:0}}>
         {fichaRows.map(function(r,i){
@@ -8135,12 +8254,12 @@ function ExecSummary({rep, vendors}) {
       {isCl&&(
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
           {rep.fotoUniforme&&(rep.fotoUniforme.startsWith("http")||rep.fotoUniforme.startsWith("data:")) ? (
-            <div style={{display:"flex",gap:10,alignItems:"center",padding:"8px 12px",borderRadius:8,background:rep._gorraOk==="no"?"#FFF9E6":"#EDF5EF",border:"1px solid "+(rep._gorraOk==="no"?"#E6D88A":"#c8dfc8")}}>
+            <div style={{display:"flex",gap:10,alignItems:"center",padding:"8px 12px",borderRadius:8,background:rep._gorraOk==="no"?"#F5EBE5":"#E8F2ED",border:"1px solid "+(rep._gorraOk==="no"?"#E3D5C8":"#CFE3D6")}}>
               <a href={rep.fotoUniforme} target="_blank" rel="noopener noreferrer">
                 <img src={driveThumb(rep.fotoUniforme,200)} alt="uniforme" style={{width:44,height:44,objectFit:"cover",borderRadius:6,border:"1px solid "+C.line,flexShrink:0}} onError={function(e){e.target.src=rep.fotoUniforme;}}/>
               </a>
               <div>
-                <div style={{fontSize:12,fontWeight:700,color:rep._gorraOk==="no"?"#7a6000":C.green}}>
+                <div style={{fontSize:12,fontWeight:700,color:rep._gorraOk==="no"?"#9a5020":C.green}}>
                   {rep._gorraOk==="no"?"⚠ Sin gorra en foto":"✓ Foto de uniforme"}
                 </div>
                 <div style={{fontSize:10.5,color:C.earth,marginTop:2}}>
@@ -8149,7 +8268,7 @@ function ExecSummary({rep, vendors}) {
               </div>
             </div>
           ) : (
-            <div style={{padding:"8px 12px",borderRadius:8,background:"#F5EDEC",border:"1px solid #DBC8C4",fontSize:12,fontWeight:700,color:C.red}}>
+            <div style={{padding:"8px 12px",borderRadius:8,background:"#F7E7E4",border:"1px solid #E9C9C2",fontSize:12,fontWeight:700,color:C.red}}>
               ⚠ Sin foto de uniforme — proveedor no subió evidencia
             </div>
           )}
@@ -8157,7 +8276,7 @@ function ExecSummary({rep, vendors}) {
       )}
       {isCl&&inv.length>0&&(
         <div style={{display:"flex",gap:8}}>
-          {[[okItems.length,"OK","#EDF5EF",C.green],[badItems.length,"Faltantes","#F5EDEC",C.red],[danios.length,"Daños","#F5EDEC",C.red]].map(function(it,i){
+          {[[okItems.length,"OK","#E8F2ED",C.green],[badItems.length,"Faltantes","#F8ECE9",C.attentionText],[danios.length,"Daños","#F7E7E4",C.red]].map(function(it,i){
             var val=it[0],lbl=it[1],bg=val>0||i>0?it[2]:C.surfaceWarm,cl=val>0||i>0?it[3]:C.taupe;
             return <div key={i} style={{flex:1,padding:"9px 8px",borderRadius:8,background:val>0?bg:C.surfaceWarm,textAlign:"center"}}><div style={{fontSize:18,fontWeight:700,color:val>0?cl:C.taupe}}>{val}</div><div style={{fontSize:9,color:val>0?cl:C.taupe,letterSpacing:".1em",textTransform:"uppercase"}}>{lbl}</div></div>;
           })}
@@ -8267,9 +8386,9 @@ function CleaningPhotoGallery({rep}) {
   return (
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
       {/* Photo coverage indicator */}
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderRadius:8,background:lowPhotos?"#F5EDEC":C.surfaceWarm,border:"1px solid "+(lowPhotos?"#DBC8C4":C.line)}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderRadius:8,background:lowPhotos?"#F7E7E4":C.surfaceWarm,border:"1px solid "+(lowPhotos?"#E9C9C2":C.line)}}>
         <div>
-          <div style={{fontSize:12.5,fontWeight:600,color:lowPhotos?C.red:C.black}}>
+          <div style={{fontSize:12.5,fontWeight:600,color:lowPhotos?C.attentionText:C.black}}>
             {lowPhotos?"⚠ Fotos insuficientes":"📷 Evidencia fotográfica"}
           </div>
           <div style={{fontSize:11,color:C.earth,marginTop:2}}>
@@ -8277,11 +8396,11 @@ function CleaningPhotoGallery({rep}) {
             {lowPhotos&&" — el proveedor no subió suficientes fotos"}
           </div>
         </div>
-        <div style={{fontSize:18,fontWeight:700,color:lowPhotos?C.red:C.green}}>{pct}%</div>
+        <div style={{fontSize:18,fontWeight:700,color:lowPhotos?C.attentionText:C.green}}>{pct}%</div>
       </div>
 
       {sections.length===0&&(
-        <div style={{padding:"14px",background:"#F5EDEC",borderRadius:8,fontSize:13,color:C.red,fontWeight:600,textAlign:"center"}}>
+        <div style={{padding:"14px",background:"#F8ECE9",borderRadius:8,fontSize:13,color:C.attentionText,fontWeight:600,textAlign:"center"}}>
           ⚠ No se subió ninguna foto en este reporte
         </div>
       )}
@@ -8348,9 +8467,9 @@ function QASection({rep, onQA}) {
 
   var statusColors = {
     pendiente:  {bg:"#F0F0EE",tx:C.taupe,  label:"Pendiente de revisión"},
-    aprobada:   {bg:"#EDF5EF",tx:C.green,  label:"✓ Limpieza aprobada"},
-    correccion: {bg:"#F5EDEC",tx:C.red,    label:"⚠ Necesita corrección"},
-    corregido:  {bg:"#EDF5EF",tx:C.green,  label:"✓ Corrección realizada"},
+    aprobada:   {bg:"#E8F2ED",tx:C.green,  label:"✓ Limpieza aprobada"},
+    correccion: {bg:"#F7E7E4",tx:C.red,    label:"⚠ Necesita corrección"},
+    corregido:  {bg:"#E8F2ED",tx:C.green,  label:"✓ Corrección realizada"},
     futuro:     {bg:"#EDEAE3",tx:C.taupe,  label:"→ Tomado en cuenta"},
   };
   var sc = statusColors[st] || statusColors["pendiente"];
@@ -8365,7 +8484,7 @@ function QASection({rep, onQA}) {
       {/* Sin respuesta del técnico */}
       {st==="correccion"&&rep.qaFecha&&(function(){
         var days=Math.floor((Date.now()-new Date(rep.qaFecha+"T12:00:00").getTime())/86400000);
-        return <div style={{padding:"8px 12px",borderRadius:8,background:"#F7EFE2",fontSize:12,color:"#9a6b2f",fontWeight:600}}>⏳ El técnico aún no responde{days>0?" — "+days+" día"+(days!==1?"s":"")+" sin respuesta":""}</div>;
+        return <div style={{padding:"8px 12px",borderRadius:8,background:"#F5EBE5",fontSize:12,color:"#9a5020",fontWeight:600}}>⏳ El técnico aún no responde{days>0?" — "+days+" día"+(days!==1?"s":"")+" sin respuesta":""}</div>;
       })()}
 
       {/* Admin comment if flagged */}
@@ -8385,8 +8504,13 @@ function QASection({rep, onQA}) {
         </div>
       )}
 
+      {qaFueraDeTiempo(rep)&&(
+        <div style={{fontSize:12,color:C.earth,background:"#F8ECE9",borderLeft:"3px solid "+C.attention,padding:"10px 13px",borderRadius:6,lineHeight:1.6,textWrap:"pretty"}}>
+          <b style={{color:C.attentionText}}>Sin revisar a tiempo.</b> Pasó más de una semana desde el trabajo, así que ya no se puede aprobar ni pedir corrección.
+        </div>
+      )}
       {/* Admin action buttons */}
-      {(st==="pendiente"||st==="correccion")&&!mode&&(
+      {!qaFueraDeTiempo(rep)&&(st==="pendiente"||st==="correccion")&&!mode&&(
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           <button onClick={approve} disabled={busy} style={{flex:1,padding:"11px 14px",borderRadius:7,border:"none",background:C.green,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",letterSpacing:".04em"}}>
             {busy?"…":"✓ Aprobar limpieza"}
@@ -8403,10 +8527,10 @@ function QASection({rep, onQA}) {
           <div>
             <div style={{fontSize:9.5,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:6}}>Tipo de corrección</div>
             <div style={{display:"flex",gap:6}}>
-              <button onClick={function(){setCorrTipo("inmediata");}} style={{flex:1,padding:"9px 8px",borderRadius:7,border:"1.5px solid "+(corrTipo==="inmediata"?"#8a3030":C.gray),background:corrTipo==="inmediata"?"#F5EDEC":"#fff",color:corrTipo==="inmediata"?"#8a3030":C.earth,fontSize:11.5,fontWeight:700,cursor:"pointer"}}>🔴 Inmediata (urgente)</button>
+              <button onClick={function(){setCorrTipo("inmediata");}} style={{flex:1,padding:"9px 8px",borderRadius:7,border:"1.5px solid "+(corrTipo==="inmediata"?"#C0392B":C.gray),background:corrTipo==="inmediata"?"#F7E7E4":"#fff",color:corrTipo==="inmediata"?"#C0392B":C.earth,fontSize:11.5,fontWeight:700,cursor:"pointer"}}>🔴 Inmediata (urgente)</button>
               <button onClick={function(){setCorrTipo("futuro");}} style={{flex:1,padding:"9px 8px",borderRadius:7,border:"1.5px solid "+(corrTipo==="futuro"?C.black:C.gray),background:corrTipo==="futuro"?"#EDEAE3":"#fff",color:corrTipo==="futuro"?C.black:C.earth,fontSize:11.5,fontWeight:700,cursor:"pointer"}}>→ Para el futuro</button>
             </div>
-            <div style={{fontSize:10.5,color:C.taupe,marginTop:5,lineHeight:1.5}}>{corrTipo==="inmediata"?"El técnico debe atenderla hoy y confirmar cuando esté corregida.":"Observación para sus próximas limpiezas — debe confirmarla."}</div>
+            <div style={{fontSize:12,color:C.taupe,marginTop:5,lineHeight:1.5}}>{corrTipo==="inmediata"?"El técnico debe atenderla hoy y confirmar cuando esté corregida.":"Observación para sus próximas limpiezas — debe confirmarla."}</div>
           </div>
           <F label="Comentario para el proveedor">
             <textarea rows={3} placeholder="Describe qué debe corregirse o mejorar…" value={comment} onChange={function(e){setComment(e.target.value);}}/>
@@ -8463,13 +8587,13 @@ function FeedbackBubble({vendor, onSaveFeedback, currentStep, totalSteps}) {
   return (
     <div style={{position:"fixed",bottom:80,right:16,zIndex:500,maxWidth:280,fontFamily:"Montserrat,sans-serif"}}>
       {!open&&(
-        <button onClick={function(){setOpen(true);}} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 14px",borderRadius:100,background:"#fff",border:"1px solid "+C.line,boxShadow:"0 2px 12px rgba(0,0,0,.12)",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
+        <button onClick={function(){setOpen(true);}} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 14px",borderRadius:"var(--sa-pill)",background:"#fff",border:"1px solid "+C.line,boxShadow:"var(--sa-shadow-sm)",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
           💬 ¿Tienes un comentario?
           <button onClick={function(e){e.stopPropagation();setVisible(false);}} style={{background:"none",border:"none",color:C.gray,fontSize:14,cursor:"pointer",padding:"0 0 0 4px",lineHeight:1}}>×</button>
         </button>
       )}
       {open&&(
-        <div style={{background:"#fff",borderRadius:14,padding:"16px",boxShadow:"0 4px 24px rgba(0,0,0,.14)",border:"1px solid "+C.line}}>
+        <div style={{background:"#fff",borderRadius:14,padding:"16px",boxShadow:"var(--sa-shadow-md)",border:"1px solid "+C.line}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
             <div style={{fontSize:13,fontWeight:700,color:C.black}}>Tu opinión nos ayuda</div>
             <button onClick={function(){setOpen(false);}} style={{background:"none",border:"none",color:C.gray,fontSize:16,cursor:"pointer",lineHeight:1}}>×</button>
@@ -8571,7 +8695,7 @@ function ProfundasCfg({props, reps, schedules, hoy, vendors, onSvSchedules}) {
     var v=(vendors||[]).find(function(x){ return String(x.email||"").toLowerCase()===String(em||"").toLowerCase(); });
     return v?vendorDisplay(v):"";
   }
-  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"};
 
   return (
     <div style={CARD}>
@@ -8584,7 +8708,7 @@ function ProfundasCfg({props, reps, schedules, hoy, vendors, onSvSchedules}) {
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:9,flexShrink:0}}>
-            {vencidas.length>0&&<span style={{fontSize:10.5,fontWeight:700,color:C.orange,background:"#F7EFE2",padding:"3px 10px",borderRadius:100}}>{vencidas.length} por hacer</span>}
+            {vencidas.length>0&&<span style={{fontSize:10.5,fontWeight:700,color:C.orange,background:"#F5EBE5",padding:"3px 10px",borderRadius:"var(--sa-pill)"}}>{vencidas.length} por hacer</span>}
             <span style={{color:C.taupe,fontSize:13}}>{abierto?"▾":"▸"}</span>
           </div>
         </div>
@@ -8595,7 +8719,7 @@ function ProfundasCfg({props, reps, schedules, hoy, vendors, onSvSchedules}) {
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:11}}>
             {[["vencidas","Por hacer",vencidas.length],["agendadas","Ya agendadas",agendadas.length],["aldia","Al día",alDia.length]].map(function(o){
               var sel=filtro===o[0];
-              return <button key={o[0]} onClick={function(){setFiltro(o[0]);}} style={{padding:"7px 12px",minHeight:38,borderRadius:100,border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{o[1]} {o[2]}</button>;
+              return <button key={o[0]} onClick={function(){setFiltro(o[0]);}} style={{padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{o[1]} {o[2]}</button>;
             })}
           </div>
 
@@ -8693,8 +8817,8 @@ function CodigosCfg({props, codigos, onSave}){
     var next=Object.assign({}, codigos||{}); delete next[lunes]; onSave&&onSave(next);
   }
 
-  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
-  var NAV={padding:"9px 14px",minHeight:42,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"};
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"};
+  var NAV={padding:"9px 14px",minHeight:42,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"};
   var hayPrev=!!((codigos||{})[SCHED.shift(lunes,-7)]);
 
   return (
@@ -8723,7 +8847,7 @@ function CodigosCfg({props, codigos, onSave}){
       </div>
 
       <input value={q} onChange={function(e){setQ(e.target.value);}} placeholder="Buscar propiedad…"
-        style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:100,padding:"11px 16px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",minHeight:46,background:"#fff"}}/>
+        style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:"var(--sa-pill)",padding:"11px 16px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",minHeight:46,background:"#fff"}}/>
 
       <div style={Object.assign({},CARD,{padding:"6px 16px"})}>
         {lista.length===0&&<div style={{padding:"26px 0",textAlign:"center",fontSize:12.5,color:C.taupe}}>Sin propiedades que coincidan.</div>}
@@ -8748,11 +8872,11 @@ function CodigosCfg({props, codigos, onSave}){
 /* ═══ VER COMO — el administrador principal revisa la app con los ojos de otro ═══ */
 function VerComoBanner({vendor, onExit}){
   return (
-    <div style={{position:"fixed",top:0,left:0,right:0,height:40,boxSizing:"border-box",zIndex:9000,background:C.black,color:"#fff",padding:"0 16px",display:"flex",alignItems:"center",gap:12,fontFamily:"Montserrat,sans-serif",boxShadow:"0 4px 16px rgba(62,63,63,.18)",overflow:"hidden"}}>
+    <div style={{position:"fixed",top:0,left:0,right:0,height:40,boxSizing:"border-box",zIndex:9000,background:C.black,color:"#fff",padding:"0 16px",display:"flex",alignItems:"center",gap:12,fontFamily:"Montserrat,sans-serif",boxShadow:"var(--sa-shadow-sm)",overflow:"hidden"}}>
       <span style={{fontSize:9,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",opacity:.6,flexShrink:0}}>Viendo como</span>
       <span style={{fontSize:12.5,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{vendorDisplay(vendor)}</span>
       <div style={{flex:1,minWidth:8}}/>
-      <button onClick={onExit} style={{flexShrink:0,padding:"6px 14px",minHeight:28,borderRadius:100,border:"1px solid rgba(255,255,255,.35)",background:"transparent",color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif",whiteSpace:"nowrap"}}>Volver a mi vista →</button>
+      <button onClick={onExit} style={{flexShrink:0,padding:"6px 14px",minHeight:28,borderRadius:"var(--sa-pill)",border:"1px solid rgba(255,255,255,.35)",background:"transparent",color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif",whiteSpace:"nowrap"}}>Volver a mi vista →</button>
     </div>
   );
 }
@@ -8763,7 +8887,7 @@ function VerComoCfg({vendors, onVerComo}){
   var lista=(vendors||[]).filter(function(v){ return v.active!==false; })
     .filter(function(v){ return !q || vendorDisplay(v).toLowerCase().indexOf(q.toLowerCase())>=0; })
     .sort(function(a,b){ return vendorDisplay(a)<vendorDisplay(b)?-1:1; });
-  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)",marginBottom:16};
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)",marginBottom:16};
   return (
     <div style={CARD}>
       <button onClick={function(){setAbierto(!abierto);}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
@@ -8775,12 +8899,12 @@ function VerComoCfg({vendors, onVerComo}){
         Abre la aplicación exactamente como la ve esa persona — su programación, sus pagos, sus permisos. Nada de lo que hagas cambia de dueño: sigues siendo tú, solo cambia lo que ves. Sales con un clic.
       </div>
       <input value={q} onChange={function(e){setQ(e.target.value);}} placeholder="Buscar persona…"
-        style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:100,padding:"10px 15px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",minHeight:44,marginTop:11,background:"#fff"}}/>
+        style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:"var(--sa-pill)",padding:"10px 15px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",minHeight:44,marginTop:11,background:"#fff"}}/>
       <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:11}}>
         {lista.map(function(v){
           return (
             <button key={v.id} onClick={function(){ onVerComo(v.id); try{window.scrollTo(0,0);}catch(_){} }}
-              style={{padding:"8px 14px",minHeight:40,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif",display:"flex",alignItems:"center",gap:7}}>
+              style={{padding:"8px 14px",minHeight:40,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif",display:"flex",alignItems:"center",gap:7}}>
               {vendorDisplay(v)}
               {v.isAdmin&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.taupe}}>Admin</span>}
             </button>
@@ -8810,7 +8934,7 @@ function BitacoraPanel(){
   }
   useEffect(function(){ if(abierto&&ev===null) cargar(); },[abierto]);
 
-  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"};
   var COLOR={correo:C.green, programacion:C.black, manual:C.orange, error:C.red};
 
   return (
@@ -8829,7 +8953,7 @@ function BitacoraPanel(){
       {abierto&&(
         <div style={{marginTop:13}}>
           <div style={{display:"flex",gap:9,marginBottom:11,alignItems:"center",flexWrap:"wrap"}}>
-            <button onClick={cargar} disabled={busy} style={{padding:"8px 14px",minHeight:38,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{busy?"Leyendo…":"Actualizar"}</button>
+            <button onClick={cargar} disabled={busy} style={{padding:"8px 14px",minHeight:38,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{busy?"Leyendo…":"Actualizar"}</button>
             {ev&&<span style={{fontSize:11,color:C.taupe}}>{ev.length} eventos</span>}
           </div>
           {err&&<div style={{fontSize:11.5,color:C.red,lineHeight:1.6,marginBottom:9}}>{err}</div>}
@@ -8895,7 +9019,7 @@ function ReglasPropCfg({props, vendors, onSvP}){
     return t.length?t.join(" · "):"Reglas generales";
   }
 
-  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"};
   var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6};
   var IN={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44,color:C.black};
 
@@ -8917,7 +9041,7 @@ function ReglasPropCfg({props, vendors, onSvP}){
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:9,flexShrink:0}}>
-            {conRegla.length>0&&<span style={{fontSize:10.5,fontWeight:700,color:C.earth,background:C.surfaceWarm,padding:"3px 10px",borderRadius:100}}>{conRegla.length} con regla</span>}
+            {conRegla.length>0&&<span style={{fontSize:10.5,fontWeight:700,color:C.earth,background:C.surfaceWarm,padding:"3px 10px",borderRadius:"var(--sa-pill)"}}>{conRegla.length} con regla</span>}
             <span style={{color:C.taupe,fontSize:13}}>{abierto?"▾":"▸"}</span>
           </div>
         </div>
@@ -8938,7 +9062,7 @@ function ReglasPropCfg({props, vendors, onSvP}){
                       <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{p.name}</div>
                       <div style={{fontSize:11,color:reg?C.earth:C.taupe,marginTop:3}}>{resumen(p)}</div>
                     </div>
-                    <button onClick={function(){setEdit(ab?"":p.name);}} style={{flexShrink:0,padding:"7px 13px",minHeight:36,borderRadius:100,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{ab?"Listo":"Ajustar"}</button>
+                    <button onClick={function(){setEdit(ab?"":p.name);}} style={{flexShrink:0,padding:"7px 13px",minHeight:36,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{ab?"Listo":"Ajustar"}</button>
                   </div>
                   {ab&&(
                     <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid "+C.line,display:"flex",flexDirection:"column",gap:12}}>
@@ -8947,7 +9071,7 @@ function ReglasPropCfg({props, vendors, onSvP}){
                         <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
                           {[[false,"Automáticas"],[true,"No programar"]].map(function(it){
                             var sel=!!p.sinProfundas===it[0];
-                            return <button key={String(it[0])} onClick={function(){ set(p.name,{sinProfundas:it[0]}); }} style={{flex:1,minWidth:130,padding:"10px",minHeight:44,borderRadius:100,border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{it[1]}</button>;
+                            return <button key={String(it[0])} onClick={function(){ set(p.name,{sinProfundas:it[0]}); }} style={{flex:1,minWidth:130,padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{it[1]}</button>;
                           })}
                         </div>
                         {p.sinProfundas&&<div style={{fontSize:11,color:C.taupe,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>El motor no le montará profundas. Se puede seguir agregando una a mano cuando haga falta.</div>}
@@ -9023,7 +9147,7 @@ function PausasCfg({props, onSvP, hoy}){
     return "Hasta el "+fmtDate(h);
   }
 
-  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"};
   var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6};
   var IN={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44,color:C.black};
   var disponibles=(props||[]).filter(function(p){ return !(p.pausa&&p.pausa.activa); })
@@ -9040,7 +9164,7 @@ function PausasCfg({props, onSvP, hoy}){
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:9,flexShrink:0}}>
-            {vigentes.length>0&&<span style={{fontSize:10.5,fontWeight:700,color:C.earth,background:C.surfaceWarm,padding:"3px 10px",borderRadius:100}}>{vigentes.length} en pausa</span>}
+            {vigentes.length>0&&<span style={{fontSize:10.5,fontWeight:700,color:C.earth,background:C.surfaceWarm,padding:"3px 10px",borderRadius:"var(--sa-pill)"}}>{vigentes.length} en pausa</span>}
             <span style={{color:C.taupe,fontSize:13}}>{abierto?"▾":"▸"}</span>
           </div>
         </div>
@@ -9062,14 +9186,14 @@ function PausasCfg({props, onSvP, hoy}){
                     </div>
                     {p.pausa.motivo&&<div style={{fontSize:11,color:C.taupe,marginTop:3,lineHeight:1.5}}>“{p.pausa.motivo}”</div>}
                   </div>
-                  <button onClick={function(){guardar(p.name,null);}} style={{flexShrink:0,padding:"7px 13px",minHeight:36,borderRadius:100,border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Reactivar</button>
+                  <button onClick={function(){guardar(p.name,null);}} style={{flexShrink:0,padding:"7px 13px",minHeight:36,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Reactivar</button>
                 </div>
               </div>
             );
           })}
 
           {!nueva
-            ? <button onClick={function(){setNueva({propiedad:"",modo:"indef",desde:hoy,hasta:"",motivo:""});}} style={{width:"100%",padding:"11px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>+ Pausar una propiedad</button>
+            ? <button onClick={function(){setNueva({propiedad:"",modo:"indef",desde:hoy,hasta:"",motivo:""});}} style={{width:"100%",padding:"11px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>+ Pausar una propiedad</button>
             : <div style={{display:"flex",flexDirection:"column",gap:11,borderTop:"1px solid "+C.line,paddingTop:13}}>
                 <div>
                   <span style={LBL}>Propiedad</span>
@@ -9083,7 +9207,7 @@ function PausasCfg({props, onSvP, hoy}){
                   <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
                     {[["indef","Indefinida"],["fechas","Por fechas"]].map(function(it){
                       var sel=nueva.modo===it[0];
-                      return <button key={it[0]} onClick={function(){setNueva(Object.assign({},nueva,{modo:it[0]}));}} style={{flex:1,minWidth:120,padding:"10px",minHeight:44,borderRadius:100,border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{it[1]}</button>;
+                      return <button key={it[0]} onClick={function(){setNueva(Object.assign({},nueva,{modo:it[0]}));}} style={{flex:1,minWidth:120,padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{it[1]}</button>;
                     })}
                   </div>
                 </div>
@@ -9098,8 +9222,8 @@ function PausasCfg({props, onSvP, hoy}){
                   Mientras esté en pausa, esta propiedad no se le asigna a nadie. Lo ya programado no se borra: quítalo del día si corresponde.
                 </div>
                 <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-                  <button onClick={crear} disabled={!nueva.propiedad||(nueva.modo==="fechas"&&!nueva.desde)} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:100,border:"none",background:(!nueva.propiedad||(nueva.modo==="fechas"&&!nueva.desde))?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Pausar</button>
-                  <button onClick={function(){setNueva(null);}} style={{padding:"12px 18px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cancelar</button>
+                  <button onClick={crear} disabled={!nueva.propiedad||(nueva.modo==="fechas"&&!nueva.desde)} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"none",background:(!nueva.propiedad||(nueva.modo==="fechas"&&!nueva.desde))?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Pausar</button>
+                  <button onClick={function(){setNueva(null);}} style={{padding:"12px 18px",minHeight:46,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cancelar</button>
                 </div>
               </div>}
         </div>
@@ -9219,7 +9343,7 @@ function ImportarRuta({props, vendors, schedules, onSvSchedules, hoy, onAviso}){
     setTxt(""); setPrev(null); setAbierto(false);
   }
 
-  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"};
 
   return (
     <div style={CARD}>
@@ -9238,7 +9362,7 @@ function ImportarRuta({props, vendors, schedules, onSvSchedules, hoy, onAviso}){
       {abierto&&(
         <div style={{marginTop:13,display:"flex",flexDirection:"column",gap:11}}>
           {hoy==="2026-07-31"&&!txt&&(
-            <button onClick={function(){ setTxt(RUTA_31JUL); setPrev(null); }} style={{alignSelf:"flex-start",padding:"9px 15px",minHeight:42,borderRadius:100,border:"1.5px solid "+C.black,background:"#fff",color:C.black,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cargar la ruta del viernes 31 →</button>
+            <button onClick={function(){ setTxt(RUTA_31JUL); setPrev(null); }} style={{alignSelf:"flex-start",padding:"9px 15px",minHeight:42,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.black,background:"#fff",color:C.black,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cargar la ruta del viernes 31 →</button>
           )}
           <textarea value={txt} onChange={function(e){setTxt(e.target.value); setPrev(null);}} rows={8}
             placeholder={"2026-07-31\t11:00:00\tZ1 - Centro Vivo - 1104\tJackeline\n2026-07-31\t11:00:00\tZ10 - Airali - 1508\tMirla"}
@@ -9247,9 +9371,9 @@ function ImportarRuta({props, vendors, schedules, onSvSchedules, hoy, onAviso}){
             Una limpieza por línea, en el orden de la ruta. Sirve el export de Hospitable tal cual (fecha, hora, nota, propiedad, técnico). Las filas sin técnico se ignoran.
           </div>
           <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-            <button onClick={analizar} disabled={!txt.trim()} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:txt.trim()?C.black:C.gray,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Revisar lo pegado</button>
+            <button onClick={analizar} disabled={!txt.trim()} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:txt.trim()?C.black:C.gray,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Revisar lo pegado</button>
             {prev&&prev.filas.length>0&&(
-              <button onClick={aplicar} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Usar como ruta oficial →</button>
+              <button onClick={aplicar} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Usar como ruta oficial →</button>
             )}
           </div>
 
@@ -9301,8 +9425,8 @@ function AnticipacionCfg({vendors, onSvV}){
       return x.id===v.id ? Object.assign({},x,{avisoDias:dias}) : x;
     }));
   }
-  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
-  var CHIP=function(sel){ return {padding:"6px 12px",minHeight:34,borderRadius:100,border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:10.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif",whiteSpace:"nowrap"}; };
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"};
+  var CHIP=function(sel){ return {padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif",whiteSpace:"nowrap"}; };
 
   return (
     <div style={CARD}>
@@ -9315,7 +9439,7 @@ function AnticipacionCfg({vendors, onSvV}){
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:9,flexShrink:0}}>
-            {tres.length>0&&<span style={{fontSize:10.5,fontWeight:700,color:C.earth,background:C.surfaceWarm,padding:"3px 10px",borderRadius:100}}>{tres.length} con 3 días</span>}
+            {tres.length>0&&<span style={{fontSize:10.5,fontWeight:700,color:C.earth,background:C.surfaceWarm,padding:"3px 10px",borderRadius:"var(--sa-pill)"}}>{tres.length} con 3 días</span>}
             <span style={{color:C.taupe,fontSize:13}}>{abierto?"▾":"▸"}</span>
           </div>
         </div>
@@ -9493,7 +9617,7 @@ function DiagProgramacion({props, reservas, schedules, vendors, ausencias, reps,
     d={pasos:pasos, veredicto:veredicto, checkoutsDia:checkoutsDia, sinNombre:sinNombre.length};
   }
 
-  var CARD2={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+  var CARD2={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"};
   var IN2={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44};
   return (
     <div style={CARD2}>
@@ -9545,7 +9669,7 @@ function DiagProgramacion({props, reservas, schedules, vendors, ausencias, reps,
   );
 }
 
-var FAROL_COLOR = {verde:"#3d6b52", amarillo:"#D9A441", rojo:"#9B3A3A", gris:"#D8D4CE"};
+var FAROL_COLOR = {verde:"#3d6b52", amarillo:"#9a5020", rojo:"#C0392B", gris:"#D8D4CE"};
 var FAROL_TXT   = {verde:"Ruta completa", amarillo:"En curso — le falta", rojo:"Sin empezar", gris:"Todavía no toca"};
 function farolDe(lista, cierres, activo){
   lista=(lista||[]).filter(function(s){ return (cierres[s.id]||{}).estado!=="cancelada"; });
@@ -9574,11 +9698,11 @@ function CancelarModal({sched, tecnico, paga, tarifa, monto, onClose, onConfirm}
   var hora=horaTxtGT();
   return (
     <Overlay>
-      <div style={{width:"100%",maxWidth:430,background:"#fff",borderRadius:22,padding:"28px 26px",fontFamily:"Montserrat,sans-serif",boxShadow:"0 28px 80px rgba(62,63,63,.22)"}}>
+      <div style={{width:"100%",maxWidth:430,background:"#fff",borderRadius:22,padding:"28px 26px",fontFamily:"Montserrat,sans-serif",boxShadow:"var(--sa-shadow-lg)"}}>
         <div style={{fontSize:9.5,fontWeight:700,color:C.red,letterSpacing:".24em",textTransform:"uppercase",marginBottom:8}}>Cancelar limpieza</div>
         <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:24,color:C.black,lineHeight:1.2,marginBottom:6}}>{sched.propiedad}</div>
         <div style={{fontSize:12.5,color:C.earth,lineHeight:1.6,marginBottom:16}}>{schedDiaNombre(String(sched.fecha).slice(0,10))} {fmtDate(sched.fecha)} · {tecnico}</div>
-        <div style={{background:paga?"#F5EDEC":C.beige,border:"1px solid "+(paga?"#DBC8C4":C.gray),borderRadius:12,padding:"14px 16px",marginBottom:16}}>
+        <div style={{background:paga?"#F7E7E4":C.beige,border:"1px solid "+(paga?"#E9C9C2":C.gray),borderRadius:12,padding:"14px 16px",marginBottom:16}}>
           {[["Hora de la cancelación",hora],
             ["Tarifa del técnico",tarifa?("Q"+tarifa.toLocaleString()):"sin tarifa registrada"],
             ["Pago por cancelación",paga?("Q"+monto.toLocaleString()+" · media tarifa"):"Sin pago"]].map(function(r,i){
@@ -10179,7 +10303,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
 
   var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6};
   var IN={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44};
-  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+  var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"};
 
   return (
     <div style={{maxWidth:760,margin:"0 auto",padding:"18px 16px 90px",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:13}}>
@@ -10210,17 +10334,17 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           Todo esto corre solo. Úsalos únicamente si algo falló: rehacer o borrar cambia el trabajo del día a todo el equipo.
         </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:11}}>
-          <button onClick={sincronizar} disabled={!!busy} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:busy?"default":"pointer"}}>
+          <button onClick={sincronizar} disabled={!!busy} style={{padding:"11px 16px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:busy?"default":"pointer"}}>
             {busy==="sync"?"Sincronizando…":"↻ Actualizar ahora"}
           </button>
-          <button onClick={generar} disabled={!!busy||!resUtiles} style={{flex:1,minWidth:170,padding:"11px 16px",minHeight:44,borderRadius:100,border:"none",background:(busy||!resUtiles)?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:(busy||!resUtiles)?"default":"pointer",letterSpacing:".03em"}}>
+          <button onClick={generar} disabled={!!busy||!resUtiles} style={{flex:1,minWidth:170,padding:"11px 16px",minHeight:44,borderRadius:"var(--sa-pill)",border:"none",background:(busy||!resUtiles)?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:(busy||!resUtiles)?"default":"pointer",letterSpacing:".03em"}}>
             {busy==="gen"?"Programando…":"Programar 3 días"}
           </button>
-          <button onClick={rehacerFuturo} disabled={!!busy||!resUtiles} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Borrar y rehacer</button>
-          <button onClick={revisarHoy} disabled={!!busy} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:busy?"default":"pointer"}}>
+          <button onClick={rehacerFuturo} disabled={!!busy||!resUtiles} style={{padding:"11px 16px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Borrar y rehacer</button>
+          <button onClick={revisarHoy} disabled={!!busy} style={{padding:"11px 16px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:busy?"default":"pointer"}}>
             Revisar hoy
           </button>
-          <button onClick={function(){ simular(dia); }} disabled={!resUtiles} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px dashed "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:resUtiles?"pointer":"default",opacity:resUtiles?1:.5}}>
+          <button onClick={function(){ simular(dia); }} disabled={!resUtiles} style={{padding:"11px 16px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px dashed "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:resUtiles?"pointer":"default",opacity:resUtiles?1:.5}}>
             Simulacro del día
           </button>
         </div>
@@ -10240,7 +10364,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
 
       {/* La programación que no llegó a Sheets no existe para nadie más */}
       {schedErr&&(
-        <div style={{background:"#F5EDEC",border:"1.5px solid #DBC8C4",borderRadius:14,padding:"14px 16px"}}>
+        <div style={{background:"#F7E7E4",border:"1.5px solid #E9C9C2",borderRadius:14,padding:"14px 16px"}}>
           <div style={{fontSize:9.5,fontWeight:700,color:C.red,letterSpacing:".14em",textTransform:"uppercase"}}>No se guardó en Google Sheets</div>
           <div style={{fontSize:12,color:C.earth,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>{schedErr}</div>
         </div>
@@ -10249,7 +10373,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
       {/* Ausencias por aprobar */}
       {pendAus.length>0&&(
         <div style={{background:"#FBF6EC",border:"1px solid #E8DCC4",borderRadius:14,padding:"15px 16px"}}>
-          <div style={{fontSize:9.5,fontWeight:700,color:"#7a5c1e",letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>Ausencias por aprobar · {pendAus.length}</div>
+          <div style={{fontSize:9.5,fontWeight:700,color:"#9a5020",letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>Ausencias por aprobar · {pendAus.length}</div>
           <div style={{display:"flex",flexDirection:"column",gap:9}}>
             {pendAus.map(function(aus){
               var afect=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===aus.fecha && String(s.vendorEmail||"").toLowerCase()===String(aus.vendorEmail||"").toLowerCase(); }).length;
@@ -10259,8 +10383,8 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                   <div style={{fontSize:11.5,color:C.earth,marginTop:3}}>{schedDiaNombre(aus.fecha)} {fmtDate(aus.fecha)} · {afect} limpieza{afect===1?"":"s"} a reasignar</div>
                   {aus.motivo&&<div style={{fontSize:11.5,color:C.taupe,marginTop:4,lineHeight:1.6}}>“{aus.motivo}”</div>}
                   <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
-                    <button onClick={function(){verReajuste(aus);}} style={{padding:"9px 15px",minHeight:44,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Ver reajuste →</button>
-                    <button onClick={function(){rechazarAusencia(aus);}} style={{padding:"9px 14px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.red,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Rechazar</button>
+                    <button onClick={function(){verReajuste(aus);}} style={{padding:"9px 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Ver reajuste →</button>
+                    <button onClick={function(){rechazarAusencia(aus);}} style={{padding:"9px 14px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.red,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Rechazar</button>
                   </div>
                 </div>
               );
@@ -10290,20 +10414,20 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
               var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===m.aEmail; });
               return (
                 <div key={i} style={{background:C.surfaceWarm,borderRadius:9,padding:"10px 12px"}}>
-                  <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{m.propiedad}{m.entradaHoy?<span style={{fontSize:9,fontWeight:700,color:C.red,marginLeft:7,letterSpacing:".08em"}}>ENTRADA</span>:null}</div>
+                  <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{m.propiedad}{m.entradaHoy?<span style={{fontSize:9,fontWeight:700,color:C.attentionText,marginLeft:7,letterSpacing:".08em"}}>ENTRADA</span>:null}</div>
                   <div style={{fontSize:11,color:C.earth,marginTop:3}}>→ {v?vendorDisplay(v):m.aEmail}{m.motivo?" · "+m.motivo:""}</div>
                 </div>
               );
             })}
             {prop.res.sinAsignar.length>0&&(
-              <div style={{background:"#F5EDEC",borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.red,lineHeight:1.6}}>
+              <div style={{background:"#F7E7E4",borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.red,lineHeight:1.6}}>
                 {prop.res.sinAsignar.length} limpieza{prop.res.sinAsignar.length===1?"":"s"} sin quien la tome: {prop.res.sinAsignar.map(function(x){return x.lim.propiedad;}).join(", ")}. Hay que bloquear calendario o traer refuerzo.
               </div>
             )}
           </div>
           <div style={{display:"flex",gap:9,marginTop:13,flexWrap:"wrap"}}>
-            <button onClick={aplicarReajuste} style={{flex:1,minWidth:160,padding:"12px",minHeight:46,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Aprobar y notificar →</button>
-            <button onClick={function(){setPropu(null);}} style={{padding:"12px 18px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+            <button onClick={aplicarReajuste} style={{flex:1,minWidth:160,padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Aprobar y notificar →</button>
+            <button onClick={function(){setPropu(null);}} style={{padding:"12px 18px",minHeight:46,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
           </div>
         </div>
       )}
@@ -10339,7 +10463,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                         <div key={i} style={{fontSize:11,color:C.earth,lineHeight:1.6}}>
                           {i+1}. <b style={{color:C.black,fontWeight:600}}>{a.propiedad}</b> · {a.habitaciones} hab
                           {SCHED.esProfunda(a.tipo)?" · PROFUNDA":""}
-                          {a.entradaHoy?<span style={{color:C.red,fontWeight:700}}> · entrada hoy</span>:null}
+                          {a.entradaHoy?<span style={{color:C.attentionText,fontWeight:700}}> · entrada hoy</span>:null}
                           {a.viaje&&i>0?" · "+a.viaje+" min de traslado":""}
                           {a.motivo?<span style={{color:C.taupe}}> — {a.motivo}</span>:null}
                         </div>
@@ -10350,7 +10474,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
               );
             })}
             {sim.res.sinAsignar.length>0&&(
-              <div style={{background:"#F5EDEC",borderRadius:10,padding:"11px 12px",fontSize:11.5,color:C.red,lineHeight:1.6}}>
+              <div style={{background:"#F7E7E4",borderRadius:10,padding:"11px 12px",fontSize:11.5,color:C.red,lineHeight:1.6}}>
                 Sin técnico: {sim.res.sinAsignar.map(function(x){return x.lim.propiedad;}).join(" · ")}
               </div>
             )}
@@ -10372,7 +10496,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           var fx=SCHED.shift(hoy,n), sel=dia===n;
           var cnt=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===fx; }).length;
           return (
-            <button key={n} onClick={function(){setDia(n);}} style={{flexShrink:0,padding:"9px 13px",minHeight:44,borderRadius:100,border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>
+            <button key={n} onClick={function(){setDia(n);}} style={{flexShrink:0,padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>
               {n===-1?"Ayer":n===0?"Hoy":n===1?"Mañana":schedDiaNombre(fx).slice(0,3)+" "+String(fx).slice(8,10)}
               {cnt>0&&<span style={{marginLeft:6,opacity:.65,fontVariantNumeric:"tabular-nums"}}>{cnt}</span>}
             </button>
@@ -10390,9 +10514,9 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           {delDia.length>0&&(
             <div style={{display:"flex",gap:8,flexShrink:0,flexWrap:"wrap",justifyContent:"flex-end"}}>
               {notificado&&fecha>hoy&&!reabrir[fecha]&&(
-                <button onClick={function(){reabrirDia(fecha);}} style={{padding:"10px 14px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Rehacer este día</button>
+                <button onClick={function(){reabrirDia(fecha);}} style={{padding:"10px 14px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Rehacer este día</button>
               )}
-              <button onClick={function(){notificar(fecha);}} style={{padding:"10px 15px",minHeight:44,borderRadius:100,border:"none",background:notificado?C.gray:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer"}}>
+              <button onClick={function(){notificar(fecha);}} style={{padding:"10px 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"none",background:notificado?C.gray:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer"}}>
                 {notificado?"✓ Ya notificado":"Notificar al equipo →"}
               </button>
             </div>
@@ -10417,7 +10541,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
         )}
         {tocados[fecha]&&(
           <div style={{marginTop:11,background:"#FBF6EC",border:"1px solid #E8DCC4",borderRadius:9,padding:"11px 13px"}}>
-            <div style={{fontSize:11.5,color:"#7a5c1e",fontWeight:700,lineHeight:1.6,textWrap:"pretty"}}>Cambiaste una ruta que ya salió por correo — el equipo todavía tiene la versión anterior.</div>
+            <div style={{fontSize:11.5,color:"#9a5020",fontWeight:700,lineHeight:1.6,textWrap:"pretty"}}>Cambiaste una ruta que ya salió por correo — el equipo todavía tiene la versión anterior.</div>
             {(function(){
               var afectados=Object.keys(tecCambio[fecha]||{}).filter(function(em){
                 return delDia.some(function(s){ return String(s.vendorEmail||"").toLowerCase()===em; })
@@ -10430,17 +10554,17 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
               return (
                 <div style={{marginTop:9,display:"flex",flexDirection:"column",gap:9}}>
                   {nombres.length>0&&(
-                    <div style={{fontSize:11,color:"#7a5c1e",lineHeight:1.6,textWrap:"pretty"}}>
+                    <div style={{fontSize:11,color:"#9a5020",lineHeight:1.6,textWrap:"pretty"}}>
                       Cambió la ruta de {nombres.join(" · ")}. Al resto del equipo no le cambió nada.
                     </div>
                   )}
                   <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
                     {afectados.length>0&&(
-                      <button onClick={function(){notificar(fecha, afectados);}} style={{padding:"9px 15px",minHeight:42,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+                      <button onClick={function(){notificar(fecha, afectados);}} style={{padding:"9px 15px",minHeight:42,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
                         Avisar solo a {afectados.length===1?"quien cambió":("los "+afectados.length+" que cambiaron")} →
                       </button>
                     )}
-                    <button onClick={function(){notificar(fecha);}} style={{padding:"9px 15px",minHeight:42,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Reenviar a todo el equipo</button>
+                    <button onClick={function(){notificar(fecha);}} style={{padding:"9px 15px",minHeight:42,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Reenviar a todo el equipo</button>
                   </div>
                 </div>
               );
@@ -10448,7 +10572,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           </div>
         )}
         {notificado&&!tocados[fecha]&&(
-          <div style={{marginTop:11,background:"#EDF5EF",borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.green,lineHeight:1.6,fontWeight:600,textWrap:"pretty"}}>
+          <div style={{marginTop:11,background:"#E8F2ED",borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.green,lineHeight:1.6,fontWeight:600,textWrap:"pretty"}}>
             Esta es la ruta que el equipo recibió por correo{delDia[0]&&delDia[0].notificadoEn?" el "+fmtDate(delDia[0].notificadoEn):""}. El motor ya no la toca{reabrir[fecha]?" — pero la reabriste: al volver a programar se rehará":""}.
           </div>
         )}
@@ -10458,7 +10582,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           </div>
         )}
         {uso>=90&&delDia.length>0&&(
-          <div style={{marginTop:11,background:"#F5EDEC",borderRadius:9,padding:"11px 13px",fontSize:11.5,color:C.red,lineHeight:1.6,fontWeight:600}}>
+          <div style={{marginTop:11,background:"#F8ECE9",borderRadius:9,padding:"11px 13px",fontSize:11.5,color:C.attentionText,lineHeight:1.6,fontWeight:600}}>
             Saturación: la carga usa {uso}% de la capacidad del equipo. Conviene bloquear calendario en Hospitable.
           </div>
         )}
@@ -10470,11 +10594,11 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
         {/* Checkouts sin ruta: se asignan aquí mismo, sin buscar a nadie más abajo.
             Viene sugerido quien tiene la zona y va más liviano hoy. */}
         {sinAsignar.length>0&&(
-          <div style={{marginTop:11,background:"#F5EDEC",border:"1px solid #E7D3CE",borderRadius:11,padding:"12px 13px"}}>
+          <div style={{marginTop:11,background:"#F7E7E4",border:"1px solid #E9C9C2",borderRadius:11,padding:"12px 13px"}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"baseline"}}>
-              <div style={{fontSize:11.5,color:C.red,fontWeight:700,lineHeight:1.6}}>{sinAsignar.length} checkout{sinAsignar.length===1?"":"s"} sin limpieza asignada</div>
+              <div style={{fontSize:11.5,color:C.attentionText,fontWeight:700,lineHeight:1.6}}>{sinAsignar.length} checkout{sinAsignar.length===1?"":"s"} sin limpieza asignada</div>
               {sinAsignar.length>1&&(
-                <button onClick={asignarTodosPendientes} style={{padding:"8px 14px",minHeight:38,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Repartir {sinAsignar.length} →</button>
+                <button onClick={asignarTodosPendientes} style={{padding:"8px 14px",minHeight:38,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Repartir {sinAsignar.length} →</button>
               )}
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:9}}>
@@ -10489,9 +10613,9 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                       <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{x.propiedad}</div>
                       <div style={{fontSize:10.5,color:C.earth}}>{x.habitaciones||1} hab · {x.tipo}</div>
                     </div>
-                    {x.entradaHoy&&<div style={{fontSize:9.5,fontWeight:700,color:C.red,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>Tiene entrada hoy</div>}
+                    {x.entradaHoy&&<div style={{fontSize:9.5,fontWeight:700,color:C.attentionText,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>Tiene entrada hoy</div>}
                     {!conZona.length&&(
-                      <div style={{fontSize:10.5,color:C.orange,marginTop:5,lineHeight:1.5,textWrap:"pretty"}}>Nadie tiene {SCHED.zonaLabel(x.zona)} asignada. Elige a alguien de todos modos o agrégale la zona en Ajustes › Equipo.</div>
+                      <div style={{fontSize:12,color:C.orange,marginTop:5,lineHeight:1.5,textWrap:"pretty"}}>Nadie tiene {SCHED.zonaLabel(x.zona)} asignada. Elige a alguien de todos modos o agrégale la zona en Ajustes › Equipo.</div>
                     )}
                     <div style={{display:"flex",gap:7,marginTop:8,flexWrap:"wrap"}}>
                       <select value={sel} onChange={function(e){ var val=e.target.value; setAsigSel(function(p){ var u=Object.assign({},p); u[x.key]=val; return u; }); }}
@@ -10502,7 +10626,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                         })}
                       </select>
                       <button onClick={function(){ if(sel) asignarPendiente(x, sel); }} disabled={!sel}
-                        style={{padding:"9px 16px",minHeight:42,borderRadius:100,border:"none",background:sel?C.black:C.gray,color:"#fff",fontSize:11.5,fontWeight:600,cursor:sel?"pointer":"default",fontFamily:"Montserrat,sans-serif"}}>Asignar</button>
+                        style={{padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"none",background:sel?C.black:C.gray,color:"#fff",fontSize:11.5,fontWeight:600,cursor:sel?"pointer":"default",fontFamily:"Montserrat,sans-serif"}}>Asignar</button>
                     </div>
                   </div>
                 );
@@ -10524,10 +10648,10 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
               <div style={{fontSize:14,fontWeight:600,color:C.black}}>Rutas del día</div>
               {farolActivo&&delDia.length>0&&<Farol estado={farol(delDia)} hechas={hechasDe(delDia)} total={delDia.length} size={14}/>}
             </div>
-            <div style={{display:"flex",background:C.surfaceWarm,borderRadius:100,padding:3,gap:3,border:"1px solid "+C.line}}>
+            <div style={{display:"flex",background:C.surfaceWarm,borderRadius:"var(--sa-pill)",padding:3,gap:3,border:"1px solid "+C.line}}>
               {[["apto","Por apartamento"],["tec","Por técnico"],["zona","Por zona"]].map(function(it){
                 var sel=vistaRuta===it[0];
-                return <button key={it[0]} onClick={function(){setVistaRuta(it[0]);}} style={{padding:"7px 14px",minHeight:36,borderRadius:100,border:"none",background:sel?"#fff":"transparent",color:sel?C.black:C.taupe,fontSize:11,fontWeight:sel?700:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif",boxShadow:sel?"0 1px 4px rgba(62,63,63,.08)":"none"}}>{it[1]}</button>;
+                return <button key={it[0]} onClick={function(){setVistaRuta(it[0]);}} style={{padding:"0 15px",minHeight:38,borderRadius:"var(--sa-pill)",border:"none",background:sel?"#fff":"transparent",color:sel?C.black:C.taupe,fontSize:11.5,fontWeight:sel?700:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif",boxShadow:sel?"0 1px 4px rgba(62,63,63,.08)":"none"}}>{it[1]}</button>;
               })}
             </div>
           </div>
@@ -10537,7 +10661,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           </div>
           {/* Lo que antes era una tarjeta entera: una línea, y solo cuando urge. */}
           {sinNingunForm.length>0&&(alertaHora||esPasado)&&(
-            <div style={{marginTop:10,background:"#F5EDEC",border:"1px solid #E7D3CE",borderRadius:9,padding:"9px 12px",fontSize:11.5,color:C.red,fontWeight:600,lineHeight:1.55,textWrap:"pretty"}}>
+            <div style={{marginTop:10,background:"#F8ECE9",border:"1px solid #E9C9C2",borderRadius:9,padding:"9px 12px",fontSize:11.5,color:C.attentionText,fontWeight:600,lineHeight:1.55,textWrap:"pretty"}}>
               {esHoy?"Pasada la 1:00 pm, ":""}{sinNingunForm.length===1?"un técnico con ruta no ha registrado nada":sinNingunForm.length+" técnicos con ruta no han registrado nada"}: {sinNingunForm.map(function(em){ var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===em; }); return v?vendorDisplay(v):em; }).join(" · ")}.
             </div>
           )}
@@ -10548,7 +10672,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
               if(it[0]==="sobre"&&!resumenTec.sobre) return null;
               var sel=filtroTec===it[0];
               return (
-                <button key={it[0]} onClick={function(){setFiltroTec(it[0]);}} style={{padding:"7px 13px",minHeight:38,borderRadius:100,border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+                <button key={it[0]} onClick={function(){setFiltroTec(it[0]);}} style={{padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
                   {it[1]}<span style={{marginLeft:6,opacity:.6,fontVariantNumeric:"tabular-nums"}}>{it[2]}</span>
                 </button>
               );
@@ -10557,14 +10681,14 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
             <button onClick={function(){
               var todos={}; if(Object.keys(abiertos).length===0) filaTecs.forEach(function(f){ todos[f.em]=1; });
               setAbiertos(todos);
-            }} style={{padding:"7px 13px",minHeight:38,borderRadius:100,border:"none",background:"none",color:C.taupe,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+            }} style={{padding:"7px 13px",minHeight:38,borderRadius:"var(--sa-pill)",border:"none",background:"none",color:C.taupe,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
               {Object.keys(abiertos).length?"Cerrar todas":"Abrir todas"}
             </button>
           </div>
 
           {tecs.length>7&&(
             <input value={buscaTec} onChange={function(e){setBuscaTec(e.target.value);}} placeholder="Buscar técnico…"
-              style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:100,padding:"9px 15px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",minHeight:42,marginTop:10,background:"#fff"}}/>
+              style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:"var(--sa-pill)",padding:"9px 15px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",minHeight:42,marginTop:10,background:"#fff"}}/>
           )}
 
           <div style={{marginTop:6}}>
@@ -10580,10 +10704,10 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
                         <span style={{fontSize:13,fontWeight:600,color:(f.aus||f.desc)?C.taupe:C.black}}>{vendorDisplay(v)}</span>
-                        {f.aus&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.red,background:"#F5EDEC",padding:"2px 8px",borderRadius:100}}>Ausente</span>}
-                        {!f.aus&&f.desc&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.taupe,background:C.surfaceWarm,padding:"2px 8px",borderRadius:100}}>Descanso</span>}
-                        {conEntrada&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#B4553C",background:"#FCF4F1",padding:"2px 8px",borderRadius:100}}>Entrada hoy</span>}
-                        {mins>SCHED.JORNADA_MIN&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.orange,background:"#F7EFE2",padding:"2px 8px",borderRadius:100}}>Sobre jornada</span>}
+                        {f.aus&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.attentionText,background:"#F8ECE9",padding:"2px 8px",borderRadius:"var(--sa-pill)"}}>Ausente</span>}
+                        {!f.aus&&f.desc&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.taupe,background:C.surfaceWarm,padding:"2px 8px",borderRadius:"var(--sa-pill)"}}>Descanso</span>}
+                        {conEntrada&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#B4553C",background:"#FCF4F1",padding:"2px 8px",borderRadius:"var(--sa-pill)"}}>Entrada hoy</span>}
+                        {mins>SCHED.JORNADA_MIN&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.orange,background:"#F5EBE5",padding:"2px 8px",borderRadius:"var(--sa-pill)"}}>Sobre jornada</span>}
                       </div>
                       <div style={{fontSize:10.5,color:C.taupe,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
                         {mias.length
@@ -10592,7 +10716,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                       </div>
                     </div>
                     <div style={{width:40,flexShrink:0}}>
-                      <div style={{height:5,borderRadius:100,background:C.line,overflow:"hidden"}}>
+                      <div style={{height:5,borderRadius:"var(--sa-pill)",background:C.line,overflow:"hidden"}}>
                         <div style={{width:pct+"%",height:"100%",background:mins>SCHED.JORNADA_MIN?C.orange:C.black}}/>
                       </div>
                       <div style={{fontSize:9,color:C.taupe,marginTop:4,textAlign:"center",fontVariantNumeric:"tabular-nums"}}>{mins?schedMinsTxt(mins):"—"}</div>
@@ -10633,21 +10757,21 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                                     ? <span style={{color:C.black,fontWeight:700,letterSpacing:".06em"}}> · código {cod}</span>
                                     : <span style={{color:C.orange}}> · sin código</span>}
                                 </div>
-                                {s.entradaHoy&&<div style={{fontSize:9.5,fontWeight:700,color:C.red,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>Tiene entrada hoy</div>}
+                                {s.entradaHoy&&<div style={{fontSize:9.5,fontWeight:700,color:C.attentionText,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>Tiene entrada hoy</div>}
                                 {(function(){
                                   var cz=cierres[s.id]||{};
                                   if(cz.estado==="futura"||!cz.estado) return null;
-                                  if(cz.estado==="cancelada") return <div style={{fontSize:9.5,fontWeight:700,color:C.red,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>Cancelada{cz.hora?" · "+cz.hora:""} · {cz.paga?"media tarifa":"sin pago"}</div>;
+                                  if(cz.estado==="cancelada") return <div style={{fontSize:9.5,fontWeight:700,color:C.attentionText,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>Cancelada{cz.hora?" · "+cz.hora:""} · {cz.paga?"media tarifa":"sin pago"}</div>;
                                   if(cz.estado==="hecha") return <div style={{fontSize:9.5,fontWeight:700,color:C.green,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>✓ {cz.ajuste?"Ajuste":"Formulario"}{cz.hora?" · "+cz.hora:""}{cz.porOtro?" · lo hizo otro":""}</div>;
                                   var rojo=cz.estado==="atrasada"||cz.estado==="faltante";
-                                  return <div style={{fontSize:9.5,fontWeight:700,color:rojo?C.red:C.orange,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>{rojo?"Sin formulario":"Formulario pendiente"}</div>;
+                                  return <div style={{fontSize:9.5,fontWeight:700,color:rojo?C.attentionText:C.orange,marginTop:3,letterSpacing:".06em",textTransform:"uppercase"}}>{rojo?"Sin formulario":"Formulario pendiente"}</div>;
                                 })()}
                                 {verMotor&&s.motivo&&<div style={{fontSize:10,color:C.taupe,marginTop:3,lineHeight:1.5}}>Motor: {s.motivo}</div>}
                               </div>
                               <div style={{display:"flex",gap:4,flexShrink:0}}>
-                                <button onClick={function(){reordenar(em,i,i-1);}} disabled={i===0} title="Subir" style={{width:30,height:30,borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:i===0?C.gray:C.earth,fontSize:11,cursor:i===0?"default":"pointer",lineHeight:1}}>↑</button>
-                                <button onClick={function(){reordenar(em,i,i+1);}} disabled={i===mias.length-1} title="Bajar" style={{width:30,height:30,borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:i===mias.length-1?C.gray:C.earth,fontSize:11,cursor:i===mias.length-1?"default":"pointer",lineHeight:1}}>↓</button>
-                                <button onClick={function(){ setAccion(abrirAcc?null:s.id); }} title="Más" style={{width:30,height:30,borderRadius:8,border:"1px solid "+(abrirAcc?C.black:C.gray),background:"#fff",color:C.earth,fontSize:13,cursor:"pointer",lineHeight:1}}>⋯</button>
+                                <button onClick={function(){reordenar(em,i,i-1);}} disabled={i===0} title="Subir" style={{width:30,height:30,borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:i===0?C.gray:C.earth,cursor:i===0?"default":"pointer",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="chevronUp" size={15} stroke={i===0?C.gray:C.earth}/></button>
+                                <button onClick={function(){reordenar(em,i,i+1);}} disabled={i===mias.length-1} title="Bajar" style={{width:30,height:30,borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:i===mias.length-1?C.gray:C.earth,cursor:i===mias.length-1?"default":"pointer",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="chevronDown" size={15} stroke={i===mias.length-1?C.gray:C.earth}/></button>
+                                <button onClick={function(){ setAccion(abrirAcc?null:s.id); }} title="Más" style={{width:30,height:30,borderRadius:8,border:"1px solid "+(abrirAcc?C.black:C.gray),background:"#fff",color:C.earth,cursor:"pointer",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="dots" size={15} stroke={C.earth}/></button>
                               </div>
                             </div>
                             {abrirAcc&&(
@@ -10659,7 +10783,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                                     return <option key={x.id} value={String(x.email||"").toLowerCase()}>{vendorDisplay(x)} · {cnt} hoy</option>;
                                   })}
                                 </select>
-                                {String(s.estado||"")!=="cancelada"&&<button onClick={function(){setCancelar(s);}} style={{fontSize:11,padding:"7px 12px",minHeight:36,borderRadius:8,border:"1px solid #DBC8C4",background:"#F5EDEC",color:C.red,cursor:"pointer",fontWeight:700,fontFamily:"Montserrat,sans-serif"}}>Cancelar limpieza</button>}
+                                {String(s.estado||"")!=="cancelada"&&<button onClick={function(){setCancelar(s);}} style={{fontSize:11,padding:"7px 12px",minHeight:36,borderRadius:8,border:"1px solid #E9C9C2",background:"#F7E7E4",color:C.red,cursor:"pointer",fontWeight:700,fontFamily:"Montserrat,sans-serif"}}>Cancelar limpieza</button>}
                                 <button onClick={function(){quitar(s);}} style={{fontSize:11,padding:"7px 12px",minHeight:36,borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",fontWeight:600,fontFamily:"Montserrat,sans-serif"}}>Quitar del día</button>
                               </div>
                             )}
@@ -10667,7 +10791,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                         );
                       })}
                       {mias.length>0&&String((v.phone||v.telefono)||"").replace(/[^0-9]/g,"").length>=8&&(
-                        <a href={schedWaLink(v, mias.map(function(s){ return Object.assign({},s,{codigoAcceso:codigoSemana(codigos,s.propiedad,s.fecha,s.codigoAcceso)}); }), fecha)} target="_blank" rel="noopener noreferrer" style={{alignSelf:"flex-start",fontSize:11,fontWeight:600,color:C.earth,textDecoration:"none",padding:"8px 13px",minHeight:36,borderRadius:100,border:"1px solid "+C.gray,background:"#fff"}}>Enviar por WhatsApp →</a>
+                        <a href={schedWaLink(v, mias.map(function(s){ return Object.assign({},s,{codigoAcceso:codigoSemana(codigos,s.propiedad,s.fecha,s.codigoAcceso)}); }), fecha)} target="_blank" rel="noopener noreferrer" style={{alignSelf:"flex-start",fontSize:11,fontWeight:600,color:C.earth,textDecoration:"none",padding:"8px 13px",minHeight:36,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff"}}>Enviar por WhatsApp →</a>
                       )}
                     </div>
                   )}
@@ -10722,9 +10846,9 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                           <div style={{minWidth:0}}>
                             <div style={{fontSize:12.5,fontWeight:600,color:cancelada?C.taupe:C.black,textDecoration:cancelada?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.apto}</div>
                             <div style={{display:"flex",gap:6,marginTop:3,flexWrap:"wrap",alignItems:"center"}}>
-                              {SCHED.esProfunda(f.s.tipo)&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"2px 7px",borderRadius:100}}>Profunda</span>}
+                              {SCHED.esProfunda(f.s.tipo)&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"2px 7px",borderRadius:"var(--sa-pill)"}}>Profunda</span>}
                               {f.s.entradaHoy&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#B4553C"}}>Entrada</span>}
-                              {cancelada&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.red}}>Cancelada{f.cz.paga?" · media tarifa":""}</span>}
+                              {cancelada&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.attentionText}}>Cancelada{f.cz.paga?" · media tarifa":""}</span>}
                               {!cancelada&&farolActivo&&f.cz.estado==="hecha"&&<span style={{fontSize:9.5,color:C.green,fontWeight:600}}>✓ {f.cz.ajuste?"ajuste":"formulario"}{f.cz.hora?" "+f.cz.hora:""}</span>}
                             </div>
                           </div>
@@ -10733,7 +10857,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                             : <span/>}
                           <div style={{display:"flex",alignItems:"center",gap:7,minWidth:0}}>
                             <span style={{fontSize:12,color:f.tec?C.black:C.orange,fontWeight:f.tec?500:700,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.tec||"sin técnico"}</span>
-                            <span style={{marginLeft:"auto",color:C.taupe,fontSize:11,flexShrink:0}}>{accion===f.s.id?"▴":"⋯"}</span>
+                            <span style={{marginLeft:"auto",flexShrink:0,display:"flex"}}><Icon name={accion===f.s.id?"chevronUp":"dots"} size={15} stroke={C.taupe}/></span>
                           </div>
                         </div>
                         {/* Las mismas acciones que en la vista por técnico: mover, cancelar, quitar. */}
@@ -10746,14 +10870,14 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                                 return <option key={x.id} value={String(x.email||"").toLowerCase()}>{vendorDisplay(x)} · {cnt} hoy</option>;
                               })}
                             </select>
-                            {!cancelada&&String(f.s.estado||"")!=="cancelada"&&<button onClick={function(){setCancelar(f.s);}} style={{fontSize:11,padding:"8px 12px",minHeight:38,borderRadius:8,border:"1px solid #DBC8C4",background:"#F5EDEC",color:C.red,cursor:"pointer",fontWeight:700,fontFamily:"Montserrat,sans-serif"}}>Cancelar limpieza</button>}
+                            {!cancelada&&String(f.s.estado||"")!=="cancelada"&&<button onClick={function(){setCancelar(f.s);}} style={{fontSize:11,padding:"8px 12px",minHeight:38,borderRadius:8,border:"1px solid #E9C9C2",background:"#F7E7E4",color:C.red,cursor:"pointer",fontWeight:700,fontFamily:"Montserrat,sans-serif"}}>Cancelar limpieza</button>}
                             <button onClick={function(){quitar(f.s);setAccion(null);}} style={{fontSize:11,padding:"8px 12px",minHeight:38,borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",fontWeight:600,fontFamily:"Montserrat,sans-serif"}}>Quitar del día</button>
                           </div>
                         )}
                       </div>
                       );
                     })}
-                    <div style={{fontSize:10.5,color:C.taupe,marginTop:9,lineHeight:1.6}}>{filas.length} limpieza{filas.length===1?"":"s"} este día · toca los títulos para ordenar · toca una fila para mover, cancelar o quitar</div>
+                    <div style={{fontSize:12,color:C.taupe,marginTop:9,lineHeight:1.6}}>{filas.length} limpieza{filas.length===1?"":"s"} este día · toca los títulos para ordenar · toca una fila para mover, cancelar o quitar</div>
                   </div>
                 )}
               </div>
@@ -10810,7 +10934,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                                       <div style={{flex:1,minWidth:0}}>
                                         <div style={{fontSize:12,fontWeight:600,color:C.black}}>
                                           {un.nombre}
-                                          {un.lista.some(function(s){ return SCHED.esProfunda(s.tipo); })&&<span style={{marginLeft:7,fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"2px 7px",borderRadius:100}}>Profunda</span>}
+                                          {un.lista.some(function(s){ return SCHED.esProfunda(s.tipo); })&&<span style={{marginLeft:7,fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"2px 7px",borderRadius:"var(--sa-pill)"}}>Profunda</span>}
                                           {un.lista.some(function(s){ return s.entradaHoy; })&&<span style={{marginLeft:7,fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#B4553C"}}>Entrada</span>}
                                         </div>
                                         <div style={{fontSize:10.5,color:C.earth,marginTop:2}}>
@@ -10844,7 +10968,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
       {/* Asignación manual */}
       <div style={CARD}>
         {!manual
-          ? <button onClick={function(){setManual(true);setMForm(Object.assign({},mForm,{fecha:fecha}));}} style={{width:"100%",padding:"12px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>+ Asignar una limpieza a mano</button>
+          ? <button onClick={function(){setManual(true);setMForm(Object.assign({},mForm,{fecha:fecha}));}} style={{width:"100%",padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>+ Asignar una limpieza a mano</button>
           : <div style={{display:"flex",flexDirection:"column",gap:11}}>
               <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Asignación manual</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:11}}>
@@ -10869,8 +10993,8 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                 </div>
               </div>
               <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-                <button onClick={agregarManual} disabled={!mForm.fecha||!mForm.propiedad||!mForm.vendorId} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:100,border:"none",background:(!mForm.fecha||!mForm.propiedad||!mForm.vendorId)?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Agregar</button>
-                <button onClick={function(){setManual(false);}} style={{padding:"12px 18px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+                <button onClick={agregarManual} disabled={!mForm.fecha||!mForm.propiedad||!mForm.vendorId} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"none",background:(!mForm.fecha||!mForm.propiedad||!mForm.vendorId)?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Agregar</button>
+                <button onClick={function(){setManual(false);}} style={{padding:"12px 18px",minHeight:46,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
               </div>
             </div>}
       </div>
@@ -10916,12 +11040,12 @@ function FeedbackCfg({feedback, onSave}) {
   var unread = items.filter(function(f){return !f.visto;}).length;
   return (
     <div style={{display:"flex",flexDirection:"column",gap:10}}>
-      {unread>0&&<div style={{padding:"9px 13px",borderRadius:7,background:"#EDF5EF",fontSize:12.5,fontWeight:600,color:C.green}}>✓ {unread} comentario{unread!==1?"s":""} nuevo{unread!==1?"s":""} sin leer</div>}
+      {unread>0&&<div style={{padding:"9px 13px",borderRadius:7,background:"#E8F2ED",fontSize:12.5,fontWeight:600,color:C.green}}>✓ {unread} comentario{unread!==1?"s":""} nuevo{unread!==1?"s":""} sin leer</div>}
       {items.length===0&&<div style={{textAlign:"center",padding:"32px",color:C.taupe,fontSize:13}}>Sin comentarios aún.</div>}
       {items.map(function(f){return (
         <div key={f.id} style={{background:"#fff",borderRadius:9,padding:"13px 15px",border:"1px solid "+(f.visto?C.line:"#B2A193"),opacity:f.visto?.7:1}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-            <span style={{padding:"2px 10px",borderRadius:100,fontSize:10,fontWeight:700,background:f.tipo==="error"?"#F5EDEC":"#EDF5EF",color:f.tipo==="error"?C.red:C.green}}>{f.tipo==="error"?"🐛 Error":"💡 Sugerencia"}</span>
+            <span style={{padding:"2px 10px",borderRadius:"var(--sa-pill)",fontSize:10,fontWeight:700,background:f.tipo==="error"?"#F7E7E4":"#E8F2ED",color:f.tipo==="error"?C.red:C.green}}>{f.tipo==="error"?"🐛 Error":"💡 Sugerencia"}</span>
             <span style={{fontSize:10.5,color:C.taupe}}>{f.fecha} {f.hora} · {f.usuario}</span>
           </div>
           <div style={{fontSize:13.5,color:C.black,lineHeight:1.6,marginBottom:8}}>{f.mensaje}</div>
@@ -10997,13 +11121,13 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
 
   function Tarjeta({s, idx}){
     return (
-      <div style={{background:"#fff",borderRadius:14,border:"1px solid "+(SCHED.esProfunda(s.tipo)?C.peach:s.entradaHoy?"#E5C9BF":C.gray),padding:"15px 16px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
+      <div style={{background:"#fff",borderRadius:14,border:"1px solid "+(SCHED.esProfunda(s.tipo)?C.peach:s.entradaHoy?"#E5C9BF":C.gray),padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
           <div style={{minWidth:0}}>
             <div style={{fontSize:15,fontWeight:600,color:C.black,lineHeight:1.3}}>{idx!=null?(idx+1)+". ":""}{s.propiedad}</div>
             <div style={{fontSize:11.5,color:C.earth,marginTop:4}}>{(s.habitaciones||1)} habitación{(s.habitaciones||1)===1?"":"es"}{SCHED.esProfunda(s.tipo)?"":" · "+s.tipo}</div>
             {SCHED.esProfunda(s.tipo)&&(
-              <div style={{display:"inline-block",marginTop:7,background:C.peach,color:"#fff",fontSize:10.5,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",padding:"5px 12px",borderRadius:100}}>Limpieza profunda</div>
+              <div style={{display:"inline-block",marginTop:7,background:C.peach,color:"#fff",fontSize:10.5,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",padding:"5px 12px",borderRadius:"var(--sa-pill)"}}>Limpieza profunda</div>
             )}
             <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{horaOk(s.hora,SCHED.HORA_INI)} a {horaOk(s.horaFin,SCHED.HORA_FIN)}</div>
           </div>
@@ -11015,7 +11139,7 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
           )}
         </div>
         {s.entradaHoy&&(
-          <div style={{marginTop:11,background:"#F5EDEC",borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.red,fontWeight:700,lineHeight:1.5}}>
+          <div style={{marginTop:11,background:"#F8ECE9",borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.attentionText,fontWeight:700,lineHeight:1.5}}>
             {String(s.fecha).slice(0,10)===hoy
               ? "Entra huésped hoy mismo — esta limpieza va primero, no puede quedar para después."
               : "Entra huésped ese mismo día — esta limpieza va primero, no puede quedar para después."}
@@ -11037,11 +11161,11 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
         )}
         {(function(){
           var cz=cierreDe(s, ixCierre, hoy);
-          if(cz.estado==="cancelada") return <div style={{marginTop:11,background:"#F5EDEC",borderRadius:9,padding:"9px 12px",fontSize:11.5,color:C.red,fontWeight:600,lineHeight:1.5}}>Cancelada por la administración{cz.hora?" a las "+cz.hora:""} · {cz.paga?"se te paga media tarifa":"sin pago"}</div>;
+          if(cz.estado==="cancelada") return <div style={{marginTop:11,background:"#F8ECE9",borderRadius:9,padding:"9px 12px",fontSize:11.5,color:C.attentionText,fontWeight:600,lineHeight:1.5}}>Cancelada por la administración{cz.hora?" a las "+cz.hora:""} · {cz.paga?"se te paga media tarifa":"sin pago"}</div>;
           if(cz.estado==="futura") return null;
-          if(cz.estado==="hecha") return <div style={{marginTop:11,background:"#EDF5EF",borderRadius:9,padding:"9px 12px",fontSize:11.5,color:C.green,fontWeight:600,lineHeight:1.5}}>✓ Registrada{cz.ajuste?" con formulario de ajuste":""}{cz.hora?" · "+cz.hora:""}</div>;
+          if(cz.estado==="hecha") return <div style={{marginTop:11,background:"#E8F2ED",borderRadius:9,padding:"9px 12px",fontSize:11.5,color:C.green,fontWeight:600,lineHeight:1.5}}>✓ Registrada{cz.ajuste?" con formulario de ajuste":""}{cz.hora?" · "+cz.hora:""}</div>;
           var rojo=cz.estado==="atrasada"||cz.estado==="faltante";
-          return <div style={{marginTop:11,background:rojo?"#F5EDEC":C.surfaceWarm,borderRadius:9,padding:"9px 12px",fontSize:11.5,color:rojo?C.red:C.earth,fontWeight:rojo?700:400,lineHeight:1.5,textWrap:"pretty"}}>{rojo?"Falta el formulario de esta limpieza.":"Al terminar, llena el formulario para que quede registrada."}</div>;
+          return <div style={{marginTop:11,background:rojo?"#F8ECE9":C.surfaceWarm,borderRadius:9,padding:"9px 12px",fontSize:11.5,color:rojo?C.attentionText:C.earth,fontWeight:rojo?700:400,lineHeight:1.5,textWrap:"pretty"}}>{rojo?"Falta el formulario de esta limpieza.":"Al terminar, llena el formulario para que quede registrada."}</div>;
         })()}
         {s.reajustada&&<div style={{marginTop:9,fontSize:10.5,fontWeight:600,color:C.orange}}>Cambio reciente en tu programación</div>}
       </div>
@@ -11067,7 +11191,7 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
       )}
 
       {deHoy.length>0&&(
-        <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"13px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
+        <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"13px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",boxShadow:"var(--sa-shadow-sm)"}}>
           <div style={{minWidth:0}}>
             <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Hoy</div>
             <div style={{fontSize:11.5,color:C.earth,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>{hechasHoy===deHoy.length?"Todas tus limpiezas de hoy quedaron registradas.":"Cada limpieza queda registrada con su formulario."}</div>
@@ -11076,10 +11200,10 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
         </div>
       )}
 
-      <div style={{display:"flex",background:C.surfaceWarm,borderRadius:100,padding:3,gap:3,border:"1px solid "+C.line}}>
+      <div style={{display:"flex",background:C.surfaceWarm,borderRadius:"var(--sa-pill)",padding:3,gap:3,border:"1px solid "+C.line}}>
         {[["hoy","Hoy"],["semana","Esta semana"]].map(function(it){
           var sel=view===it[0];
-          return <button key={it[0]} onClick={function(){setView(it[0]);}} style={{flex:1,padding:"10px",minHeight:42,borderRadius:100,border:"none",background:sel?C.black:"transparent",color:sel?"#fff":C.earth,fontSize:12,fontWeight:600,cursor:"pointer"}}>{it[1]}</button>;
+          return <button key={it[0]} onClick={function(){setView(it[0]);}} style={{flex:1,padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"none",background:sel?C.black:"transparent",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{it[1]}</button>;
         })}
       </div>
 
@@ -11096,7 +11220,7 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
           <div style={{fontSize:12.5,fontWeight:600,color:C.black,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
             {deHoy.length} limpieza{deHoy.length===1?"":"s"} hoy
             {deHoy.filter(function(s){return SCHED.esProfunda(s.tipo);}).length>0&&(
-              <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"3px 9px",borderRadius:100}}>
+              <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"3px 9px",borderRadius:"var(--sa-pill)"}}>
                 {deHoy.filter(function(s){return SCHED.esProfunda(s.tipo);}).length===1?"1 profunda":deHoy.filter(function(s){return SCHED.esProfunda(s.tipo);}).length+" profundas"}
               </span>
             )}
@@ -11123,13 +11247,13 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
                 </div>
               </div>
               {d.fecha>hoy&&!d.lista.some(function(s){return s.notificadoEn;})&&(
-                <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.taupe,background:C.surfaceWarm,padding:"3px 8px",borderRadius:100,flexShrink:0}}>Sin confirmar</span>
+                <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.taupe,background:C.surfaceWarm,padding:"3px 8px",borderRadius:"var(--sa-pill)",flexShrink:0}}>Sin confirmar</span>
               )}
               {d.lista.some(function(s){return s.entradaHoy;})&&(
-                <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#B4553C",background:"#FCF4F1",padding:"3px 8px",borderRadius:100,flexShrink:0}}>Entrada</span>
+                <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#B4553C",background:"#FCF4F1",padding:"3px 8px",borderRadius:"var(--sa-pill)",flexShrink:0}}>Entrada</span>
               )}
               {d.lista.some(function(s){return SCHED.esProfunda(s.tipo);})&&(
-                <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"3px 8px",borderRadius:100,flexShrink:0}}>Profunda</span>
+                <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"3px 8px",borderRadius:"var(--sa-pill)",flexShrink:0}}>Profunda</span>
               )}
               <span style={{fontSize:16,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums",flexShrink:0}}>{d.lista.length}</span>
               <span style={{color:C.taupe,fontSize:12,flexShrink:0}}>{abierto?"▾":"▸"}</span>
@@ -11161,7 +11285,7 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
           </div>
         )}
         {!pedir
-          ? <button onClick={function(){setPedir(true);}} style={{width:"100%",padding:"12px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>No podré trabajar un día</button>
+          ? <button onClick={function(){setPedir(true);}} style={{width:"100%",padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>No podré trabajar un día</button>
           : <div style={{display:"flex",flexDirection:"column",gap:11}}>
               <div style={{fontSize:11.5,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>Avísanos con tiempo. Tus limpiezas de ese día se reparten entre el equipo y el administrador te confirma.</div>
               <div>
@@ -11173,8 +11297,8 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
                 <input value={motivo} onChange={function(e){setMotivo(e.target.value);}} placeholder="Cita médica, viaje, asunto familiar…" style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"11px 12px",fontSize:13,fontFamily:"Montserrat,sans-serif",minHeight:46,outline:"none"}}/>
               </div>
               <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-                <button onClick={enviarAusencia} disabled={!fAus} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:100,border:"none",background:!fAus?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Enviar aviso</button>
-                <button onClick={function(){setPedir(false);}} style={{padding:"12px 18px",minHeight:46,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+                <button onClick={enviarAusencia} disabled={!fAus} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"none",background:!fAus?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Enviar aviso</button>
+                <button onClick={function(){setPedir(false);}} style={{padding:"12px 18px",minHeight:46,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
               </div>
             </div>}
       </div>
@@ -11256,15 +11380,20 @@ function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos
   }
   var scoped = cleanReps.filter(inScope);
   var filtered = scoped.filter(function(r){
+    if(filter==="vencida")   return qaFueraDeTiempo(r);
+    if(filter==="pendiente") return (!r.qaStatus||r.qaStatus==="pendiente")&&!qaFueraDeTiempo(r);
     if(filter!=="all"&&(r.qaStatus||"pendiente")!==filter) return false;
     return true;
   }).sort(function(a,b){return (b.createdAt||b.id)-(a.createdAt||a.id);});
 
-  var pendScope = scoped.filter(function(r){return !r.qaStatus||r.qaStatus==="pendiente";});
+  /* Pendientes = las que TODAVÍA se pueden revisar. Las que pasaron la ventana
+     salen de aquí, así que ni el contador ni el botón de aprobar en lote las tocan. */
+  var pendScope = scoped.filter(function(r){return (!r.qaStatus||r.qaStatus==="pendiente")&&!qaFueraDeTiempo(r);});
   var counts = {
     pendiente:  pendScope.length,
     aprobada:   scoped.filter(function(r){return r.qaStatus==="aprobada";}).length,
     correccion: scoped.filter(function(r){return r.qaStatus==="correccion"||r.qaStatus==="corregido";}).length,
+    vencida:    scoped.filter(qaFueraDeTiempo).length,
   };
 
   var IS = {border:"1px solid "+C.gray,borderRadius:6,padding:"7px 10px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",width:"100%"};
@@ -11313,7 +11442,7 @@ function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos
       </div>
       {/* Summary stats */}
       <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-        {[["all","Todas","#fff",C.black,cleanReps.length],["pendiente","En revisión",C.surfaceWarm,C.earth,counts.pendiente],["aprobada","Aprobadas","#EDF5EF",C.green,counts.aprobada],["correccion","Correcciones","#F5EDEC",C.red,counts.correccion]].map(function(it){
+        {[["all","Todas","#fff",C.black,cleanReps.length],["pendiente","En revisión",C.surfaceWarm,C.earth,counts.pendiente],["vencida","Sin revisar a tiempo","#F8ECE9",C.attentionText,counts.vencida],["aprobada","Aprobadas","#E8F2ED",C.green,counts.aprobada],["correccion","Correcciones","#F7E7E4",C.red,counts.correccion]].map(function(it){
           var k=it[0],l=it[1],bg=it[2],cl=it[3],n=it[4];
           return (
             <button key={k} onClick={function(){setFilter(k);}} style={{flex:1,minWidth:80,padding:"10px 8px",borderRadius:8,border:"1.5px solid "+(filter===k?cl:C.line),background:filter===k?bg:"#fff",cursor:"pointer",textAlign:"center"}}>
@@ -11341,36 +11470,42 @@ function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos
       {filtered.map(function(r,i){
         var vn  = vMap[r.reportadoPor]||r.reportadoPor||"—";
         var qs  = r.qaStatus||"pendiente";
-        var qcl = {pendiente:C.earth, aprobada:C.green, correccion:C.red, corregido:C.green, futuro:C.earth}[qs]||C.earth;
-        var qlbl= {pendiente:"En revisión",aprobada:"✓ Aprobada",correccion:"⚠ Corrección",corregido:"✓ Corregida",futuro:"→ Tomado en cuenta"}[qs]||qs;
+        var vieja = qaFueraDeTiempo(r);
+        var qcl = vieja ? C.attentionText : ({pendiente:C.earth, aprobada:C.green, correccion:C.red, corregido:C.green, futuro:C.earth}[qs]||C.earth);
+        var qlbl= vieja ? "Sin revisar a tiempo" : ({pendiente:"En revisión",aprobada:"✓ Aprobada",correccion:"⚠ Corrección",corregido:"✓ Corregida",futuro:"→ Tomado en cuenta"}[qs]||qs);
         return (
-          <div key={r.id} style={{background:"#fff",borderRadius:10,padding:"14px 16px",border:"1.5px solid "+(qs==="pendiente"?C.line:qs==="aprobada"?"#c8dfc8":"#DBC8C4"),display:"flex",flexDirection:"column",gap:8}}>
+          <div key={r.id} style={{background:"#fff",borderRadius:10,padding:"14px 16px",border:"1.5px solid "+(qs==="pendiente"?C.line:qs==="aprobada"?"#CFE3D6":"#E9C9C2"),display:"flex",flexDirection:"column",gap:8}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:8}}>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:14,fontWeight:600,color:C.black}}>{r.propiedad}</div>
                 <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{vn} · {fmtDate(r.fecha)} · {r.categoria}</div>
               </div>
               <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6,flexShrink:0}}>
-                <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:100,background:qs==="aprobada"?"#EDF5EF":qs==="correccion"?"#F5EDEC":C.surfaceWarm,color:qcl}}>{qlbl}</span>
+                <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:"var(--sa-pill)",background:vieja?"#F8ECE9":qs==="aprobada"?"#E8F2ED":qs==="correccion"?"#F7E7E4":C.surfaceWarm,color:qcl}}>{qlbl}</span>
                 <button onClick={function(){onSelect&&onSelect(r);}} style={{fontSize:11,padding:"4px 10px",borderRadius:5,border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",fontWeight:600}}>Ver detalle →</button>
               </div>
             </div>
+            {vieja&&(
+              <div style={{fontSize:11.5,color:C.earth,background:"#F8ECE9",borderLeft:"3px solid "+C.attention,padding:"9px 12px",borderRadius:6,lineHeight:1.6,textWrap:"pretty"}}>
+                Pasó más de una semana sin revisarse, así que ya no se puede aprobar ni pedir corrección. Queda registrada como no revisada a tiempo.
+              </div>
+            )}
             {/* QA action buttons */}
-            {(qs==="pendiente"||qs==="corregido")&&(
+            {!vieja&&(qs==="pendiente"||qs==="corregido")&&(
               onQAForm
                 ? <button onClick={function(){onQAForm(r);}} style={{padding:"11px",borderRadius:7,border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",marginTop:4,letterSpacing:".03em"}}>Supervisar limpieza →</button>
                 : <div style={{display:"flex",gap:8,marginTop:4}}>
                     <button onClick={function(){onQA&&onQA(r.id,"aprobada","");}} style={{flex:1,padding:"9px",borderRadius:7,border:"none",background:"#3d6b52",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>✓ Aprobar</button>
-                    <button onClick={function(){var c=prompt("Comentario para el técnico:");if(c!==null)onQA&&onQA(r.id,"correccion",c);}} style={{flex:1,padding:"9px",borderRadius:7,border:"none",background:"#8a3030",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>⚠ Corrección</button>
+                    <button onClick={function(){var c=prompt("Comentario para el técnico:");if(c!==null)onQA&&onQA(r.id,"correccion",c);}} style={{flex:1,padding:"9px",borderRadius:7,border:"none",background:"#C0392B",color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>⚠ Corrección</button>
                   </div>
             )}
             {r.supForm&&r.supForm.items&&(
               <div style={{background:C.surfaceWarm,borderRadius:8,padding:"9px 11px",display:"flex",flexWrap:"wrap",gap:7,alignItems:"center"}}>
                 <span style={{fontSize:9.5,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:r.supForm.criticas?C.red:(r.supForm.score>=100?C.green:C.earth)}}>Supervisión {r.supForm.score}%{r.supForm.criticas?" · "+r.supForm.criticas+" crítica"+(r.supForm.criticas===1?"":"s"):""}</span>
                 {(r.supForm.items||[]).filter(function(q){return !q.ok;}).map(function(q){
-                  return <span key={q.id} title={q.nota||q.titulo} style={{fontSize:10,fontWeight:600,padding:"2px 8px",borderRadius:100,background:q.critico?C.red:"#F5EDEC",color:q.critico?"#fff":C.red}}>{q.titulo}{q.nota?" — "+q.nota:""}</span>;
+                  return <span key={q.id} title={q.nota||q.titulo} style={{fontSize:11.5,fontWeight:600,padding:"0 15px",borderRadius:"var(--sa-pill)",minHeight:44,background:q.critico?C.red:"#F7E7E4",color:q.critico?"#fff":C.red}}>{q.titulo}{q.nota?" — "+q.nota:""}</span>;
                 })}
-                {(r.supForm.items||[]).every(function(q){return q.ok;})&&<span style={{fontSize:10,fontWeight:600,padding:"2px 8px",borderRadius:100,background:"#EDF5EF",color:C.green}}>Sin fallas</span>}
+                {(r.supForm.items||[]).every(function(q){return q.ok;})&&<span style={{fontSize:10,fontWeight:600,padding:"2px 8px",borderRadius:"var(--sa-pill)",background:"#E8F2ED",color:C.green}}>Sin fallas</span>}
                 {r.supForm.por&&<span style={{fontSize:9.5,color:C.taupe}}>· {r.supForm.por}</span>}
               </div>
             )}
@@ -11378,7 +11513,7 @@ function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos
               <div style={{fontSize:11.5,color:C.green,fontWeight:600}}>✓ Limpieza aprobada {r.qaFecha?("el "+fmtDate(r.qaFecha)):""}</div>
             )}
             {qs==="correccion"&&r.qaComentario&&(
-              <div style={{fontSize:11.5,color:C.red,background:"#F5EDEC",padding:"8px 12px",borderRadius:6}}>Corrección: {r.qaComentario}</div>
+              <div style={{fontSize:11.5,color:C.red,background:"#F7E7E4",padding:"8px 12px",borderRadius:6}}>Corrección: {r.qaComentario}</div>
             )}
             {r.qaRespuesta&&(
               <div style={{fontSize:11.5,color:C.earth,background:C.surfaceWarm,padding:"8px 12px",borderRadius:6}}>Respuesta: {r.qaRespuesta}</div>
@@ -11622,21 +11757,21 @@ function SupervisionForm({rep, vendors, reps, onCancel, onSubmit}) {
                 <div style={{flex:"1 1 205px",minWidth:0}}>
                   <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
                     <span style={{fontSize:13.5,fontWeight:600,color:C.black}}>{q.t}</span>
-                    {q.critico&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 7px",borderRadius:100,background:"#F5EDEC",color:C.red}}>Crítico</span>}
-                    {rec.fallas>=2&&<span title={"Falló en "+rec.fallas+" de las últimas "+rec.total+" supervisiones"} style={{fontSize:8.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",padding:"2px 7px",borderRadius:100,background:"#F7EFE2",color:"#8a6320"}}>Reincide {rec.fallas}/{rec.total}</span>}
+                    {q.critico&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 7px",borderRadius:"var(--sa-pill)",background:"#F7E7E4",color:C.red}}>Crítico</span>}
+                    {rec.fallas>=2&&<span title={"Falló en "+rec.fallas+" de las últimas "+rec.total+" supervisiones"} style={{fontSize:8.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",padding:"2px 7px",borderRadius:"var(--sa-pill)",background:"#F5EBE5",color:"#9a5020"}}>Reincide {rec.fallas}/{rec.total}</span>}
                   </div>
                   <div style={{fontSize:11.5,color:C.earth,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>{q.d}</div>
-                  <div style={{fontSize:10.5,color:C.taupe,marginTop:5,lineHeight:1.55,textWrap:"pretty"}}>{q.donde}</div>
+                  <div style={{fontSize:12,color:C.taupe,marginTop:5,lineHeight:1.55,textWrap:"pretty"}}>{q.donde}</div>
                 </div>
                 <div style={{display:"flex",gap:6,flexShrink:0}}>
-                  <button onClick={function(){marcar(q.id,"ok");}} style={{minWidth:62,minHeight:44,padding:"0 13px",borderRadius:100,border:"1.5px solid "+(val==="ok"?C.green:C.gray),background:val==="ok"?C.green:"#fff",color:val==="ok"?"#fff":C.earth,fontSize:12,fontWeight:700,cursor:"pointer"}}>Bien</button>
-                  <button onClick={function(){marcar(q.id,"falla");}} style={{minWidth:62,minHeight:44,padding:"0 13px",borderRadius:100,border:"1.5px solid "+(falla?C.red:C.gray),background:falla?C.red:"#fff",color:falla?"#fff":C.earth,fontSize:12,fontWeight:700,cursor:"pointer"}}>Falla</button>
+                  <button onClick={function(){marcar(q.id,"ok");}} style={{minWidth:62,minHeight:44,padding:"0 13px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(val==="ok"?C.green:C.gray),background:val==="ok"?C.green:"#fff",color:val==="ok"?"#fff":C.earth,fontSize:12,fontWeight:700,cursor:"pointer"}}>Bien</button>
+                  <button onClick={function(){marcar(q.id,"falla");}} style={{minWidth:62,minHeight:44,padding:"0 13px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(falla?C.red:C.gray),background:falla?C.red:"#fff",color:falla?"#fff":C.earth,fontSize:12,fontWeight:700,cursor:"pointer"}}>Falla</button>
                 </div>
               </div>
               {(function(){
                 var fs=supFotos(slots, q.id);
                 if(!fs.length) return (
-                  <div style={{marginTop:10,fontSize:10.5,color:C.taupe,lineHeight:1.5}}>Sin fotos de este punto en el formulario del técnico.</div>
+                  <div style={{marginTop:10,fontSize:12,color:C.taupe,lineHeight:1.5}}>Sin fotos de este punto en el formulario del técnico.</div>
                 );
                 return (
                   <div style={{marginTop:11}}>
@@ -11663,7 +11798,7 @@ function SupervisionForm({rep, vendors, reps, onCancel, onSubmit}) {
                   <input autoFocus value={notas[q.id]||""} onChange={function(e){var v=e.target.value;setNotas(function(p){var u=Object.assign({},p);u[q.id]=v;return u;});}}
                     placeholder="Ej. drenaje de la ducha del cuarto principal"
                     style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"11px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44}}/>
-                  <div style={{fontSize:10.5,color:C.taupe,marginTop:5,lineHeight:1.5}}>Sin el lugar exacto la corrección no sirve — el técnico no sabe dónde volver.</div>
+                  <div style={{fontSize:12,color:C.taupe,marginTop:5,lineHeight:1.5}}>Sin el lugar exacto la corrección no sirve — el técnico no sabe dónde volver.</div>
                 </div>
               )}
             </div>
@@ -11676,7 +11811,7 @@ function SupervisionForm({rep, vendors, reps, onCancel, onSubmit}) {
   return (
     <Overlay>
       {light&&<PhotoLightbox photos={light.photos} initialIdx={light.idx} onClose={function(){setLight(null);}}/>}
-      <div style={{background:"#fff",borderRadius:18,width:"min(580px,94vw)",maxHeight:"92vh",overflowY:"auto",fontFamily:"Montserrat,sans-serif",boxShadow:"0 28px 80px rgba(62,63,63,.18)"}}>
+      <div style={{background:"#fff",borderRadius:18,width:"min(580px,94vw)",maxHeight:"92vh",overflowY:"auto",fontFamily:"Montserrat,sans-serif",boxShadow:"var(--sa-shadow-lg)"}}>
         <div style={{padding:"20px 22px 14px",borderBottom:"1px solid "+C.line,position:"sticky",top:0,background:"#fff",zIndex:2,borderRadius:"18px 18px 0 0"}}>
           <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Supervisión de limpieza</div>
           <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:20,color:C.black,marginTop:4,lineHeight:1.2}}>{rep.propiedad||"—"}</div>
@@ -11699,22 +11834,22 @@ function SupervisionForm({rep, vendors, reps, onCancel, onSubmit}) {
             )}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:9,marginTop:11}}>
-            <div style={{flex:1,height:4,background:C.surfaceWarm,borderRadius:100,overflow:"hidden"}}>
-              <div style={{height:"100%",width:(resp.length/SUP_ITEMS.length*100)+"%",background:criticas.length?C.red:(fallas.length?C.orange:C.green),borderRadius:100,transition:"width .18s"}}/>
+            <div style={{flex:1,height:4,background:C.surfaceWarm,borderRadius:"var(--sa-pill)",overflow:"hidden"}}>
+              <div style={{height:"100%",width:(resp.length/SUP_ITEMS.length*100)+"%",background:criticas.length?C.red:(fallas.length?C.orange:C.green),borderRadius:"var(--sa-pill)",transition:"width .18s"}}/>
             </div>
             <span style={{fontSize:10.5,fontWeight:700,color:C.earth,fontVariantNumeric:"tabular-nums"}}>{resp.length}/{SUP_ITEMS.length}</span>
           </div>
           {patrones.length>0&&(
             <div style={{marginTop:11,background:"#FBF6EC",border:"1px solid #E8DCC4",borderRadius:10,padding:"10px 12px"}}>
               <button onClick={function(){setVerHist(!verHist);}} style={{background:"none",border:"none",padding:0,textAlign:"left",width:"100%",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
-                <div style={{fontSize:11.5,color:"#7a5c1e",lineHeight:1.6,fontWeight:600}}>
+                <div style={{fontSize:11.5,color:"#9a5020",lineHeight:1.6,fontWeight:600}}>
                   Reincidencias de {(vendorNameByEmail(vendors,tecEmail)||"").split(" ")[0]||"este técnico"} — pon atención aquí {verHist?"▾":"▸"}
                 </div>
               </button>
               {verHist&&(
                 <div style={{display:"flex",flexDirection:"column",gap:4,marginTop:7}}>
                   {patrones.slice(0,4).map(function(p){
-                    return <div key={p.item.id} style={{fontSize:11,color:"#7a5c1e",display:"flex",justifyContent:"space-between",gap:8}}>
+                    return <div key={p.item.id} style={{fontSize:11,color:"#9a5020",display:"flex",justifyContent:"space-between",gap:8}}>
                       <span>{p.item.t}</span><span style={{fontWeight:700,fontVariantNumeric:"tabular-nums"}}>{p.fallas} de {p.total}</span>
                     </div>;
                   })}
@@ -11741,13 +11876,13 @@ function SupervisionForm({rep, vendors, reps, onCancel, onSubmit}) {
               <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
                 {[["inmediata","Ahora — hay entrada próxima"],["futura","En la siguiente limpieza"]].map(function(o){
                   var s=urg===o[0];
-                  return <button key={o[0]} onClick={function(){setUrg(o[0]);}} style={{padding:"9px 14px",minHeight:44,borderRadius:100,border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{o[1]}</button>;
+                  return <button key={o[0]} onClick={function(){setUrg(o[0]);}} style={{padding:"9px 14px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{o[1]}</button>;
                 })}
               </div>
             </div>
           )}
           {criticas.length>0&&(
-            <div style={{background:"#F5EDEC",borderRadius:10,padding:"11px 13px",fontSize:11.5,color:C.red,lineHeight:1.6}}>
+            <div style={{background:"#F7E7E4",borderRadius:10,padding:"11px 13px",fontSize:11.5,color:C.red,lineHeight:1.6}}>
               Hay {criticas.length} falla{criticas.length===1?"":"s"} crítica{criticas.length===1?"":"s"} — la corrección se marca <b>inmediata</b> y el técnico recibe el aviso ahora.
             </div>
           )}
@@ -11764,8 +11899,8 @@ function SupervisionForm({rep, vendors, reps, onCancel, onSubmit}) {
                       : <>Puntaje <b style={{color:criticas.length?C.red:C.orange}}>{score}%</b> — se enviará una <b style={{color:C.red}}>corrección</b> con {fallas.length} falla{fallas.length===1?"":"s"}{criticas.length?" ("+criticas.length+" crítica"+(criticas.length===1?"":"s")+")":""}.</>))}
           </div>
           <div style={{display:"flex",gap:9}}>
-            <button onClick={onCancel} style={{padding:"13px 18px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
-            <button onClick={enviar} disabled={!listo||busy} style={{flex:1,padding:"13px",borderRadius:100,border:"none",background:!listo||busy?C.gray:(aprueba?C.green:C.red),color:"#fff",fontSize:13,fontWeight:700,cursor:!listo||busy?"default":"pointer",letterSpacing:".03em"}}>
+            <button onClick={onCancel} style={{padding:"13px 18px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+            <button onClick={enviar} disabled={!listo||busy} style={{flex:1,padding:"0 15px",borderRadius:"var(--sa-pill)",minHeight:44,border:"none",background:!listo||busy?C.gray:(aprueba?C.green:C.red),color:"#fff",fontSize:11.5,fontWeight:700,cursor:!listo||busy?"default":"pointer",letterSpacing:".03em"}}>
               {busy?"Enviando…":(aprueba?"Aprobar limpieza →":"Enviar corrección →")}
             </button>
           </div>
@@ -11777,7 +11912,7 @@ function SupervisionForm({rep, vendors, reps, onCancel, onSubmit}) {
 
 /* ═══ TABLERO DE DAÑOS — clasificación por urgencia, estado y comentarios.
    Compartido: supervisión y administrador. */
-var DMG_URG = [["alta","Alta","#8a3030","#F5EDEC"],["media","Media","#9a6b2f","#F7EFE2"],["baja","Baja","#3d6b52","#EDF5EF"]];
+var DMG_URG = [["alta","Alta","#C0392B","#F7E7E4"],["media","Media","#9a5020","#F5EBE5"],["baja","Baja","#3d6b52","#E8F2ED"]];
 var DMG_STA = [["pendiente","Pendiente"],["proceso","En proceso"],["resuelto","Resuelto"]];
 function DamageBoard({reps, vendors, me, isAdmin, onUpdate, onSelect}) {
   const [fU,  setFU]  = useState("todas");
@@ -11822,7 +11957,7 @@ function DamageBoard({reps, vendors, me, isAdmin, onUpdate, onSelect}) {
       <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
         {[["todas","Todos ("+danios.length+")"],["alta","🔴 Alta ("+cnt.alta+")"],["media","🟡 Media ("+cnt.media+")"],["baja","🟢 Baja ("+cnt.baja+")"],["sin","Sin clasificar ("+cnt.sin+")"],["resuelto","✓ Resueltos ("+cnt.res+")"]].map(function(it){
           var s=fU===it[0];
-          return <button key={it[0]} onClick={function(){setFU(it[0]);}} style={{padding:"6px 12px",borderRadius:100,border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{it[1]}</button>;
+          return <button key={it[0]} onClick={function(){setFU(it[0]);}} style={{padding:"6px 12px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{it[1]}</button>;
         })}
       </div>
       {list.length===0&&<div style={{textAlign:"center",padding:"32px",color:C.taupe,fontSize:13}}>Sin reportes de daños en esta categoría.</div>}
@@ -11846,13 +11981,13 @@ function DamageBoard({reps, vendors, me, isAdmin, onUpdate, onSelect}) {
                 <div>
                   <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Urgencia</div>
                   <div style={{display:"flex",gap:5}}>
-                    {DMG_URG.map(function(x){var s=r.urgencia===x[0];return <button key={x[0]} onClick={function(){setUrg(r,s?"":x[0]);}} style={{padding:"5px 12px",borderRadius:100,border:"1.5px solid "+(s?x[2]:C.gray),background:s?x[3]:"#fff",color:s?x[2]:C.earth,fontSize:11,fontWeight:700,cursor:"pointer"}}>{x[1]}</button>;})}
+                    {DMG_URG.map(function(x){var s=r.urgencia===x[0];return <button key={x[0]} onClick={function(){setUrg(r,s?"":x[0]);}} style={{padding:"5px 12px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s?x[2]:C.gray),background:s?x[3]:"#fff",color:s?x[2]:C.earth,fontSize:11,fontWeight:700,cursor:"pointer"}}>{x[1]}</button>;})}
                   </div>
                 </div>
                 <div>
                   <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Estado</div>
                   <div style={{display:"flex",gap:5}}>
-                    {DMG_STA.map(function(x){var s=st===x[0];return <button key={x[0]} onClick={function(){upd(r,{dmgStatus:x[0]});}} style={{padding:"5px 12px",borderRadius:100,border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{x[1]}</button>;})}
+                    {DMG_STA.map(function(x){var s=st===x[0];return <button key={x[0]} onClick={function(){upd(r,{dmgStatus:x[0]});}} style={{padding:"5px 12px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{x[1]}</button>;})}
                   </div>
                 </div>
               </div>
@@ -11900,22 +12035,22 @@ function MaintBoard({reps, vendors, me, onUpdate, onSelect}) {
     upd(r,{provComments:(r.provComments||[]).concat([c])});
     setCom(function(p){var u=Object.assign({},p);u[r.id]="";return u;});
   }
-  var pagColors={"Spacio AM":{bg:"#EEF3FA",tx:"#4a7fa5"},"Dueño":{bg:"#FEF0EC",tx:"#E9826A"},"Airbnb":{bg:"#FDEEF0",tx:"#b14a5a"},"Seguro":{bg:"#EDF0E8",tx:"#5a7a3a"}};
+  var pagColors={"Spacio AM":{bg:"#E8EDF3",tx:"#3B6691"},"Dueño":{bg:"#FEF0EC",tx:"#E9826A"},"Airbnb":{bg:"#FDEEF0",tx:"#b14a5a"},"Seguro":{bg:"#EDF0E8",tx:"#5a7a3a"}};
   return (
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
       <div style={{fontSize:12,color:C.earth,background:C.surfaceWarm,padding:"10px 13px",borderRadius:8,border:"1px solid "+C.line,lineHeight:1.55}}>Asigna rápidamente quién paga cada trabajo de mantenimiento y deja comentarios para el proveedor. Solo tú (administrador) ves estos comentarios.</div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
         {[["todos","Todos ("+mants.length+")"],["sin","Sin pagador ("+cntSin+")"]].concat(MANT_PAGADORES.map(function(p){return [p,p];})).map(function(it){
           var s=fP===it[0];
-          return <button key={it[0]} onClick={function(){setFP(it[0]);}} style={{padding:"6px 12px",borderRadius:100,border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{it[1]}</button>;
+          return <button key={it[0]} onClick={function(){setFP(it[0]);}} style={{padding:"6px 12px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{it[1]}</button>;
         })}
       </div>
       {list.length===0&&<div style={{textAlign:"center",padding:"32px",color:C.taupe,fontSize:13}}>Sin mantenimientos en esta categoría.</div>}
       {list.map(function(r){
         var comments=r.provComments||[];
         return (
-          <div key={r.id} style={{background:"#fff",borderRadius:12,border:"1.5px solid "+(r.pagadoPor?C.line:"#E6D88A"),overflow:"hidden"}}>
-            {!r.pagadoPor&&<div style={{height:4,background:"#E6D88A"}}></div>}
+          <div key={r.id} style={{background:"#fff",borderRadius:12,border:"1.5px solid "+(r.pagadoPor?C.line:"#E3D5C8"),overflow:"hidden"}}>
+            {!r.pagadoPor&&<div style={{height:4,background:"#E3D5C8"}}></div>}
             <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:8}}>
                 <div style={{flex:1,minWidth:0}}>
@@ -11928,7 +12063,7 @@ function MaintBoard({reps, vendors, me, onUpdate, onSelect}) {
               <div>
                 <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>¿Quién paga?</div>
                 <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                  {MANT_PAGADORES.map(function(p){var s=r.pagadoPor===p;var cx=pagColors[p];return <button key={p} onClick={function(){upd(r,{pagadoPor:s?"":p});}} style={{padding:"5px 13px",borderRadius:100,border:"1.5px solid "+(s?cx.tx:C.gray),background:s?cx.bg:"#fff",color:s?cx.tx:C.earth,fontSize:11,fontWeight:700,cursor:"pointer"}}>{p}</button>;})}
+                  {MANT_PAGADORES.map(function(p){var s=r.pagadoPor===p;var cx=pagColors[p];return <button key={p} onClick={function(){upd(r,{pagadoPor:s?"":p});}} style={{padding:"5px 13px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s?cx.tx:C.gray),background:s?cx.bg:"#fff",color:s?cx.tx:C.earth,fontSize:11,fontWeight:700,cursor:"pointer"}}>{p}</button>;})}
                 </div>
               </div>
               {comments.length>0&&(
@@ -12018,7 +12153,7 @@ function TechSummary({reps, vendors}) {
         <div style={{fontSize:12.5,color:C.earth,lineHeight:1.5,flex:1,minWidth:200}}>Correcciones hechas por supervisión, desglosadas por técnico, con sus temas más recurrentes.</div>
         <button onClick={genAI} disabled={busy} style={{padding:"10px 16px",borderRadius:9,border:"none",background:busy?"#9CA89F":C.black,color:"#fff",fontSize:12,fontWeight:700,cursor:busy?"wait":"pointer"}}>{busy?"Analizando…":"✦ Generar resumen IA"}</button>
       </div>
-      {aiErr&&<div style={{background:"#F7EFE2",border:"1px solid #E3D5B8",borderRadius:8,padding:"9px 13px",fontSize:11.5,color:"#9a6b2f"}}>{aiErr}</div>}
+      {aiErr&&<div style={{background:"#F5EBE5",border:"1px solid #E3D5C8",borderRadius:8,padding:"9px 13px",fontSize:11.5,color:"#9a5020"}}>{aiErr}</div>}
       {techs.length===0&&<div style={{textAlign:"center",padding:"32px",color:C.taupe,fontSize:13}}>Sin limpiezas registradas.</div>}
       {techs.map(function(t){
         var th=themesFor(t);
@@ -12035,7 +12170,7 @@ function TechSummary({reps, vendors}) {
             {th.length>0&&(
               <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
                 <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase"}}>Recurrentes:</span>
-                {th.map(function(x){return <span key={x.name} style={{padding:"4px 11px",borderRadius:100,background:"#F5EDEC",color:C.red,fontSize:11,fontWeight:700}}>{x.name} ×{x.n}</span>;})}
+                {th.map(function(x){return <span key={x.name} style={{padding:"4px 11px",borderRadius:"var(--sa-pill)",background:"#F7E7E4",color:C.red,fontSize:11,fontWeight:700}}>{x.name} ×{x.n}</span>;})}
               </div>
             )}
             {ai&&ai[t.email]&&(
@@ -12047,7 +12182,7 @@ function TechSummary({reps, vendors}) {
             {isOpen&&(
               <div style={{display:"flex",flexDirection:"column",gap:6,borderTop:"1px solid "+C.line,paddingTop:10}}>
                 {t.corr.map(function(r){return (
-                  <div key={r.id} style={{background:"#F5EDEC",borderRadius:8,padding:"9px 12px"}}>
+                  <div key={r.id} style={{background:"#F7E7E4",borderRadius:8,padding:"9px 12px"}}>
                     <div style={{fontSize:10.5,fontWeight:700,color:C.earth}}>{fmtDate(r.fecha)} · {r.propiedad}{r.qaPor?" · por "+r.qaPor:""}</div>
                     <div style={{fontSize:12.5,color:C.black,lineHeight:1.5,marginTop:3}}>{r.qaComentario}</div>
                     {r.qaRespuesta&&<div style={{fontSize:11.5,color:C.green,marginTop:4,fontWeight:600}}>↳ Respuesta: {r.qaRespuesta==="corregido"?"Corrección realizada":r.qaRespuesta}</div>}
@@ -12161,7 +12296,7 @@ function PhotoRecoveryTool() {
 
       {/* Results summary */}
       {results&&(
-        <div style={{background:"#EDF5EF",borderRadius:10,padding:"14px 16px",border:"1px solid #c8dfc8"}}>
+        <div style={{background:"#E8F2ED",borderRadius:10,padding:"14px 16px",border:"1px solid #CFE3D6"}}>
           <div style={{fontSize:13,fontWeight:700,color:C.green,marginBottom:8}}>Resultado de la recuperación</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
             <div style={{textAlign:"center",padding:"10px",background:"#fff",borderRadius:8}}>
@@ -12217,7 +12352,7 @@ function PhotoLightbox({photos, initialIdx, onClose}) {
         {total>1&&<button onClick={next} style={{position:"absolute",right:-48,background:"rgba(255,255,255,.15)",border:"none",color:"#fff",fontSize:28,width:40,height:40,borderRadius:"50%",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2}}>›</button>}
       </div>
       <div style={{color:"rgba(255,255,255,.6)",fontSize:12,letterSpacing:".1em"}}>{idx+1} / {total}</div>
-      <a href={src} target="_blank" rel="noopener noreferrer" onClick={function(e){e.stopPropagation();}} style={{color:"rgba(255,255,255,.5)",fontSize:11,textDecoration:"none"}}>↗ Abrir en Drive</a>
+      <a href={src} target="_blank" rel="noopener noreferrer" onClick={function(e){e.stopPropagation();}} style={{color:"rgba(255,255,255,.5)",fontSize:11,textDecoration:"none",display:"inline-flex",alignItems:"center",gap:5}}><Icon name="arrowUpRight" size={13} stroke="rgba(255,255,255,.5)"/>Abrir en Drive</a>
     </div>
   );
 }
@@ -12903,7 +13038,7 @@ function printComprobante(pago, company, focusEmail){
   var html="<html><head><meta charset='UTF-8'><title>Comprobante "+esc(pago.folio)+"</title>"
     + "<link href='https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap' rel='stylesheet'>"
     + "<style>"+css+"</style></head><body>"
-    + "<div class='hd'><img src='"+LOGO_STAMP+"' alt='Spacio AM'/><div class='co'><b>"+esc(coName)+"</b><br>NIT: "+esc(coNit)+"<br>hola@spacioam.com<br>+502 5690 9499</div></div>"
+    + "<div class='hd'><img src='"+LOGO_STAMP+"' alt='Spacio AM'/><div class='co'><b>"+esc(coName)+"</b><br>NIT: "+esc(coNit)+"</div></div>"
     + "<div class='elig'>Comprobante de pago · "+pgTipoLabel(pago.tipo)+"</div>"
     + "<h1>"+(((focusEmail||techs.length===1)&&techs[0])?esc(techs[0].vendorName):"Pago a técnicos")+"</h1>"
     + "<div class='meta'>"
@@ -13134,7 +13269,7 @@ function nom_seed(list){
   });
 }
 function pgTipoLabel(t){ return t==="nomina"?"Planilla":t==="bono14"?"Bono 14":t==="aguinaldo"?"Aguinaldo":t==="individual"?"Individual":"Lote"; }
-function pgTipoBg(t){ return t==="nomina"?"#EFEAF3":t==="bono14"||t==="aguinaldo"?"#FBEDE8":t==="individual"?"#EDEAE3":"#EDF5EF"; }
+function pgTipoBg(t){ return t==="nomina"?"#EFEAF3":t==="bono14"||t==="aguinaldo"?"#FBEDE8":t==="individual"?"#EDEAE3":"#E8F2ED"; }
 function pgTipoFg(t){ return t==="nomina"?"#5d4b78":t==="bono14"||t==="aguinaldo"?"#b25a3c":t==="individual"?"#7a7050":C.green; }
 
 /* Campo numérico editable en línea (planilla) */
@@ -13209,7 +13344,7 @@ function NominaAdmin({vendors, pagos, adelantos, onSvPagos, ajustes, onSvAjustes
 
   var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".13em",textTransform:"uppercase",display:"block",marginBottom:5};
   var IN={width:"100%",border:"1.5px solid "+C.gray,borderRadius:9,padding:"8px 11px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",color:C.black,boxSizing:"border-box"};
-  var CARD={background:"#fff",borderRadius:16,border:"1px solid "+C.gray,padding:"18px 20px",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"};
+  var CARD={background:"#fff",borderRadius:16,border:"1px solid "+C.gray,padding:"18px 20px",boxShadow:"var(--sa-shadow-sm)"};
 
   return (
     <div style={{padding:"22px 16px 80px",maxWidth:900,margin:"0 auto",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:16}}>
@@ -13254,7 +13389,7 @@ function NominaAdmin({vendors, pagos, adelantos, onSvPagos, ajustes, onSvAjustes
                 <div style={{display:"flex",alignItems:"center",gap:10,marginTop:11,flexWrap:"wrap",fontSize:11.5,color:C.earth}}>
                   <span>Bono 14 y aguinaldo sobre el promedio de</span>
                   {[12,6].map(function(n){ var s=nomPromMeses(v)===n; return (
-                    <button key={n} onClick={function(){ setCampo(v,"promMeses",n); }} style={{padding:"3px 11px",borderRadius:100,border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{n} meses</button>
+                    <button key={n} onClick={function(){ setCampo(v,"promMeses",n); }} style={{padding:"3px 11px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{n} meses</button>
                   ); })}
                   <span>· salario promedio actual <b style={{color:C.black}}>{pgMoney(nomSalarioProm(v,{hasta:hoy},pagos))}</b></span>
                 </div>
@@ -13287,7 +13422,7 @@ function NominaAdmin({vendors, pagos, adelantos, onSvPagos, ajustes, onSvAjustes
                           <span style={{color:C.black,fontWeight:600}}>{p.label}</span>
                           <span>pago {fmtDate(p.pago)}</span>
                           <span style={{flex:1}}/>
-                          <button onClick={function(){ generarAhora(v,p); }} style={{background:C.black,border:"none",borderRadius:100,padding:"4px 12px",fontSize:10.5,color:"#fff",fontWeight:600,cursor:"pointer"}}>Generar ahora</button>
+                          <button onClick={function(){ generarAhora(v,p); }} style={{background:C.black,border:"none",borderRadius:"var(--sa-pill)",padding:"4px 12px",fontSize:10.5,color:"#fff",fontWeight:600,cursor:"pointer"}}>Generar ahora</button>
                         </div>
                       );
                     })}
@@ -13302,7 +13437,7 @@ function NominaAdmin({vendors, pagos, adelantos, onSvPagos, ajustes, onSvAjustes
                           <span>{pgTipoLabel(p.tipo)} · {fmtDate(p.fechaPago)}</span>
                           <span style={{flex:1}}/>
                           <span style={{fontWeight:700,color:C.black,fontVariantNumeric:"tabular-nums"}}>{pgMoney(p.totalNeto)}</span>
-                          <button onClick={function(){ recalcular(p); }} title="Recalcular con los valores actuales" style={{background:"none",border:"1px solid "+C.gray,borderRadius:100,padding:"2px 9px",fontSize:10.5,color:C.earth,cursor:"pointer"}}>↻ Recalcular</button>
+                          <button onClick={function(){ recalcular(p); }} title="Recalcular con los valores actuales" style={{background:"none",border:"1px solid "+C.gray,borderRadius:"var(--sa-pill)",padding:"2px 9px",fontSize:10.5,color:C.earth,cursor:"pointer"}}>↻ Recalcular</button>
                         </div>
                       );
                     })}
@@ -13444,13 +13579,13 @@ function RecuperarPagos({pagos, onSvPagos}){
     setBusy(false);
   }
   return (
-    <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"14px 18px",marginBottom:12,boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
+    <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"14px 18px",marginBottom:12,boxShadow:"var(--sa-shadow-sm)"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
         <div style={{minWidth:0,flex:1}}>
           <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Respaldo del historial</div>
           <div style={{fontSize:11.5,color:C.earth,marginTop:5,lineHeight:1.6,textWrap:"pretty"}}>Si faltan comprobantes, esto relee todos los respaldos del Sheet y la copia de este navegador, y devuelve al historial lo que encuentre.</div>
         </div>
-        <button onClick={buscar} disabled={busy} style={{flexShrink:0,padding:"10px 16px",minHeight:42,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:busy?C.taupe:C.black,fontSize:11.5,fontWeight:600,cursor:busy?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>{busy?"Buscando…":"Buscar comprobantes perdidos"}</button>
+        <button onClick={buscar} disabled={busy} style={{flexShrink:0,padding:"10px 16px",minHeight:42,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:busy?C.taupe:C.black,fontSize:11.5,fontWeight:600,cursor:busy?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>{busy?"Buscando…":"Buscar comprobantes perdidos"}</button>
       </div>
       {msg&&<div style={{marginTop:11,fontSize:11.5,color:C.black,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",lineHeight:1.6,textWrap:"pretty"}}>{msg}</div>}
     </div>
@@ -13546,13 +13681,13 @@ function ReconstruirPagos({reps, vendors, pagos, onSvPagos}){
   if(prev) prev.grupos.forEach(function(gr){ porTec[gr.nombre]=(porTec[gr.nombre]||0)+1; });
 
   return (
-    <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"14px 18px",marginBottom:12,boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
+    <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"14px 18px",marginBottom:12,boxShadow:"var(--sa-shadow-sm)"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
         <div style={{minWidth:0,flex:1}}>
           <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Reconstruir desde los trabajos pagados</div>
           <div style={{fontSize:11.5,color:C.earth,marginTop:5,lineHeight:1.6,textWrap:"pretty"}}>Los trabajos siguen completos en la hoja de Reportes. Esto vuelve a levantar un comprobante por técnico y por semana con el detalle real de cada trabajo pagado que hoy no aparece en ningún comprobante.</div>
         </div>
-        <button onClick={revisar} disabled={busy} style={{flexShrink:0,padding:"10px 16px",minHeight:42,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:busy?C.taupe:C.black,fontSize:11.5,fontWeight:600,cursor:busy?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>{busy?"Revisando…":"Revisar qué se puede reconstruir"}</button>
+        <button onClick={revisar} disabled={busy} style={{flexShrink:0,padding:"10px 16px",minHeight:42,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:busy?C.taupe:C.black,fontSize:11.5,fontWeight:600,cursor:busy?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>{busy?"Revisando…":"Revisar qué se puede reconstruir"}</button>
       </div>
 
       {prev&&(
@@ -13567,8 +13702,8 @@ function ReconstruirPagos({reps, vendors, pagos, onSvPagos}){
             Cada uno lleva la fecha del último trabajo de su semana y el folio REC-. El descuento de adelanto del comprobante original no se puede reconstruir: van en bruto.
           </div>
           <div style={{display:"flex",gap:9,marginTop:11,flexWrap:"wrap"}}>
-            <button onClick={aplicar} disabled={busy} style={{padding:"11px 18px",minHeight:44,borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Reconstruir el historial</button>
-            <button onClick={function(){setPrev(null);}} style={{padding:"11px 16px",minHeight:44,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cancelar</button>
+            <button onClick={aplicar} disabled={busy} style={{padding:"11px 18px",minHeight:44,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Reconstruir el historial</button>
+            <button onClick={function(){setPrev(null);}} style={{padding:"11px 16px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cancelar</button>
           </div>
         </div>
       )}
@@ -13657,7 +13792,7 @@ function RestaurarPagos({pagos, onSvPagos}){
   }
 
   return (
-    <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"14px 18px",marginBottom:12,boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
+    <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"14px 18px",marginBottom:12,boxShadow:"var(--sa-shadow-sm)"}}>
       <button onClick={function(){setAbierto(!abierto);}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
         <div style={{minWidth:0}}>
           <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Restaurar desde una versión anterior del Sheet</div>
@@ -13674,8 +13809,8 @@ function RestaurarPagos({pagos, onSvPagos}){
           <textarea value={txt} onChange={function(e){setTxt(e.target.value);setPrev(null);}} rows={5} placeholder='pagos&#9;[{"id":"pg_…","folio":"CP-2026-0054",…}]'
             style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"10px 12px",fontSize:11,fontFamily:"ui-monospace,SFMono-Regular,Menlo,monospace",outline:"none",resize:"vertical",lineHeight:1.5}}/>
           <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-            <button onClick={leer} disabled={busy||!txt.trim()} style={{padding:"10px 16px",minHeight:42,borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:(busy||!txt.trim())?C.taupe:C.black,fontSize:11.5,fontWeight:600,cursor:(busy||!txt.trim())?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>Revisar el texto pegado</button>
-            {txt&&<button onClick={function(){setTxt("");setPrev(null);setMsg("");}} style={{padding:"10px 14px",minHeight:42,borderRadius:100,border:"none",background:"none",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Limpiar</button>}
+            <button onClick={leer} disabled={busy||!txt.trim()} style={{padding:"10px 16px",minHeight:42,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:(busy||!txt.trim())?C.taupe:C.black,fontSize:11.5,fontWeight:600,cursor:(busy||!txt.trim())?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>Revisar el texto pegado</button>
+            {txt&&<button onClick={function(){setTxt("");setPrev(null);setMsg("");}} style={{padding:"10px 14px",minHeight:42,borderRadius:"var(--sa-pill)",border:"none",background:"none",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Limpiar</button>}
           </div>
 
           {prev&&prev.nuevos.length>0&&(
@@ -13690,7 +13825,7 @@ function RestaurarPagos({pagos, onSvPagos}){
               <div style={{fontSize:11,color:C.earth,marginTop:7,lineHeight:1.7,maxHeight:120,overflowY:"auto"}}>
                 {prev.nuevos.map(function(p){ return p.folio||p.id; }).join(" · ")}
               </div>
-              <button onClick={restaurar} disabled={busy} style={{marginTop:11,padding:"11px 18px",minHeight:44,borderRadius:100,border:"none",background:busy?C.gray:C.black,color:"#fff",fontSize:12,fontWeight:700,cursor:busy?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>{busy?"Restaurando…":"Restaurar al historial"}</button>
+              <button onClick={restaurar} disabled={busy} style={{marginTop:11,padding:"11px 18px",minHeight:44,borderRadius:"var(--sa-pill)",border:"none",background:busy?C.gray:C.black,color:"#fff",fontSize:12,fontWeight:700,cursor:busy?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>{busy?"Restaurando…":"Restaurar al historial"}</button>
             </div>
           )}
           {msg&&<div style={{fontSize:11.5,color:C.black,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",lineHeight:1.6,textWrap:"pretty"}}>{msg}</div>}
@@ -13748,7 +13883,7 @@ function PagosHistory({pagos, vendors, company, isAdmin, meEmails, meNames, reps
       <div style={{display:"flex",alignItems:"flex-end",justifyContent:"space-between",gap:12,flexWrap:"wrap",marginBottom:18}}>
         <div>
           <div style={{fontSize:19,fontWeight:600,color:C.black,letterSpacing:".01em"}}>Historial de pagos</div>
-          <div style={{fontSize:12,color:C.earth,marginTop:3}}>{isAdmin?"Comprobantes generados al marcar trabajos como pagados.":"Tus comprobantes de pago. Puedes descargarlos o imprimirlos."}</div>
+          <div style={{fontSize:12,color:C.earth,marginTop:3}}>{isAdmin?"Comprobantes generados al marcar trabajos como pagados.":"Tus comprobantes de pago. Ábrelos para guardarlos o compartirlos."}</div>
         </div>
         <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
           <div>
@@ -13776,7 +13911,7 @@ function PagosHistory({pagos, vendors, company, isAdmin, meEmails, meNames, reps
             </div>
           )}
           {filtrando&&(
-            <button onClick={function(){setFTipo("Todos");setFDesde("");setFHasta("");}} style={{fontSize:11,fontWeight:600,color:C.earth,background:"#fff",border:"1px solid "+C.gray,borderRadius:100,padding:"8px 13px",minHeight:38,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Quitar filtros</button>
+            <button onClick={function(){setFTipo("Todos");setFDesde("");setFHasta("");}} style={{fontSize:11,fontWeight:600,color:C.earth,background:"#fff",border:"1px solid "+C.gray,borderRadius:"var(--sa-pill)",padding:"8px 13px",minHeight:38,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Quitar filtros</button>
           )}
         </div>
       </div>
@@ -13787,7 +13922,7 @@ function PagosHistory({pagos, vendors, company, isAdmin, meEmails, meNames, reps
 
       {/* Lo que suma lo que se está viendo — la pregunta real detrás del historial. */}
       {list.length>0&&(
-        <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"14px 18px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
+        <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"14px 18px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",boxShadow:"var(--sa-shadow-sm)"}}>
           <div style={{fontSize:11.5,color:C.earth,lineHeight:1.6}}>
             {list.length} comprobante{list.length===1?"":"s"}{(fDesde||fHasta)?" · "+(fDesde?fmtDate(fDesde):"inicio")+" a "+(fHasta?fmtDate(fHasta):"hoy"):""}
           </div>
@@ -13810,12 +13945,12 @@ function PagosHistory({pagos, vendors, company, isAdmin, meEmails, meNames, reps
             {list.map(function(p){
               var techs=techBadges(p);
               return (
-                <div key={p.id} className="rh" onClick={function(){setSel(p);}} style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 18px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,transition:"box-shadow .18s",boxShadow:"0 4px 16px rgba(62,63,63,0.05)"}}>
+                <div key={p.id} className="rh" onClick={function(){setSel(p);}} style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 18px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,transition:"box-shadow .18s",boxShadow:"var(--sa-shadow-sm)"}}>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",marginBottom:5}}>
                       <span style={{fontSize:13.5,fontWeight:700,color:C.black,fontVariantNumeric:"tabular-nums"}}>{p.folio}</span>
-                      <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:100,background:pgTipoBg(p.tipo),color:pgTipoFg(p.tipo)}}>{pgTipoLabel(p.tipo)}</span>
-                      {p.reconstruido&&<span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:100,background:C.surfaceWarm,color:C.earth,border:"1px solid "+C.line}}>Reconstruido</span>}
+                      <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:"var(--sa-pill)",background:pgTipoBg(p.tipo),color:pgTipoFg(p.tipo)}}>{pgTipoLabel(p.tipo)}</span>
+                      {p.reconstruido&&<span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:"var(--sa-pill)",background:C.surfaceWarm,color:C.earth,border:"1px solid "+C.line}}>Reconstruido</span>}
                     </div>
                     <div style={{fontSize:12,color:C.earth}}>{fmtDate(p.fechaPago)} · {techs.length} técnico{techs.length!==1?"s":""} · {techs.slice(0,3).join(", ")}{techs.length>3?" +"+(techs.length-3):""}</div>
                   </div>
@@ -13873,7 +14008,7 @@ function pgComprobanteCardHTML(pago, company, focusEmail){
   return "<div style=\"width:760px;box-sizing:border-box;background:#fff;padding:40px 44px;font-family:Montserrat,Helvetica,Arial,sans-serif;color:#3E3F3F\">"
     +"<div style=\"display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid #E4DFD8;padding-bottom:20px;margin-bottom:22px\">"
     +"<img src=\""+LOGO_STAMP+"\" style=\"width:54px;height:54px;object-fit:contain\"/>"
-    +"<div style=\"text-align:right;font-size:10.5px;line-height:1.6;color:#938B8A\"><b style=\"color:#3E3F3F;font-size:12px\">"+pgEsc(coName)+"</b><br>NIT: "+pgEsc(coNit)+"<br>hola@spacioam.com<br>+502 5690 9499</div>"
+    +"<div style=\"text-align:right;font-size:10.5px;line-height:1.6;color:#938B8A\"><b style=\"color:#3E3F3F;font-size:12px\">"+pgEsc(coName)+"</b><br>NIT: "+pgEsc(coNit)+"</div>"
     +"</div>"
     +"<div style=\"font-size:9.5px;font-weight:700;letter-spacing:.26em;text-transform:uppercase;color:#E9826A;margin-bottom:8px\">Comprobante de pago · "+pgTipoLabel(pago.tipo)+"</div>"
     +"<div style=\"font-size:26px;font-weight:600;font-family:Georgia,serif;margin-bottom:4px\">"+pgEsc(title)+"</div>"
@@ -13985,12 +14120,18 @@ function PagoComprobanteModal({pago, company, isAdmin, focusEmail, onClose, onSv
 
   return (
     <Overlay onClick={onClose}>
-      <div onClick={function(e){e.stopPropagation();}} style={{background:"#fff",borderRadius:22,width:"min(680px,94vw)",maxHeight:"90vh",overflow:"auto",boxShadow:"0 28px 80px rgba(62,63,63,0.16)",fontFamily:"Montserrat,sans-serif"}}>
+      <div onClick={function(e){e.stopPropagation();}} style={{background:"#fff",borderRadius:22,width:"min(680px,94vw)",maxHeight:"90vh",overflow:"auto",boxShadow:"var(--sa-shadow-lg)",fontFamily:"Montserrat,sans-serif"}}>
         {/* header */}
         <div style={{padding:"22px 26px 18px",borderBottom:"1px solid "+C.gray,display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:14,position:"sticky",top:0,background:"#fff",zIndex:2}}>
           <div>
-            <div style={{fontSize:9.5,fontWeight:700,letterSpacing:".26em",textTransform:"uppercase",color:C.peach,marginBottom:6}}>Comprobante de pago</div>
-            <div style={{fontSize:22,fontWeight:600,color:C.black,fontFamily:"Georgia,serif"}}>{focusEmail&&techs[0]?techs[0].vendorName:"Pago a técnicos"}</div>
+            <div style={{fontSize:9.5,fontWeight:700,letterSpacing:".26em",textTransform:"uppercase",color:C.earth,marginBottom:6,display:"flex",alignItems:"center",gap:7}}><span style={{width:6,height:6,borderRadius:999,background:C.attention,flexShrink:0,display:"inline-block"}}/>Comprobante de pago</div>
+            {/* Antes decía "Pago a técnicos" incluso cuando era de uno solo: el nombre es
+                lo primero que se busca al abrir un comprobante. */}
+            <div style={{fontSize:22,fontWeight:600,color:C.black,fontFamily:"Georgia,serif"}}>{
+              techs.length===1&&techs[0] ? techs[0].vendorName
+              : techs.length>1 ? (techs.length+" técnicos · "+techs.map(function(t){return String(t.vendorName||"").split(" ")[0];}).join(", "))
+              : "Pago a técnicos"
+            }</div>
             <div style={{fontSize:12,color:C.earth,marginTop:4,fontVariantNumeric:"tabular-nums"}}>{pago.folio} · {fmtDate(pago.fechaPago)}</div>
           </div>
           <button onClick={onClose} style={{background:"none",border:"none",fontSize:24,color:C.earth,cursor:"pointer",lineHeight:1,flexShrink:0}}>×</button>
@@ -14023,7 +14164,7 @@ function PagoComprobanteModal({pago, company, isAdmin, focusEmail, onClose, onSv
                 );})}
                 <div style={{padding:"10px 14px",background:C.surfaceWarm}}>
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.earth,padding:"2px 0"}}><span>Subtotal</span><b style={{color:C.black,fontVariantNumeric:"tabular-nums"}}>{pgMoney(t.subtotal)}</b></div>
-                  {t.adelanto>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.peach,padding:"2px 0"}}><span>Descuento — adelanto</span><b style={{fontVariantNumeric:"tabular-nums"}}>−{pgMoney(t.adelanto)}</b></div>}
+                  {t.adelanto>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.attentionText,padding:"2px 0"}}><span>Descuento — adelanto</span><b style={{fontVariantNumeric:"tabular-nums"}}>−{pgMoney(t.adelanto)}</b></div>}
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:13.5,fontWeight:700,color:C.black,padding:"6px 0 0",marginTop:4,borderTop:"1.5px solid "+C.gray}}><span>Neto a pagar</span><b style={{color:C.green,fontVariantNumeric:"tabular-nums"}}>{pgMoney(t.neto)}</b></div>
                 </div>
               </div>
@@ -14034,7 +14175,7 @@ function PagoComprobanteModal({pago, company, isAdmin, focusEmail, onClose, onSv
           {multi&&(
             <div style={{borderTop:"2px solid "+C.black,paddingTop:12,marginTop:4,marginBottom:8}}>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,color:C.earth,padding:"3px 0"}}><span>Total bruto</span><b style={{color:C.black,fontVariantNumeric:"tabular-nums"}}>{pgMoney(gBruto)}</b></div>
-              {gDesc>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,color:C.peach,padding:"3px 0"}}><span>Descuentos por adelanto</span><b style={{fontVariantNumeric:"tabular-nums"}}>−{pgMoney(gDesc)}</b></div>}
+              {gDesc>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,color:C.attentionText,padding:"3px 0"}}><span>Descuentos por adelanto</span><b style={{fontVariantNumeric:"tabular-nums"}}>−{pgMoney(gDesc)}</b></div>}
               <div style={{display:"flex",justifyContent:"space-between",fontSize:16,fontWeight:700,color:C.black,padding:"6px 0 0"}}><span>Total neto pagado</span><b style={{color:C.green,fontVariantNumeric:"tabular-nums"}}>{pgMoney(gNeto)}</b></div>
             </div>
           )}
@@ -14044,7 +14185,7 @@ function PagoComprobanteModal({pago, company, isAdmin, focusEmail, onClose, onSv
             <div style={{fontSize:8.5,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",color:C.earth,marginBottom:10}}>Comprobante de transferencia</div>
             {soporte?(
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                {okMsg&&<div style={{padding:"9px 13px",borderRadius:8,background:"#EDF5EF",color:C.green,fontSize:12.5,fontWeight:600}}>✓ Comprobante subido con éxito.</div>}
+                {okMsg&&<div style={{padding:"9px 13px",borderRadius:8,background:"#E8F2ED",color:C.green,fontSize:12.5,fontWeight:600}}>✓ Comprobante subido con éxito.</div>}
                 {(soporte.type||"").indexOf("image/")===0
                   ? <img src={soporte.url?driveThumb(soporte.url,1200):soporte.data} alt="soporte" loading="lazy" style={{maxWidth:"100%",borderRadius:10,border:"1px solid "+C.gray,background:"#f0f0f0"}} onError={function(e){var raw=soporte.url||soporte.data;if(raw&&e.target.src!==raw)e.target.src=raw;}}/>
                   : <a href={soporte.url||soporte.data} target="_blank" rel="noopener" download={soporte.url?undefined:soporte.name} style={{display:"flex",alignItems:"center",gap:10,background:C.surfaceWarm,border:"1px solid "+C.gray,borderRadius:8,padding:"12px 14px",fontSize:13,color:C.black,textDecoration:"none",fontWeight:600}}><span style={{fontSize:18}}>📄</span>{soporte.name||"Documento adjunto"}<span style={{marginLeft:"auto",fontSize:11,color:C.earth}}>{soporte.url?"Ver":"Descargar"}</span></a>}
@@ -14060,12 +14201,8 @@ function PagoComprobanteModal({pago, company, isAdmin, focusEmail, onClose, onSv
 
           {/* actions */}
           <div style={{display:"flex",flexDirection:"column",gap:10,marginTop:24}}>
-            <button disabled={!!shareBusy} onClick={function(){shareComprobante(pago,company,focusEmail,"image",setShareBusy);}} style={{width:"100%",padding:"14px",borderRadius:11,border:"none",background:shareBusy?C.gray:C.green,color:"#fff",fontSize:13.5,fontWeight:700,cursor:shareBusy?"default":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>{shareBusy==="image"?"Generando imagen…":"Compartir por WhatsApp (imagen)"}</button>
-            <div style={{display:"flex",gap:10}}>
-              <button disabled={!!shareBusy} onClick={function(){shareComprobante(pago,company,focusEmail,"pdf",setShareBusy);}} style={{flex:1,padding:"12px",borderRadius:11,border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:shareBusy?"default":"pointer"}}>{shareBusy==="pdf"?"Generando…":"Descargar PDF"}</button>
-              <button disabled={!!shareBusy} onClick={function(){shareComprobante(pago,company,focusEmail,"imgdl",setShareBusy);}} style={{flex:1,padding:"12px",borderRadius:11,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:shareBusy?"default":"pointer"}}>{shareBusy==="imgdl"?"Generando…":"Descargar imagen"}</button>
-              <button onClick={function(){printComprobante(pago,company,focusEmail);}} title="Imprimir" style={{padding:"12px 16px",borderRadius:11,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Imprimir</button>
-            </div>
+            <button onClick={function(){printComprobante(pago,company,focusEmail);}} style={{width:"100%",padding:"14px",borderRadius:11,border:"none",background:C.black,color:"#fff",fontSize:13.5,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8,fontFamily:"Montserrat,sans-serif"}}>Descargar comprobante</button>
+            <div style={{fontSize:11.5,color:C.earth,lineHeight:1.6,textAlign:"center",textWrap:"pretty"}}>Se abre listo para guardar como PDF, imprimir o compartir.</div>
             <button onClick={onClose} style={{width:"100%",padding:"11px",borderRadius:11,border:"none",background:"none",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cerrar</button>
           </div>
         </div>
@@ -14090,7 +14227,7 @@ function ContractModal({adv,onClose}){
             var dep=c.comprobanteDeposito;
             return (
               <div key={i} style={{marginBottom:i<arr.length-1?36:0,paddingBottom:i<arr.length-1?30:0,borderBottom:i<arr.length-1?"1px solid "+C.line:"none"}}>
-                {multi&&<div style={{fontSize:9.5,fontWeight:700,color:C.peach,letterSpacing:".2em",textTransform:"uppercase",marginBottom:12}}>Contrato {i+1} · Q{(c.monto||0).toLocaleString()}</div>}
+                {multi&&<div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:12}}>Contrato {i+1} · Q{(c.monto||0).toLocaleString()}</div>}
                 <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,letterSpacing:".03em",textAlign:"center",color:C.black,marginBottom:22}}>Solicitud y recibo de adelanto de pago</div>
                 <div style={{fontFamily:"Georgia,serif",fontSize:13.5,lineHeight:1.7,color:C.black,whiteSpace:"pre-wrap"}}>{txt}</div>
                 <div style={{marginTop:36}}>
@@ -14104,7 +14241,7 @@ function ContractModal({adv,onClose}){
           })}
         </div>
         <div style={{padding:"14px 22px",borderBottom:"none",borderTop:"1px solid "+C.line,display:"flex",justifyContent:"flex-end",gap:10,position:"sticky",bottom:0,background:"#fff"}}>
-          <button onClick={function(){printContract(adv);}} style={{padding:"10px 20px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Imprimir / PDF</button>
+          <button onClick={function(){printContract(adv);}} style={{padding:"10px 20px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Imprimir / PDF</button>
         </div>
       </div>
     </Overlay>
@@ -14138,8 +14275,8 @@ function AdminReqComplete({adv, vendor, onComplete}){
   }
   function StepBadge({n,done,active}){ return <span style={{width:24,height:24,borderRadius:"50%",flexShrink:0,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,background:done?C.green:(active?C.black:C.gray),color:done||active?"#fff":C.earth}}>{done?"✓":n}</span>; }
   return (
-    <div style={{background:"#fff",border:"1.5px solid "+C.peach+"66",borderRadius:18,boxShadow:"0 4px 16px rgba(62,63,63,.05)",padding:"18px 18px 20px",marginBottom:20}}>
-      <div style={{fontSize:9.5,fontWeight:700,color:C.peach,letterSpacing:".22em",textTransform:"uppercase",marginBottom:6}}>Solicitud del administrador</div>
+    <div style={{background:"#fff",border:"1.5px solid "+C.peach+"66",borderRadius:18,boxShadow:"var(--sa-shadow-sm)",padding:"18px 18px 20px",marginBottom:20}}>
+      <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".22em",textTransform:"uppercase",marginBottom:6,display:"flex",alignItems:"center",gap:7}}><span style={{width:6,height:6,borderRadius:999,background:C.attention,flexShrink:0,display:"inline-block"}}/>Solicitud del administrador</div>
       <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:21,color:C.black,marginBottom:4}}>Tienes un adelanto por firmar</div>
       <div style={{fontSize:12,color:C.earth,lineHeight:1.6,marginBottom:14}}>El administrador inició un adelanto para ti. Sube tu DPI y firma el contrato; luego el administrador hará el depósito.</div>
       <div style={{background:C.surfaceWarm,borderRadius:12,padding:"13px 15px",marginBottom:16,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
@@ -14178,9 +14315,9 @@ function AdminReqComplete({adv, vendor, onComplete}){
         {datosOk&&(
           <div>
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:11}}><StepBadge n={3} done={!!firma} active={!firma}/><span style={{fontSize:13,fontWeight:700,color:C.black}}>Firma y envía</span></div>
-            <button onClick={function(){setPreview(true);}} style={{width:"100%",padding:"11px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",marginBottom:13,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}><Icon name="file" size={15} stroke={C.black}/>Leer el contrato</button>
+            <button onClick={function(){setPreview(true);}} style={{width:"100%",padding:"11px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",marginBottom:13,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}><Icon name="file" size={15} stroke={C.black}/>Leer el contrato</button>
             <SignaturePad onChange={setFirma}/>
-            <div style={{fontSize:10.5,color:C.earth,lineHeight:1.6,marginTop:10}}>Al firmar aceptas el contrato de adelanto y autorizas el descuento semanal automático.</div>
+            <div style={{fontSize:12,color:C.earth,lineHeight:1.6,marginTop:10}}>Al firmar aceptas el contrato de adelanto y autorizas el descuento semanal automático.</div>
           </div>
         )}
         {err&&<Err msg={err}/>}
@@ -14300,7 +14437,7 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
             {vigentes.filter(function(a){return a.status!=="pendiente_tecnico";}).map(function(a){ var st=advanceState(a,reps); var isActivo=a.status==="activo"; var dot=isActivo?C.green:C.orange;
               var estado=isActivo?"activo":(a.status==="por_depositar"?"esperando depósito":"pendiente de aprobación");
               var sub=isActivo?("Saldo Q"+advQ(st.saldo)+" · "+advCuotaLabel(a)):(a.status==="por_depositar"?"Firmado · el admin realizará el depósito":"En revisión"); return (
-              <button key={a.id} onClick={function(){setPreview(a);}} style={{textAlign:"left",background:"#fff",border:"1px solid "+C.line,borderRadius:14,padding:"13px 15px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",boxShadow:"0 4px 16px rgba(62,63,63,.04)"}}>
+              <button key={a.id} onClick={function(){setPreview(a);}} style={{textAlign:"left",background:"#fff",border:"1px solid "+C.line,borderRadius:14,padding:"13px 15px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",boxShadow:"var(--sa-shadow-sm)"}}>
                 <span style={{width:9,height:9,borderRadius:"50%",background:dot,flexShrink:0}}/>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:700,color:C.black}}>Q{(a.monto||0).toLocaleString()} <span style={{fontWeight:500,color:C.earth,fontSize:11.5}}>· {estado}</span></div>
@@ -14356,7 +14493,7 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
       ) : (
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           {/* PASO 1 — Documento */}
-          <div style={{background:"#fff",borderRadius:16,border:"1px solid "+C.line,boxShadow:"0 4px 16px rgba(62,63,63,.04)",padding:"16px 18px"}}>
+          <div style={{background:"#fff",borderRadius:16,border:"1px solid "+C.line,boxShadow:"var(--sa-shadow-sm)",padding:"16px 18px"}}>
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:13}}><StepBadge n={1} done={!!dpiPhoto} active={!dpiPhoto}/><span style={{fontSize:13.5,fontWeight:700,color:C.black}}>Sube tu documento</span></div>
             {dpiPhoto?(
               <div style={{position:"relative",borderRadius:12,overflow:"hidden",border:"1px solid "+C.gray}}>
@@ -14375,7 +14512,7 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
 
           {/* PASO 2 — Confirma datos del documento */}
           {dpiPhoto&&(
-            <div style={{background:"#fff",borderRadius:16,border:"1px solid "+C.line,boxShadow:"0 4px 16px rgba(62,63,63,.04)",padding:"16px 18px"}}>
+            <div style={{background:"#fff",borderRadius:16,border:"1px solid "+C.line,boxShadow:"var(--sa-shadow-sm)",padding:"16px 18px"}}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:13}}><StepBadge n={2} done={!!(nombre.trim()&&dpiNum.trim())} active={!(nombre.trim()&&dpiNum.trim())}/><span style={{fontSize:13.5,fontWeight:700,color:C.black}}>Confirma tus datos</span></div>
               <div style={{fontSize:11,color:C.earth,marginBottom:13,lineHeight:1.6}}>Verifica que coincidan exactamente con tu documento. Se usarán en el contrato.</div>
               <div style={{display:"flex",flexDirection:"column",gap:13}} className="f">
@@ -14387,7 +14524,7 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
 
           {/* PASO 3 — Monto y plazo */}
           {datosOk&&(
-            <div style={{background:"#fff",borderRadius:16,border:"1px solid "+C.line,boxShadow:"0 4px 16px rgba(62,63,63,.04)",padding:"16px 18px"}} className="f">
+            <div style={{background:"#fff",borderRadius:16,border:"1px solid "+C.line,boxShadow:"var(--sa-shadow-sm)",padding:"16px 18px"}} className="f">
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:13}}><StepBadge n={3} done={montoOk} active={!montoOk}/><span style={{fontSize:13.5,fontWeight:700,color:C.black}}>Monto y plazo</span></div>
               <div style={{display:"flex",flexDirection:"column",gap:14}}>
                 <F label={"Monto a solicitar (máx. Q"+disponible.toLocaleString()+")"}><input type="number" inputMode="numeric" placeholder={"Ej. "+Math.min(500,disponible)} value={monto} onChange={function(e){setMonto(e.target.value);setErr("");}}/></F>
@@ -14401,7 +14538,7 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
                 </div>
                 {montoN>0&&(
                   <div style={{background:C.peach12||"rgba(233,130,106,.12)",borderRadius:12,padding:"14px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <span style={{fontSize:12.5,color:C.black,fontWeight:600}}>Pagarás cada semana</span><span style={{fontSize:19,fontWeight:700,color:C.peach}}>Q{semanal.toLocaleString()}</span>
+                    <span style={{fontSize:12.5,color:C.black,fontWeight:600}}>Pagarás cada semana</span><span style={{fontSize:19,fontWeight:700,color:C.black}}>Q{semanal.toLocaleString()}</span>
                   </div>
                 )}
               </div>
@@ -14410,12 +14547,12 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
 
           {/* PASO 4 — Firma y envío */}
           {montoOk&&(
-            <div style={{background:"#fff",borderRadius:16,border:"1px solid "+C.line,boxShadow:"0 4px 16px rgba(62,63,63,.04)",padding:"16px 18px"}}>
+            <div style={{background:"#fff",borderRadius:16,border:"1px solid "+C.line,boxShadow:"var(--sa-shadow-sm)",padding:"16px 18px"}}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:13}}><StepBadge n={4} done={!!firma} active={!firma}/><span style={{fontSize:13.5,fontWeight:700,color:C.black}}>Firma y envía</span></div>
-              <button onClick={function(){setPreview(Object.assign({vendorEmail:vendor.email},draft()));}} style={{width:"100%",padding:"12px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",marginBottom:14,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}><Icon name="file" size={15} stroke={C.black}/>Leer el contrato</button>
+              <button onClick={function(){setPreview(Object.assign({vendorEmail:vendor.email},draft()));}} style={{width:"100%",padding:"12px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",marginBottom:14,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}><Icon name="file" size={15} stroke={C.black}/>Leer el contrato</button>
               <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:9}}>Tu firma</div>
               <SignaturePad onChange={setFirma}/>
-              <div style={{fontSize:10.5,color:C.earth,lineHeight:1.6,marginTop:10}}>Al firmar aceptas el contrato de adelanto y autorizas el descuento semanal automático.</div>
+              <div style={{fontSize:12,color:C.earth,lineHeight:1.6,marginTop:10}}>Al firmar aceptas el contrato de adelanto y autorizas el descuento semanal automático.</div>
             </div>
           )}
 
@@ -14577,13 +14714,13 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
           <div style={{fontSize:9.5,fontWeight:600,color:C.earth,letterSpacing:".28em",textTransform:"uppercase",marginBottom:8}}>Adelantos</div>
           <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:28,color:C.black}}>Adelantos de pago</div>
         </div>
-        <button onClick={function(){setCreating(true);}} style={{padding:"11px 20px",borderRadius:100,border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:8,whiteSpace:"nowrap"}}><Icon name="plus" size={15} stroke="#fff"/>Crear adelanto</button>
+        <button onClick={function(){setCreating(true);}} style={{padding:"11px 20px",borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:8,whiteSpace:"nowrap"}}><Icon name="plus" size={15} stroke="#fff"/>Crear adelanto</button>
       </div>
 
       {/* Summary */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:24}}>
-        <div style={{background:"#fff",borderRadius:16,padding:"16px 18px",border:"1px solid "+C.line,boxShadow:"0 4px 16px rgba(62,63,63,.05)"}}><div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Activos</div><div style={{fontSize:24,fontWeight:600,color:C.black}}>{active.length}</div></div>
-        <div style={{background:"#fff",borderRadius:16,padding:"16px 18px",border:"1px solid "+C.line,boxShadow:"0 4px 16px rgba(62,63,63,.05)"}}><div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Saldo total</div><div style={{fontSize:24,fontWeight:600,color:C.black}}>Q{totalSaldo.toLocaleString()}</div></div>
+        <div style={{background:"#fff",borderRadius:16,padding:"16px 18px",border:"1px solid "+C.line,boxShadow:"var(--sa-shadow-sm)"}}><div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Activos</div><div style={{fontSize:24,fontWeight:600,color:C.black}}>{active.length}</div></div>
+        <div style={{background:"#fff",borderRadius:16,padding:"16px 18px",border:"1px solid "+C.line,boxShadow:"var(--sa-shadow-sm)"}}><div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Saldo total</div><div style={{fontSize:24,fontWeight:600,color:C.black}}>Q{totalSaldo.toLocaleString()}</div></div>
         <div style={{background:C.black,borderRadius:16,padding:"16px 18px"}}><div style={{fontSize:9.5,fontWeight:700,color:"rgba(255,255,255,.6)",letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Descuento</div><div style={{fontSize:24,fontWeight:600,color:C.peach}}>Q{advQ(totalSemanal)}<span style={{fontSize:12,fontWeight:600,color:"rgba(255,255,255,.55)"}}> /sem</span></div>{totalQuincenal>0&&<div style={{fontSize:12,fontWeight:600,color:"rgba(255,255,255,.75)",marginTop:2}}>Q{advQ(totalQuincenal)}<span style={{fontSize:11,color:"rgba(255,255,255,.5)"}}> /quincena · planilla</span></div>}</div>
       </div>
 
@@ -14593,7 +14730,7 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
           <div style={{fontSize:10,fontWeight:700,color:C.green,letterSpacing:".18em",textTransform:"uppercase",marginBottom:12}}>Firmados · por depositar · {porDep.length}</div>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             {porDep.map(function(a){ var dep=advDeposits(a)[0]; return (
-              <div key={a.id} style={{background:"#fff",borderRadius:16,border:"1.5px solid "+C.green+"55",overflow:"hidden",boxShadow:"0 4px 16px rgba(62,63,63,.05)"}}>
+              <div key={a.id} style={{background:"#fff",borderRadius:16,border:"1.5px solid "+C.green+"55",overflow:"hidden",boxShadow:"var(--sa-shadow-sm)"}}>
                 <div style={{padding:"16px 18px"}}>
                   <div style={{display:"flex",flexWrap:"wrap",gap:14,alignItems:"center",marginBottom:14}}>
                     <div style={{flex:1,minWidth:160}}>
@@ -14608,9 +14745,9 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
                   <div style={{fontSize:11.5,color:C.earth,lineHeight:1.6,marginBottom:12}}>El técnico ya subió su DPI y firmó el contrato. Sube el comprobante de depósito para activar el adelanto.</div>
                   <div style={{marginBottom:12}}><DepositReceiptUp receipt={dep} onAdd={function(rc){setDeposit(a,rc);}} onDel={function(){setDeposit(a,null);}}/></div>
                   <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                    <button onClick={function(){activateDeposit(a);}} disabled={!dep} style={{flex:1,minWidth:150,padding:"11px",borderRadius:100,border:"none",background:dep?C.green:C.gray,color:"#fff",fontSize:12.5,fontWeight:700,cursor:dep?"pointer":"not-allowed"}}>Activar adelanto</button>
-                    <button onClick={function(){setPreview(a);}} style={{padding:"11px 18px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Ver contrato</button>
-                    <button onClick={function(){delAdv(a);}} title="Eliminar" style={{padding:"11px 14px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,cursor:"pointer"}}><Icon name="trash" size={15} stroke={C.earth}/></button>
+                    <button onClick={function(){activateDeposit(a);}} disabled={!dep} style={{flex:1,minWidth:150,padding:"11px",borderRadius:"var(--sa-pill)",border:"none",background:dep?C.green:C.gray,color:"#fff",fontSize:12.5,fontWeight:700,cursor:dep?"pointer":"not-allowed"}}>Activar adelanto</button>
+                    <button onClick={function(){setPreview(a);}} style={{padding:"11px 18px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Ver contrato</button>
+                    <button onClick={function(){delAdv(a);}} title="Eliminar" style={{padding:"11px 14px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,cursor:"pointer"}}><Icon name="trash" size={15} stroke={C.earth}/></button>
                   </div>
                 </div>
               </div>
@@ -14633,7 +14770,7 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
                   </div>
                   <div style={{display:"flex",gap:14,alignItems:"center"}}>
                     <AdvStat label="Monto" value={"Q"+(a.monto||0).toLocaleString()}/>
-                    <button onClick={function(){delAdv(a);}} title="Cancelar solicitud" style={{padding:"9px 14px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.red,fontSize:12,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+                    <button onClick={function(){delAdv(a);}} title="Cancelar solicitud" style={{padding:"9px 14px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.red,fontSize:12,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
                   </div>
                 </div>
               </div>
@@ -14648,7 +14785,7 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
           <div style={{fontSize:10,fontWeight:700,color:C.orange,letterSpacing:".18em",textTransform:"uppercase",marginBottom:12}}>Solicitudes pendientes · {pend.length}</div>
           <div style={{display:"flex",flexDirection:"column",gap:12}}>
             {pend.map(function(a){ return (
-              <div key={a.id} style={{background:"#fff",borderRadius:16,border:"1.5px solid "+C.orange+"55",overflow:"hidden",boxShadow:"0 4px 16px rgba(62,63,63,.05)"}}>
+              <div key={a.id} style={{background:"#fff",borderRadius:16,border:"1.5px solid "+C.orange+"55",overflow:"hidden",boxShadow:"var(--sa-shadow-sm)"}}>
                 <div style={{padding:"16px 18px",display:"flex",flexWrap:"wrap",gap:14,alignItems:"center"}}>
                   <div style={{flex:1,minWidth:160}}>
                     <div style={{fontSize:15,fontWeight:700,color:C.black}}>{a.vendorName||a.vendorEmail}</div>
@@ -14661,9 +14798,9 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
                   </div>
                 </div>
                 <div style={{display:"flex",gap:8,padding:"0 18px 16px",flexWrap:"wrap"}}>
-                  <button onClick={function(){approve(a);}} style={{flex:1,minWidth:120,padding:"11px",borderRadius:100,border:"none",background:C.green,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>Aprobar y activar</button>
-                  <button onClick={function(){setPreview(a);}} style={{padding:"11px 18px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Ver contrato</button>
-                  <button onClick={function(){reject(a);}} style={{padding:"11px 18px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.red,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Rechazar</button>
+                  <button onClick={function(){approve(a);}} style={{flex:1,minWidth:120,padding:"11px",borderRadius:"var(--sa-pill)",border:"none",background:C.green,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>Aprobar y activar</button>
+                  <button onClick={function(){setPreview(a);}} style={{padding:"11px 18px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Ver contrato</button>
+                  <button onClick={function(){reject(a);}} style={{padding:"11px 18px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.red,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Rechazar</button>
                 </div>
               </div>
             );})}
@@ -14676,11 +14813,11 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
       {active.length===0&&<div style={{textAlign:"center",padding:"30px",color:C.earth,fontSize:13}}>No hay adelantos activos.</div>}
       <div style={{display:"flex",flexDirection:"column",gap:12}}>
         {active.map(function(a){ var st=advanceState(a,reps); var pct=st.monto>0?Math.round(st.debited/st.monto*100):0; var avgPay=avgWeekPay(reps,a.vendorEmail); var esPl=advIsPlanilla(a); var pctPay=(!esPl&&avgPay>0)?Math.round(st.semanal/avgPay*100):0; var nextK=esPl?null:nextChargeableWeek(a,reps); var pausasFut=(a.pausas||[]).filter(function(k){ var w=st.weeks[k]; return !(w&&w.n>0&&w.paid===w.n); }); return (
-          <div key={a.id} style={{background:"#fff",borderRadius:16,border:"1px solid "+C.line,overflow:"hidden",boxShadow:"0 4px 16px rgba(62,63,63,.05)"}}>
+          <div key={a.id} style={{background:"#fff",borderRadius:16,border:"1px solid "+C.line,overflow:"hidden",boxShadow:"var(--sa-shadow-sm)"}}>
             <div style={{padding:"16px 18px"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:14,flexWrap:"wrap"}}>
                 <div>
-                  <div style={{fontSize:15,fontWeight:700,color:C.black}}>{a.vendorName||a.vendorEmail}{!a.vendorEmail&&<span style={{fontSize:9,fontWeight:700,color:C.red,background:"#F5EDEC",padding:"2px 7px",borderRadius:100,marginLeft:8,letterSpacing:".06em"}}>SIN LIGAR</span>}</div>
+                  <div style={{fontSize:15,fontWeight:700,color:C.black}}>{a.vendorName||a.vendorEmail}{!a.vendorEmail&&<span style={{fontSize:9,fontWeight:700,color:C.red,background:"#F7E7E4",padding:"2px 7px",borderRadius:"var(--sa-pill)",marginLeft:8,letterSpacing:".06em"}}>SIN LIGAR</span>}</div>
                   <div style={{fontSize:11,color:C.earth,marginTop:2}}>{esPl?"Planilla · quincenal · ":""}Inicio {fmtDMY(advStart(a))}{a.dpiNumber?" \u00b7 DPI "+a.dpiNumber:""}{a.unified?" \u00b7 "+advContracts(a).length+" contratos unificados":""}</div>
                 </div>
                 <div style={{textAlign:"right"}}>
@@ -14689,10 +14826,10 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
                 </div>
               </div>
               {/* progress */}
-              <div style={{height:6,borderRadius:100,background:C.surfaceWarm,overflow:"hidden",marginBottom:8}}><div style={{height:"100%",width:pct+"%",background:C.green,borderRadius:100,transition:"width .3s"}}/></div>
+              <div style={{height:6,borderRadius:"var(--sa-pill)",background:C.surfaceWarm,overflow:"hidden",marginBottom:8}}><div style={{height:"100%",width:pct+"%",background:C.green,borderRadius:"var(--sa-pill)",transition:"width .3s"}}/></div>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.earth,marginBottom:12,flexWrap:"wrap",gap:6}}>
                 <span>{esPl&&!st.cuotas?"Q"+st.debited.toLocaleString()+" debitado":st.paidWeeks+" / "+st.cuotas+" cuotas · Q"+st.debited.toLocaleString()+" debitado"}{st.revertido>0?" · Q"+st.revertido.toLocaleString()+" revertido":""}</span>
-                <span style={{color:C.peach,fontWeight:700}}>{esPl?(advCuota(a)>0?"Q"+advCuota(a).toLocaleString()+" / quincena":"Sin cuota · a la liquidación"):("Q"+st.weeklyCharge.toLocaleString()+" / semana"+(pctPay>0?" \u00b7 "+pctPay+"% del pago":""))}</span>
+                <span style={{color:C.black,fontWeight:700}}>{esPl?(advCuota(a)>0?"Q"+advCuota(a).toLocaleString()+" / quincena":"Sin cuota · a la liquidación"):("Q"+st.weeklyCharge.toLocaleString()+" / semana"+(pctPay>0?" \u00b7 "+pctPay+"% del pago":""))}</span>
               </div>
               {/* próximo cobro / pausas */}
               <div style={{background:C.surfaceWarm,borderRadius:10,padding:"9px 12px",marginBottom:12,fontSize:11,color:C.earth,lineHeight:1.6}}>
@@ -14701,7 +14838,7 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
                       ? <><span style={{fontWeight:700,color:C.black}}>Cobro automático en planilla.</span> Se debita Q{advCuota(a).toLocaleString()} dentro del comprobante de cada quincena (15 y 30).</>
                       : <><span style={{fontWeight:700,color:C.black}}>Sin cuota quincenal.</span> El saldo permanece vigente y se descontará íntegro de la liquidación al terminar la relación laboral.</>)
                   : <><span style={{fontWeight:700,color:C.black}}>Cobro automático.</span> Se debita Q{st.semanal.toLocaleString()} cuando se pagan todos los trabajos de la semana.{nextK&&<> Próximo: <span style={{fontWeight:700,color:C.black}}>{weekLabel(nextK)}</span>.</>}</>}
-                {pausasFut.length>0&&<div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}><span style={{fontWeight:700,color:C.orange}}>En pausa:</span>{pausasFut.map(function(k){return <button key={k} onClick={function(){unpauseWeek(a,k);}} title="Reanudar esta semana" style={{fontSize:10,fontWeight:700,color:C.orange,background:"#fff",border:"1px solid "+C.orange+"66",borderRadius:100,padding:"2px 9px",cursor:"pointer"}}>{weekLabel(k)} ×</button>;})}</div>}
+                {pausasFut.length>0&&<div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}><span style={{fontWeight:700,color:C.orange}}>En pausa:</span>{pausasFut.map(function(k){return <button key={k} onClick={function(){unpauseWeek(a,k);}} title="Reanudar esta semana" style={{fontSize:10,fontWeight:700,color:C.orange,background:"#fff",border:"1px solid "+C.orange+"66",borderRadius:"var(--sa-pill)",padding:"2px 9px",cursor:"pointer"}}>{weekLabel(k)} ×</button>;})}</div>}
               </div>
               {/* Comprobantes de depósito — se ven aquí y en el contrato/recibo */}
               <div style={{marginBottom:12,display:"flex",flexDirection:"column",gap:8}}>
@@ -14718,10 +14855,10 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
                 })}
               </div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                {!esPl&&<button onClick={function(){pauseNext(a);}} disabled={!nextK} style={{flex:1,minWidth:150,padding:"10px",borderRadius:100,border:"1.5px solid "+(nextK?C.orange:C.gray),background:"#fff",color:nextK?C.orange:C.gray,fontSize:12,fontWeight:700,cursor:nextK?"pointer":"not-allowed"}}>Pausar próximo cobro</button>}
-                <button onClick={function(){setPreview(a);}} style={{padding:"10px 16px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:600,cursor:"pointer"}}>Contrato</button>
-                <button onClick={function(){setAdjust(adjust===a.id?null:a.id);}} style={{padding:"10px 16px",borderRadius:100,border:"1.5px solid "+(adjust===a.id?C.black:C.gray),background:adjust===a.id?C.black:"#fff",color:adjust===a.id?"#fff":C.black,fontSize:12,fontWeight:600,cursor:"pointer"}}>Ajustar</button>
-                <button onClick={function(){delAdv(a);}} title="Eliminar" style={{padding:"10px 14px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,cursor:"pointer"}}><Icon name="trash" size={15} stroke={C.earth}/></button>
+                {!esPl&&<button onClick={function(){pauseNext(a);}} disabled={!nextK} style={{flex:1,minWidth:150,padding:"10px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(nextK?C.orange:C.gray),background:"#fff",color:nextK?C.orange:C.gray,fontSize:12,fontWeight:700,cursor:nextK?"pointer":"not-allowed"}}>Pausar próximo cobro</button>}
+                <button onClick={function(){setPreview(a);}} style={{padding:"10px 16px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:600,cursor:"pointer"}}>Contrato</button>
+                <button onClick={function(){setAdjust(adjust===a.id?null:a.id);}} style={{padding:"10px 16px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(adjust===a.id?C.black:C.gray),background:adjust===a.id?C.black:"#fff",color:adjust===a.id?"#fff":C.black,fontSize:12,fontWeight:600,cursor:"pointer"}}>Ajustar</button>
+                <button onClick={function(){delAdv(a);}} title="Eliminar" style={{padding:"10px 14px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,cursor:"pointer"}}><Icon name="trash" size={15} stroke={C.earth}/></button>
               </div>
               {adjust===a.id&&<AdvAdjustPanel adv={a} st={st} onUpdate={function(p){update(a.id,p);}}/>}
             </div>
@@ -14754,7 +14891,7 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
                           Q{(a.monto||0).toLocaleString()} · {advIsPlanilla(a)?"cuota quincenal":"cuota semanal"} {advCuota(a)?("Q"+advQ(advCuota(a))):"—"}
                         </div>
                       </div>
-                      <span style={{fontSize:10,fontWeight:700,letterSpacing:".06em",padding:"3px 10px",borderRadius:100,background:ok?"#EDF5EF":"#F5EDEC",color:ok?C.green:C.red,whiteSpace:"nowrap"}}>{ok?"Liquidado":"Rechazado"}</span>
+                      <span style={{fontSize:10,fontWeight:700,letterSpacing:".06em",padding:"3px 10px",borderRadius:"var(--sa-pill)",background:ok?"#E8F2ED":"#F8ECE9",color:ok?C.green:C.attentionText,whiteSpace:"nowrap"}}>{ok?"Liquidado":"Rechazado"}</span>
                     </div>
                     <div style={{marginTop:9,paddingTop:9,borderTop:"1px solid "+C.gray,display:"flex",gap:18,flexWrap:"wrap"}}>
                       {[["Inicio",a.fechaInicio?fmtDate(a.fechaInicio):"—"],
@@ -14762,7 +14899,7 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
                         ["Descontado",ok?("Q"+advQ(a.montoLiquidado!=null?a.montoLiquidado:st.debited)):"Q0"]].map(function(r,i){
                         return <div key={i}><div style={{fontSize:8.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:3}}>{r[0]}</div><div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{r[1]}</div></div>;
                       })}
-                      <button onClick={function(){setPreview(a);}} style={{marginLeft:"auto",alignSelf:"center",padding:"7px 13px",borderRadius:100,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Ver contrato</button>
+                      <button onClick={function(){setPreview(a);}} style={{marginLeft:"auto",alignSelf:"center",padding:"7px 13px",borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Ver contrato</button>
                     </div>
                   </div>
                 );
@@ -14829,7 +14966,7 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
   }
   return (
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(62,63,63,.45)",backdropFilter:"blur(4px)",zIndex:1000,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"5vh 16px",overflowY:"auto"}}>
-      <div onClick={function(e){e.stopPropagation();}} style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:460,padding:"24px",fontFamily:"Montserrat,sans-serif",boxShadow:"0 28px 80px rgba(62,63,63,.18)"}} className="f">
+      <div onClick={function(e){e.stopPropagation();}} style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:460,padding:"24px",fontFamily:"Montserrat,sans-serif",boxShadow:"var(--sa-shadow-lg)"}} className="f">
         <div style={{fontSize:9.5,fontWeight:600,color:C.earth,letterSpacing:".24em",textTransform:"uppercase",marginBottom:6}}>Nuevo adelanto</div>
         <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,color:C.black,marginBottom:18}}>Crear adelanto</div>
         {internos.length===0 ? (
@@ -14840,7 +14977,7 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
           <div style={{background:C.black,borderRadius:14,padding:"14px 16px",color:"#fff"}}>
             <div style={{fontSize:9,fontWeight:600,letterSpacing:".2em",textTransform:"uppercase",opacity:.7,marginBottom:5}}>Disponible para {esPlanilla?"este colaborador":"este técnico"}</div>
             <div style={{fontSize:26,fontWeight:600,color:disponible>0?"#fff":C.peach}}>Q{disponible.toLocaleString()}</div>
-            <div style={{fontSize:10.5,opacity:.62,marginTop:6,lineHeight:1.6}}>{esPlanilla
+            <div style={{fontSize:12,opacity:.62,marginTop:6,lineHeight:1.6}}>{esPlanilla
               ? <>Máx. = liquidación estimada a hoy (indemnización + prestaciones proporcionales): <b style={{color:"#fff"}}>Q{maxTotal.toLocaleString()}</b>{saldoVigente>0?" · Vigente: Q"+saldoVigente.toLocaleString():""}</>
               : <>Máx. (25% del ingreso semanal promedio × 12 cuotas; ingreso 8 sem. Q{sum8.toLocaleString()}): <b style={{color:"#fff"}}>Q{maxTotal.toLocaleString()}</b>{saldoVigente>0?" · Vigente: Q"+saldoVigente.toLocaleString():""}</>}</div>
           </div>
@@ -14849,7 +14986,7 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
             <div>
               <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:9}}>Cuota quincenal</div>
               <input type="number" inputMode="decimal" value={quincenal} onChange={function(e){setQuincenal(e.target.value);}} placeholder="0.00" style={{width:"100%",border:"1.5px solid "+C.gray,borderRadius:10,padding:"11px 13px",fontSize:14,fontFamily:"Montserrat,sans-serif",boxSizing:"border-box"}}/>
-              <div style={{fontSize:10.5,color:C.earth,marginTop:8,lineHeight:1.6}}>
+              <div style={{fontSize:12,color:C.earth,marginTop:8,lineHeight:1.6}}>
                 {qCuota>0
                   ? <>Se descontará Q{qCuota.toLocaleString()} en cada comprobante de quincena — {montoN>0?Math.ceil(montoN/qCuota)+" quincenas":"—"}.</>
                   : <><b style={{color:C.black}}>Cuota 0 — sin descuento quincenal.</b> El saldo permanece vigente y se cobrará íntegro en la liquidación al terminar la relación laboral.</>}
@@ -14862,7 +14999,7 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
               <input type="range" min={minCuotas} max="12" value={cuotas} onChange={function(e){setCuotas(parseInt(e.target.value));}} style={{flex:1,accentColor:C.peach}}/>
               <span style={{fontSize:15,fontWeight:700,color:C.black,minWidth:64,textAlign:"right"}}>{cuotas} sem.</span>
             </div>
-            {maxWeekly>0&&<div style={{fontSize:10.5,color:semanal>maxWeekly?C.red:C.earth,marginTop:8,lineHeight:1.5,fontWeight:semanal>maxWeekly?700:400}}>Cuota Q{semanal.toLocaleString()} · tope Q{maxWeekly.toLocaleString()} (25% del ingreso semanal promedio){semanal>maxWeekly?" — excede el tope":""}</div>}
+            {maxWeekly>0&&<div style={{fontSize:12,color:semanal>maxWeekly?C.attentionText:C.earth,marginTop:8,lineHeight:1.5,fontWeight:semanal>maxWeekly?700:400}}>Cuota Q{semanal.toLocaleString()} · tope Q{maxWeekly.toLocaleString()} (25% del ingreso semanal promedio){semanal>maxWeekly?" — excede el tope":""}</div>}
           </div>
           )}
           <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
@@ -14871,15 +15008,15 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
           </div>
           {montoN>0&&(
             <div style={{background:C.peach12||"rgba(233,130,106,.12)",borderRadius:12,padding:"12px 15px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <span style={{fontSize:12,color:C.black,fontWeight:600}}>{esPlanilla?(qCuota>0?"Descuento quincenal automático":"Sin descuento · a la liquidación"):"Descuento semanal automático"}</span><span style={{fontSize:17,fontWeight:700,color:C.peach}}>{esPlanilla?(qCuota>0?"Q"+qCuota.toLocaleString():"Q0"):"Q"+semanal.toLocaleString()}</span>
+              <span style={{fontSize:12,color:C.black,fontWeight:600}}>{esPlanilla?(qCuota>0?"Descuento quincenal automático":"Sin descuento · a la liquidación"):"Descuento semanal automático"}</span><span style={{fontSize:17,fontWeight:700,color:C.black}}>{esPlanilla?(qCuota>0?"Q"+qCuota.toLocaleString():"Q0"):"Q"+semanal.toLocaleString()}</span>
             </div>
           )}
           {err&&<Err msg={err}/>}
           <div style={{display:"flex",gap:10,marginTop:4}}>
-            <button onClick={onClose} style={{flex:1,padding:"13px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
-            <button onClick={crear} disabled={!ok} style={{flex:2,padding:"13px",borderRadius:100,border:"none",background:ok?C.green:C.gray,color:"#fff",fontSize:13,fontWeight:700,cursor:ok?"pointer":"not-allowed"}}>{esPlanilla?"Enviar al colaborador →":"Enviar al técnico →"}</button>
+            <button onClick={onClose} style={{flex:1,padding:"13px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+            <button onClick={crear} disabled={!ok} style={{flex:2,padding:"0 15px",borderRadius:"var(--sa-pill)",minHeight:44,border:"none",background:ok?C.green:C.gray,color:"#fff",fontSize:11.5,fontWeight:700,cursor:ok?"pointer":"not-allowed"}}>{esPlanilla?"Enviar al colaborador →":"Enviar al técnico →"}</button>
           </div>
-          <div style={{fontSize:10.5,color:C.earth,textAlign:"center",lineHeight:1.6}}>Le llegará {esPlanilla?"al colaborador":"al técnico"} para que suba su DPI y firme el contrato. Cuando firme, sube el comprobante de depósito para activarlo.</div>
+          <div style={{fontSize:12,color:C.earth,textAlign:"center",lineHeight:1.6}}>Le llegará {esPlanilla?"al colaborador":"al técnico"} para que suba su DPI y firme el contrato. Cuando firme, sube el comprobante de depósito para activarlo.</div>
         </div>
         )}
       </div>
@@ -14950,11 +15087,10 @@ function AdvAdjustPanel({adv, st, onUpdate}) {
 }
 
 function GS() {
-  var css = "@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=Montserrat:wght@300;400;500;600;700&display=swap');"
-    + "@font-face{font-family:'Valky';src:url('/fonts/Valky-Light.otf') format('opentype');font-weight:300;font-style:normal;font-display:swap;}"
-    + "@font-face{font-family:'Valky';src:url('/fonts/Valky-Regular.otf') format('opentype');font-weight:400;font-style:normal;font-display:swap;}"
-    + "@font-face{font-family:'Valky';src:url('/fonts/Valky-Semibold.otf') format('opentype');font-weight:600;font-style:normal;font-display:swap;}"
-    + "@font-face{font-family:'Valky';src:url('/fonts/Valky-Bold.otf') format('opentype');font-weight:700;font-style:normal;font-display:swap;}"
+  var css = "@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Montserrat:wght@300;400;500;600;700&display=swap');"
+    + "@font-face{font-family:'Valky';src:url('fonts/Valky-Regular.otf') format('opentype');font-weight:400;font-style:normal;font-display:swap;}"
+    + "@font-face{font-family:'Valky';src:url('fonts/Valky-Semibold.otf') format('opentype');font-weight:600;font-style:normal;font-display:swap;}"
+    + "@font-face{font-family:'Valky';src:url('fonts/Valky-Bold.otf') format('opentype');font-weight:700;font-style:normal;font-display:swap;}"
     + "*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}"
     + "body{background:#FAFAFA;font-family:'Montserrat',sans-serif;}"
     + "button,input,select,textarea{font-family:'Montserrat',sans-serif;letter-spacing:.03em;}"
@@ -14963,9 +15099,9 @@ function GS() {
     + ".rh{cursor:pointer;transition:background .15s;}"
     + ".rh:hover{background:#F5F3F0!important;}"
     + ".rh:active{background:#EFEBE6!important;}"
-    + ".f label{display:block;font-size:10px;font-weight:600;color:#938B8A;letter-spacing:.2em;text-transform:uppercase;margin-bottom:7px;}"
-    + ".f input,.f select,.f textarea{width:100%;border:1px solid #D8D4CE;border-radius:6px;padding:12px 14px;font-size:14px;color:#3E3F3F;background:#fff;outline:none;transition:border-color .2s,box-shadow .2s;-webkit-appearance:none;appearance:none;}"
-    + ".f input:focus,.f select:focus,.f textarea:focus{border-color:#938B8A;box-shadow:0 0 0 3px rgba(147,139,138,.10);}"
+    + ".f label{display:block;font-size:10px;font-weight:600;color:#6F6867;letter-spacing:.2em;text-transform:uppercase;margin-bottom:7px;}"
+    + ".f input,.f select,.f textarea{width:100%;border:1px solid #D8D4CE;border-radius:14px;padding:12px 14px;font-size:14px;color:#3E3F3F;background:#fff;outline:none;transition:border-color .2s,box-shadow .2s;-webkit-appearance:none;appearance:none;}"
+    + ".f input:focus,.f select:focus,.f textarea:focus{border-color:#3E3F3F;box-shadow:var(--sa-focus-ring);}"
     + "::-webkit-scrollbar{width:3px;}::-webkit-scrollbar-thumb{background:#D8D4CE;border-radius:3px;}"
     + "::placeholder{color:#B7B0AE;}"
     + "@media(max-width:639px){.hide-mobile{display:none!important;}.table-cols{grid-template-columns:1fr auto!important;}}"
@@ -14975,12 +15111,12 @@ function GS() {
     + "input[type=date]{min-height:44px;}"
     + "select{min-height:40px;padding-right:36px;position:relative;}"
     + "button:active{transform:scale(.98);}"
-    + ".card-hover:hover{box-shadow:0 4px 16px rgba(0,0,0,.07)!important;transform:translateY(-1px);transition:all .2s;}"
+    + ".card-hover:hover{box-shadow:var(--sa-shadow-md)!important;transform:translateY(-1px);transition:all .2s;}"
     + "input[type=date]::-webkit-calendar-picker-indicator{opacity:.5;cursor:pointer;}";
   return <style>{css}</style>;
 }
 
-function Card({title,children,accent}) { return <div style={{background:"#fff",borderRadius:8,padding:"18px",border:"1px solid "+(accent?accent:C.gray),boxShadow:"0 1px 4px rgba(0,0,0,.04)",transition:"box-shadow .2s"}}><div style={{fontSize:9,fontWeight:600,color:accent?accent:C.earth,letterSpacing:".24em",textTransform:"uppercase",marginBottom:14,paddingBottom:10,borderBottom:"1px solid "+(accent?accent+"40":C.line)}}>{title}</div>{children}</div>; }
+function Card({title,children,accent}) { return <div style={{background:"#fff",borderRadius:8,padding:"18px",border:"1px solid "+(accent?accent:C.gray),boxShadow:"var(--sa-shadow-xs)",transition:"box-shadow .2s"}}><div style={{fontSize:9,fontWeight:600,color:accent?accent:C.earth,letterSpacing:".24em",textTransform:"uppercase",marginBottom:14,paddingBottom:10,borderBottom:"1px solid "+(accent?accent+"40":C.line)}}>{title}</div>{children}</div>; }
 function F({label,children}) { return <div className="f"><label>{label}</label>{children}</div>; }
 function BigBtn({onClick,dis,children}) { return <button onClick={onClick} disabled={dis} style={{width:"100%",padding:"17px",borderRadius:6,border:"none",background:dis?C.gray:C.black,color:"#fff",fontSize:12,fontWeight:600,letterSpacing:".18em",textTransform:"uppercase",cursor:dis?"not-allowed":"pointer",transition:"all .2s",opacity:dis?.5:1,minHeight:52}}>{children}</button>; }
 function Stat({label,value,green,warn,peach,sub}) { return <div><div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:3}}>{label}</div><div style={{fontSize:20,fontWeight:600,color:peach?C.peach:green?C.green:warn?C.red:C.black}}>{value}</div>{sub&&<div style={{fontSize:10,color:C.earth,marginTop:1}}>{sub}</div>}</div>; }
@@ -15002,12 +15138,12 @@ function StatsSummary({heroLabel, heroValue, heroGreen, enCursoCount, enCursoMon
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           {enCursoMonto>0&&(
             <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",paddingRight:12,borderRight:"1px solid "+C.line}}>
-              <span style={{fontSize:8.5,fontWeight:700,color:C.peach,letterSpacing:".14em",textTransform:"uppercase",marginBottom:2}}>En curso</span>
+              <span style={{fontSize:8.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:2}}>En curso</span>
               <span style={{fontSize:15,fontWeight:700,color:C.black}}>Q{Math.round(enCursoMonto).toLocaleString()}</span>
               <span style={{fontSize:9.5,color:C.earth}}>{enCursoCount} trab. · aún no pagable</span>
             </div>
           )}
-          <button onClick={function(){setOpen(function(p){return !p;});}} style={{display:"flex",alignItems:"center",gap:6,background:open?C.black:"#fff",color:open?"#fff":C.black,border:"1.5px solid "+(open?C.black:C.gray),borderRadius:100,padding:"8px 14px",fontSize:11,fontWeight:600,cursor:"pointer",transition:"all .2s",whiteSpace:"nowrap"}}>
+          <button onClick={function(){setOpen(function(p){return !p;});}} style={{display:"flex",alignItems:"center",gap:6,background:open?C.black:"#fff",color:open?"#fff":C.black,border:"1.5px solid "+(open?C.black:C.gray),borderRadius:"var(--sa-pill)",padding:"8px 14px",fontSize:11,fontWeight:600,cursor:"pointer",transition:"all .2s",whiteSpace:"nowrap"}}>
             Desglose <Icon name="chevronDown" size={13} stroke={open?"#fff":C.black} style={{transform:open?"rotate(180deg)":"none",transition:"transform .2s"}}/>
           </button>
         </div>
@@ -15028,36 +15164,36 @@ function StatsSummary({heroLabel, heroValue, heroGreen, enCursoCount, enCursoMon
 }
 function Tile({label,value,accent}) { return <div style={{background:C.surfaceWarm,borderRadius:6,padding:"12px 14px",border:"1px solid "+C.line}}><div style={{fontSize:9,color:C.earth,fontWeight:600,letterSpacing:".18em",textTransform:"uppercase",marginBottom:5}}>{label}</div><div style={{fontSize:14,fontWeight:600,color:accent?C.taupe:C.black}}>{value}</div></div>; }
 function Overlay({onClick,children}) { return <div onClick={onClick} style={{position:"fixed",inset:0,background:"rgba(62,63,63,.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:16}}>{children}</div>; }
-function Err({msg}) { return <div style={{fontSize:12,color:C.red,background:"#F5EDEC",padding:"9px 12px",borderRadius:8,lineHeight:1.4}}>{msg}</div>; }
+function Err({msg}) { return <div style={{fontSize:12,color:C.red,background:"#F7E7E4",padding:"9px 12px",borderRadius:8,lineHeight:1.4}}>{msg}</div>; }
 function Loader() {
   const [secs, setSecs] = useState(0);
+  /* Antes de pintar, no después: con useEffect el navegador ya alcanzó a
+     dibujar los dos loaders encimados. */
+  React.useLayoutEffect(function(){
+    if(typeof window!=="undefined"&&window.__samSplashOff) window.__samSplashOff();
+  },[]);
   useEffect(function(){
     var t = setInterval(function(){setSecs(function(s){return s+1;});},1000);
     return function(){clearInterval(t);};
   },[]);
   return (
-    <div style={{height:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:C.alabaster,gap:20}}>
-      <LogoWordmark width={180}/>
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
-        <div style={{fontSize:9.5,color:C.taupe,letterSpacing:".22em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif"}}>
-          {secs<4?"Conectando con Google Sheets…":secs<8?"Esto puede tardar unos segundos…":"Verificando conexión…"}
-        </div>
-        <div style={{display:"flex",gap:6,marginTop:4}}>
-          {[0,1,2].map(function(i){return <div key={i} style={{width:6,height:6,borderRadius:"50%",background:C.earth,opacity:.4}}/>;}) }
-        </div>
-        {secs>=7&&(
-          <div style={{marginTop:12,fontSize:11,color:C.taupe,fontFamily:"Montserrat,sans-serif",textAlign:"center",maxWidth:260,lineHeight:1.7}}>
-            Primera carga puede tardar ~10 seg.<br/>
-            <span style={{fontSize:10,opacity:.7}}>El app cargará automáticamente.</span>
-          </div>
-        )}
+    <div style={{position:"fixed",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:C.alabaster,padding:24,textAlign:"center",zIndex:9998}}>
+      <img src={LOGO_WORDMARK} alt="Spacio AM" style={{width:172,maxWidth:"70vw",height:"auto",display:"block",marginBottom:30}}/>
+      <div className="sa-spin" style={{width:26,height:26,boxSizing:"border-box",borderRadius:"50%",border:"2px solid "+C.gray,borderTopColor:C.peach}}/>
+      <div style={{marginTop:22,fontSize:12,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif"}}>
+        {secs<4?"Conectando con tu información…":secs<8?"Esto puede tardar unos segundos…":"Verificando conexión…"}
       </div>
+      {secs>=7&&(
+        <div style={{marginTop:14,fontSize:12,color:C.taupe,fontFamily:"Montserrat,sans-serif",maxWidth:280,lineHeight:1.7,textWrap:"pretty"}}>
+          La primera carga puede tardar unos 10 segundos. El app se abre solo en cuanto termine.
+        </div>
+      )}
     </div>
   );
 }
 function SyncBanner({msg}) {
   return (
-    <div style={{position:"fixed",bottom:72,left:"50%",transform:"translateX(-50%)",zIndex:300,background:C.black,color:"#fff",borderRadius:100,padding:"10px 20px",fontSize:12,fontWeight:600,letterSpacing:".06em",display:"flex",alignItems:"center",gap:10,boxShadow:"0 4px 20px rgba(0,0,0,.25)",whiteSpace:"nowrap"}}>
+    <div style={{position:"fixed",bottom:72,left:"50%",transform:"translateX(-50%)",zIndex:300,background:C.black,color:"#fff",borderRadius:"var(--sa-pill)",padding:"10px 20px",fontSize:12,fontWeight:600,letterSpacing:".06em",display:"flex",alignItems:"center",gap:10,boxShadow:"var(--sa-shadow-md)",whiteSpace:"nowrap"}}>
       <div style={{width:8,height:8,borderRadius:"50%",background:C.sand,flexShrink:0}}/>
       {msg||"Sincronizando con Google…"}
     </div>
@@ -15065,13 +15201,13 @@ function SyncBanner({msg}) {
 }
 function ConfirmDel({onCancel,onConfirm}) {
   return (
-    <div style={{background:"#fff",borderRadius:8,padding:"28px 30px",maxWidth:300,textAlign:"center",boxShadow:"0 16px 48px rgba(0,0,0,.16)"}}>
+    <div style={{background:"#fff",borderRadius:8,padding:"28px 30px",maxWidth:300,textAlign:"center",boxShadow:"var(--sa-shadow-md)"}}>
       <div style={{fontSize:34,marginBottom:12}}>🗑</div>
       <div style={{fontSize:15,fontWeight:600,color:C.black,marginBottom:6}}>¿Eliminar registro?</div>
       <div style={{fontSize:13,color:C.earth,marginBottom:22,lineHeight:1.5}}>Esta acción no se puede deshacer.</div>
       <div style={{display:"flex",gap:10,justifyContent:"center"}}>
-        <button onClick={onCancel}  style={{padding:"9px 18px",borderRadius:100,border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
-        <button onClick={onConfirm} style={{padding:"9px 18px",borderRadius:100,border:"none",background:C.red,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Eliminar</button>
+        <button onClick={onCancel}  style={{padding:"9px 18px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+        <button onClick={onConfirm} style={{padding:"9px 18px",borderRadius:"var(--sa-pill)",border:"none",background:C.red,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Eliminar</button>
       </div>
     </div>
   );
@@ -15096,8 +15232,8 @@ function PicUp({label,max,photos,accent,onAdd,onDel}) {
     <div>
       <div style={{fontSize:10.5,fontWeight:700,color:accent,letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>Fotos {label} <span style={{color:C.earth,fontWeight:400,textTransform:"none",letterSpacing:0,fontSize:10}}>máx. {max}</span></div>
       <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-        {photos.map(function(src,i){ return <div key={i} style={{position:"relative",width:84,height:84,borderRadius:11,overflow:"hidden",border:"2px solid "+accent+"30"}}><img src={src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/><button onClick={function(){onDel(i);}} style={{position:"absolute",top:3,right:3,width:20,height:20,borderRadius:"50%",border:"none",background:"rgba(0,0,0,.55)",color:"#fff",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",lineHeight:1}}>×</button></div>; })}
-        {photos.length<max&&<button onClick={function(){if(ref.current)ref.current.click();}} style={{width:84,height:84,borderRadius:11,border:"2px dashed "+accent+"50",background:C.beige,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,cursor:"pointer"}}><span style={{fontSize:22,color:accent}}>+</span><span style={{fontSize:10,color:C.earth,fontWeight:600}}>Subir</span></button>}
+        {photos.map(function(src,i){ return <div key={i} style={{position:"relative",width:84,height:84,borderRadius:11,overflow:"hidden",border:"2px solid color-mix(in srgb, "+accent+" 19%, transparent)"}}><img src={src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/><button onClick={function(){onDel(i);}} style={{position:"absolute",top:3,right:3,width:20,height:20,borderRadius:"50%",border:"none",background:"rgba(0,0,0,.55)",color:"#fff",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",lineHeight:1}}>×</button></div>; })}
+        {photos.length<max&&<button onClick={function(){if(ref.current)ref.current.click();}} style={{width:84,height:84,borderRadius:11,border:"2px dashed color-mix(in srgb, "+accent+" 31%, transparent)",background:C.beige,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,cursor:"pointer"}}><span style={{fontSize:22,color:accent}}>+</span><span style={{fontSize:10,color:C.earth,fontWeight:600}}>Subir</span></button>}
       </div>
       <input ref={ref} type="file" accept="image/*" multiple style={{display:"none"}} onChange={function(e){if(e.target.files&&e.target.files.length)onAdd(e.target.files);e.target.value="";}}/>
     </div>
@@ -15346,13 +15482,13 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, casos, onSvCasos
         <div style={{display:"flex",alignItems:"start",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
           <div style={{flex:"1 1 200px"}}>
             <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>Resumen mensual de limpieza · IA</div>
-            <div style={{fontSize:10.5,color:C.taupe,marginTop:3,lineHeight:1.5}}>Se genera solo una vez al mes. Lee lo que los huéspedes escribieron en los últimos dos meses y busca temas que se repiten por área — baños, camas, cocina, polvo, olores, orden. Aparece al abrir cada técnico aquí abajo y en la pestaña Calidad del propio técnico; el dashboard muestra la visión de conjunto.</div>
+            <div style={{fontSize:12,color:C.taupe,marginTop:3,lineHeight:1.5}}>Se genera solo una vez al mes. Lee lo que los huéspedes escribieron en los últimos dos meses y busca temas que se repiten por área — baños, camas, cocina, polvo, olores, orden. Aparece al abrir cada técnico aquí abajo y en la pestaña Calidad del propio técnico; el dashboard muestra la visión de conjunto.</div>
           </div>
           {iaBusy
             ? <span style={{fontSize:11,fontWeight:700,color:C.taupe,flexShrink:0}}>Analizando…</span>
             : <button onClick={function(){genIA(false);}} style={{background:"none",border:"none",padding:0,fontSize:11,fontWeight:600,color:C.earth,cursor:"pointer",textDecoration:"underline",flexShrink:0}}>Actualizar ahora</button>}
         </div>
-        {iaMsg&&<div style={{fontSize:11.5,lineHeight:1.6,color:iaErr?C.red:C.earth,background:iaErr?"#F5EDEC":C.surfaceWarm,padding:"9px 12px",borderRadius:8}}>{iaMsg}</div>}
+        {iaMsg&&<div style={{fontSize:11.5,lineHeight:1.6,color:iaErr?C.red:C.earth,background:iaErr?"#F7E7E4":C.surfaceWarm,padding:"9px 12px",borderRadius:8}}>{iaMsg}</div>}
         {(function(){
           /* Los resúmenes se leen al expandir cada técnico, no aquí. */
           var conIA=ranked.filter(function(g){var r=iaDe(g);return r&&r.texto;});
@@ -15417,7 +15553,7 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, casos, onSvCasos
         var isOpen=open===g.value;
         var maxD=Math.max(s.dist[5],s.dist[4],s.dist[3],s.dist[2],s.dist[1],1);
         return (
-          <div key={g.value} style={{background:"#fff",border:"1.5px solid "+(i===0?"#c8dfc8":C.line),borderRadius:11,overflow:"hidden"}}>
+          <div key={g.value} style={{background:"#fff",border:"1.5px solid "+(i===0?"#CFE3D6":C.line),borderRadius:11,overflow:"hidden"}}>
             <button onClick={function(){setOpen(isOpen?null:g.value);}} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"14px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
               <span style={{width:24,fontSize:12,fontWeight:700,color:i===0?C.peach:C.taupe,flexShrink:0}}>{i+1}</span>
               <span style={{flex:1,minWidth:0}}>
@@ -15437,7 +15573,7 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, casos, onSvCasos
                     return (
                       <div key={b} style={{display:"flex",alignItems:"center",gap:9}}>
                         <span style={{fontSize:10.5,color:C.earth,width:26,flexShrink:0}}>{b} ★</span>
-                        <span style={{flex:1,background:C.beige,borderRadius:100,height:6,overflow:"hidden"}}><span style={{display:"block",width:(s.dist[b]/maxD*100)+"%",height:"100%",background:b>=4?C.green:b>=3?C.orange:C.red}}/></span>
+                        <span style={{flex:1,background:C.beige,borderRadius:"var(--sa-pill)",height:6,overflow:"hidden"}}><span style={{display:"block",width:(s.dist[b]/maxD*100)+"%",height:"100%",background:b>=4?C.green:b>=3?C.orange:C.red}}/></span>
                         <span style={{fontSize:10.5,color:C.taupe,width:20,textAlign:"right",flexShrink:0}}>{s.dist[b]}</span>
                       </div>
                     );
@@ -15470,7 +15606,7 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, casos, onSvCasos
                         {x.rv.comentario&&<div style={{fontSize:11.5,color:C.earth,lineHeight:1.6,marginTop:7,fontStyle:"italic"}}>“{String(x.rv.comentario).slice(0,260)}{String(x.rv.comentario).length>260?"…":""}”</div>}
                         {x.manual
                           ? <div style={{marginTop:8,fontSize:10.5,color:C.taupe,fontStyle:"italic"}}>Asignada manualmente — no hay limpieza registrada que enlazar</div>
-                          : <button onClick={function(){onSelect&&onSelect(x.rep);}} style={{marginTop:8,background:"none",border:"none",padding:0,fontSize:11,fontWeight:600,color:C.peach,cursor:"pointer",textDecoration:"underline"}}>Ver la limpieza del {fmtDate(x.rep.fecha)} →</button>}
+                          : <button onClick={function(){onSelect&&onSelect(x.rep);}} style={{marginTop:8,background:"none",border:"none",padding:0,fontSize:11,fontWeight:600,color:C.black,cursor:"pointer",textDecoration:"underline"}}>Ver la limpieza del {fmtDate(x.rep.fecha)} →</button>}
                       </div>
                     );
                   })}
@@ -15508,7 +15644,7 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, casos, onSvCasos
         var conNota=att.orphan.filter(function(o){return o.score!=null;});
         var oAvg=conNota.length?conNota.reduce(function(s,o){return s+o.score;},0)/conNota.length:null;
         return (
-        <div style={{background:"#fff",border:"1.5px solid #E3D5B8",borderRadius:11,overflow:"hidden"}}>
+        <div style={{background:"#fff",border:"1.5px solid #E3D5C8",borderRadius:11,overflow:"hidden"}}>
           <button onClick={function(){setOrphOpen(!orphOpen);}} style={{width:"100%",display:"flex",alignItems:"center",gap:12,padding:"13px 15px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
             <span style={{flex:1,minWidth:0}}>
               <span style={{display:"block",fontSize:13,fontWeight:700,color:C.black}}>Sin técnico asignado</span>
@@ -15553,7 +15689,7 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, casos, onSvCasos
                         <button onClick={function(){setAsgOpen(null);setAsgDest("");}} style={{padding:"8px 14px",borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
                       </div>
                     ) : (
-                      <button onClick={function(){setAsgOpen(rid);setAsgDest("");}} style={{marginTop:8,background:"none",border:"none",padding:0,fontSize:11,fontWeight:600,color:C.peach,cursor:"pointer",textDecoration:"underline"}}>Asignar a un técnico</button>
+                      <button onClick={function(){setAsgOpen(rid);setAsgDest("");}} style={{marginTop:8,background:"none",border:"none",padding:0,fontSize:11,fontWeight:600,color:C.black,cursor:"pointer",textDecoration:"underline"}}>Asignar a un técnico</button>
                     )}
                   </div>
                 );
@@ -15569,11 +15705,11 @@ function GuestRatingBoard({reviews, reps, vendors, onSvReviews, casos, onSvCasos
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
           <div style={{flex:"1 1 190px"}}>
             <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>Importar reviews de las plataformas</div>
-            <div style={{fontSize:10.5,color:C.taupe,marginTop:3,lineHeight:1.5}}>Se sincroniza solo cada noche. Este botón lo fuerza ahora mismo — no duplica. Airbnb y Booking traen la nota de limpieza por separado; las reservas directas no.</div>
+            <div style={{fontSize:12,color:C.taupe,marginTop:3,lineHeight:1.5}}>Se sincroniza solo cada noche. Este botón lo fuerza ahora mismo — no duplica. Airbnb y Booking traen la nota de limpieza por separado; las reservas directas no.</div>
           </div>
           <button onClick={function(){sync(false);}} disabled={busy} style={{padding:"10px 16px",borderRadius:9,border:"none",background:busy?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:busy?"wait":"pointer",flexShrink:0}}>{busy?"Importando…":"↻ Importar"}</button>
         </div>
-        {msg&&<div style={{fontSize:12,fontWeight:600,lineHeight:1.55,color:msg.ok?C.green:C.red,background:msg.ok?"#EDF5EF":"#F5EDEC",padding:"9px 12px",borderRadius:8}}>{msg.txt}</div>}
+        {msg&&<div style={{fontSize:12,fontWeight:600,lineHeight:1.55,color:msg.ok?C.green:C.red,background:msg.ok?"#E8F2ED":"#F7E7E4",padding:"9px 12px",borderRadius:8}}>{msg.txt}</div>}
         <button onClick={function(){setImp(!imp);}} style={{alignSelf:"flex-start",background:"none",border:"none",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",textDecoration:"underline",padding:0}}>{imp?"Ocultar carga manual":"Cargar reviews a mano (pegar tabla)"}</button>
         {imp&&<ReviewPaste reviews={reviews} onSave={function(list){onSvReviews&&onSvReviews(list);setImp(false);setMsg({ok:true,txt:"Reviews cargadas."});}}/>}
       </div>
@@ -15690,20 +15826,20 @@ function MyRatingPanel({reviews, allReps, allVendors, vendor, casos, onSvCasos, 
           </div>
 
           {(bajoStd||bajoTeam) ? (
-            <div style={{background:"#F7EFE2",border:"1px solid #E3D5B8",borderRadius:10,padding:"14px 15px"}}>
-              <div style={{fontSize:12.5,fontWeight:700,color:"#8a6320",marginBottom:6}}>Vas un poco abajo — y se puede revertir rápido</div>
-              <div style={{fontSize:11.5,color:"#7a5a20",lineHeight:1.7,textWrap:"pretty"}}>
+            <div style={{background:"#F5EBE5",border:"1px solid #E3D5C8",borderRadius:10,padding:"14px 15px"}}>
+              <div style={{fontSize:12.5,fontWeight:700,color:"#9a5020",marginBottom:6}}>Vas un poco abajo — y se puede revertir rápido</div>
+              <div style={{fontSize:11.5,color:"#9a5020",lineHeight:1.7,textWrap:"pretty"}}>
                 Una sola nota baja pesa mucho cuando hay pocas reviews, así que tres o cuatro limpiezas impecables mueven el promedio de inmediato. Nadie te está midiendo por una mala noche: lo que cuenta es la tendencia.
               </div>
-              <div style={{fontSize:11.5,color:"#7a5a20",lineHeight:1.7,marginTop:9}}>
+              <div style={{fontSize:11.5,color:"#9a5020",lineHeight:1.7,marginTop:9}}>
                 <b>Para esta semana:</b> {tip}
               </div>
-              <div style={{fontSize:11.5,color:"#7a5a20",lineHeight:1.7,marginTop:6}}>
+              <div style={{fontSize:11.5,color:"#9a5020",lineHeight:1.7,marginTop:6}}>
                 Y si alguna de estas notas no te corresponde —la propiedad ya estaba así, hubo un daño previo, la limpió alguien más— pídela a revisión abajo. Se evalúa caso por caso.
               </div>
             </div>
           ) : (
-            <div style={{background:"#EDF5EF",border:"1px solid #C8DFC8",borderRadius:10,padding:"13px 15px",fontSize:12,color:C.green,fontWeight:600,lineHeight:1.6}}>
+            <div style={{background:"#E8F2ED",border:"1px solid #CFE3D6",borderRadius:10,padding:"13px 15px",fontSize:12,color:C.green,fontWeight:600,lineHeight:1.6}}>
               Vas en el estándar de la marca. Gracias — se nota en lo que escriben los huéspedes.
             </div>
           )}
@@ -15715,7 +15851,7 @@ function MyRatingPanel({reviews, allReps, allVendors, vendor, casos, onSvCasos, 
             </div>
           )}
 
-          {msg&&<div style={{fontSize:12,fontWeight:600,lineHeight:1.55,color:msg.ok?C.green:C.red,background:msg.ok?"#EDF5EF":"#F5EDEC",padding:"9px 12px",borderRadius:8}}>{msg.txt}</div>}
+          {msg&&<div style={{fontSize:12,fontWeight:600,lineHeight:1.55,color:msg.ok?C.green:C.red,background:msg.ok?"#E8F2ED":"#F7E7E4",padding:"9px 12px",borderRadius:8}}>{msg.txt}</div>}
 
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             <div style={{fontSize:10,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase"}}>Las reviews que forman mi nota</div>
@@ -15746,7 +15882,7 @@ function MyRatingPanel({reviews, allReps, allVendors, vendor, casos, onSvCasos, 
                       <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
                         {[["eliminacion","Esta nota no me corresponde"],["aclaracion","Quiero dejar una aclaración"]].map(function(o){
                           var act=tipo===o[0];
-                          return <button key={o[0]} onClick={function(){setTipo(o[0]);}} style={{padding:"7px 12px",borderRadius:100,border:"1px solid "+(act?C.black:C.gray),background:act?C.black:"#fff",color:act?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{o[1]}</button>;
+                          return <button key={o[0]} onClick={function(){setTipo(o[0]);}} style={{padding:"0 15px",borderRadius:"var(--sa-pill)",minHeight:44,border:"1.5px solid "+(act?C.black:C.gray),background:act?C.black:"#fff",color:act?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{o[1]}</button>;
                         })}
                       </div>
                       <textarea value={motivo} onChange={function(e){setMotivo(e.target.value);}} rows={3} placeholder="Explica qué pasó. Ej: el huésped anterior dejó un daño en el sofá que no se podía limpiar, ya estaba reportado."
@@ -15757,7 +15893,7 @@ function MyRatingPanel({reviews, allReps, allVendors, vendor, casos, onSvCasos, 
                       </div>
                     </div>
                   ) : (
-                    <button onClick={function(){setOpenReq(String(x.rv.id));setMotivo("");setMsg(null);}} style={{marginTop:8,background:"none",border:"none",padding:0,fontSize:11,fontWeight:600,color:C.peach,cursor:"pointer",textDecoration:"underline"}}>Solicitar revisión de esta calificación</button>
+                    <button onClick={function(){setOpenReq(String(x.rv.id));setMotivo("");setMsg(null);}} style={{marginTop:8,background:"none",border:"none",padding:0,fontSize:11,fontWeight:600,color:C.black,cursor:"pointer",textDecoration:"underline"}}>Solicitar revisión de esta calificación</button>
                   )}
                 </div>
               );
@@ -15842,13 +15978,13 @@ function RatingCasesPanel({casos, onSvCasos, reps, vendors, me}) {
   if(!(casos||[]).length) return null;
 
   return (
-    <div style={{background:"#fff",border:"1.5px solid "+(pend.length?"#E3D5B8":C.line),borderRadius:11,padding:"14px 16px",display:"flex",flexDirection:"column",gap:11}}>
+    <div style={{background:"#fff",border:"1.5px solid "+(pend.length?"#E3D5C8":C.line),borderRadius:11,padding:"14px 16px",display:"flex",flexDirection:"column",gap:11}}>
       <div>
         <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>Solicitudes de revisión {pend.length>0&&<span style={{color:C.orange}}>({pend.length} pendiente{pend.length===1?"":"s"})</span>}</div>
-        <div style={{fontSize:10.5,color:C.taupe,marginTop:3,lineHeight:1.55}}>Un técnico pidió revisar una calificación. Puedes excluirla de su promedio, reasignarla a quien sí hizo la limpieza, o mantenerla. La review nunca se borra de la base.</div>
+        <div style={{fontSize:12,color:C.taupe,marginTop:3,lineHeight:1.55}}>Un técnico pidió revisar una calificación. Puedes excluirla de su promedio, reasignarla a quien sí hizo la limpieza, o mantenerla. La review nunca se borra de la base.</div>
       </div>
 
-      {pend.length===0&&<div style={{fontSize:12,color:C.green,fontWeight:600,background:"#EDF5EF",borderRadius:8,padding:"9px 12px"}}>✓ Sin solicitudes pendientes.</div>}
+      {pend.length===0&&<div style={{fontSize:12,color:C.green,fontWeight:600,background:"#E8F2ED",borderRadius:8,padding:"9px 12px"}}>✓ Sin solicitudes pendientes.</div>}
 
       {pend.map(function(c){
         var abierto=open===c.id;
@@ -15876,7 +16012,7 @@ function RatingCasesPanel({casos, onSvCasos, reps, vendors, me}) {
                 <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
                   {[["excluida","No cuenta para el promedio"],["reasignada","Reasignar a otro técnico"],["rechazada","Mantener la calificación"]].map(function(o){
                     var act=accion===o[0];
-                    return <button key={o[0]} onClick={function(){setAccion(o[0]);}} style={{padding:"7px 12px",borderRadius:100,border:"1px solid "+(act?C.black:C.gray),background:act?C.black:"#fff",color:act?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{o[1]}</button>;
+                    return <button key={o[0]} onClick={function(){setAccion(o[0]);}} style={{padding:"0 15px",borderRadius:"var(--sa-pill)",minHeight:44,border:"1.5px solid "+(act?C.black:C.gray),background:act?C.black:"#fff",color:act?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{o[1]}</button>;
                   })}
                 </div>
                 {accion==="reasignada"&&(
@@ -16041,7 +16177,7 @@ function RatingDashCard({reviews, reps, vendors, rvCasos, soloGrupo, rvIA, propF
       {abierto&&(
         <>
           {pend>0&&(
-            <div style={{background:"#F7EFE2",border:"1px solid #E3D5B8",borderRadius:9,padding:"10px 13px",fontSize:11.5,fontWeight:700,color:"#8a6320"}}>
+            <div style={{background:"#F5EBE5",border:"1px solid #E3D5C8",borderRadius:9,padding:"10px 13px",fontSize:11.5,fontWeight:700,color:"#9a5020"}}>
               {pend} solicitud{pend===1?"":"es"} de revisión por atender en Calidad › Rating huéspedes
             </div>
           )}
@@ -16065,8 +16201,8 @@ function RatingDashCard({reviews, reps, vendors, rvCasos, soloGrupo, rvIA, propF
                       <span style={{fontSize:10,color:C.taupe,flexShrink:0}}>{s.n} review{s.n===1?"":"s"}</span>
                       <span style={{fontSize:13.5,fontWeight:700,color:rvColor(v),flexShrink:0,width:40,textAlign:"right"}}>{v.toFixed(2)}</span>
                     </div>
-                    <div style={{position:"relative",height:10,background:C.beige,borderRadius:100}}>
-                      <div style={{position:"absolute",left:0,top:0,bottom:0,width:pct+"%",background:rvColor(v),borderRadius:100,transition:"width .36s cubic-bezier(.22,.61,.36,1)"}}/>
+                    <div style={{position:"relative",height:10,background:C.beige,borderRadius:"var(--sa-pill)"}}>
+                      <div style={{position:"absolute",left:0,top:0,bottom:0,width:pct+"%",background:rvColor(v),borderRadius:"var(--sa-pill)",transition:"width .36s cubic-bezier(.22,.61,.36,1)"}}/>
                       <div style={{position:"absolute",left:avgPct+"%",top:-2,bottom:-2,width:1,background:"rgba(62,63,63,.28)"}}/>
                       <div style={{position:"absolute",left:stdPct+"%",top:-3,bottom:-3,width:2,background:C.black,borderRadius:2}}/>
                     </div>
@@ -16083,7 +16219,7 @@ function RatingDashCard({reviews, reps, vendors, rvCasos, soloGrupo, rvIA, propF
           )}
 
           {!uno&&bajos.length>0&&(
-            <div style={{background:"#F7EFE2",border:"1px solid #E3D5B8",borderRadius:9,padding:"11px 13px",fontSize:11.5,color:"#7a5a20",lineHeight:1.65,textWrap:"pretty"}}>
+            <div style={{background:"#F5EBE5",border:"1px solid #E3D5C8",borderRadius:9,padding:"11px 13px",fontSize:11.5,color:"#9a5020",lineHeight:1.65,textWrap:"pretty"}}>
               <b>{bajos.map(function(g){return g.label;}).join(", ")}</b> {bajos.length===1?"está":"están"} por debajo del estándar {RV_STD.toFixed(2)}. En Calidad › Rating huéspedes puedes ver review por review qué mencionó cada huésped.
             </div>
           )}
@@ -16091,9 +16227,9 @@ function RatingDashCard({reviews, reps, vendors, rvCasos, soloGrupo, rvIA, propF
       )}
 
       <div style={{display:"flex",justifyContent:"center",borderTop:"1px solid "+C.line,paddingTop:11,marginTop:-1}}>
-        <button onClick={function(){setAbierto(!abierto);}} style={{display:"flex",alignItems:"center",gap:7,background:"none",border:"1px solid "+C.gray,borderRadius:100,padding:"6px 15px",fontSize:10.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.earth,cursor:"pointer",fontFamily:"Montserrat,sans-serif",transition:"opacity .18s"}}>
+        <button onClick={function(){setAbierto(!abierto);}} style={{display:"flex",alignItems:"center",gap:7,background:"none",border:"1px solid "+C.gray,borderRadius:"var(--sa-pill)",padding:"6px 15px",fontSize:10.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.earth,cursor:"pointer",fontFamily:"Montserrat,sans-serif",transition:"opacity .18s"}}>
           {abierto?"Ver menos":"Ver detalle"}
-          {pend>0&&!abierto&&<span style={{width:6,height:6,borderRadius:100,background:C.orange}}/>}
+          {pend>0&&!abierto&&<span style={{width:6,height:6,borderRadius:"var(--sa-pill)",background:C.orange}}/>}
           <span style={{fontSize:9}}>{abierto?"▴":"▾"}</span>
         </button>
       </div>
@@ -16160,7 +16296,7 @@ function MyRatingMini({reviews, allReps, vendor, rvCasos, rvIA, onGoCalidad}) {
         </div>
       )}
 
-      <button onClick={onGoCalidad} style={{alignSelf:"flex-start",background:"none",border:"none",padding:0,fontSize:11.5,fontWeight:700,color:C.peach,cursor:"pointer",textDecoration:"underline"}}>Ver el detalle en Calidad →</button>
+      <button onClick={onGoCalidad} style={{alignSelf:"flex-start",background:"none",border:"none",padding:0,fontSize:11.5,fontWeight:700,color:C.black,cursor:"pointer",textDecoration:"underline"}}>Ver el detalle en Calidad →</button>
     </div>
   );
 }
@@ -16229,7 +16365,7 @@ function ReviewPaste({reviews, onSave}) {
     <div style={{display:"flex",flexDirection:"column",gap:9,borderTop:"1px solid "+C.line,paddingTop:11}}>
       <div style={{fontSize:11,color:C.earth,lineHeight:1.6}}>Pega una tabla con encabezados. Columnas mínimas: <b>Propiedad · Check-in · Limpieza</b>. Opcionales: General, Huésped, Plataforma, Comentario.</div>
       <textarea value={raw} onChange={function(e){setRaw(e.target.value);parse(e.target.value);}} placeholder={"Propiedad\tCheck-in\tLimpieza\tPlataforma\tComentario"} rows={5} style={{width:"100%",border:"1px solid "+C.gray,borderRadius:8,padding:"9px 11px",fontSize:11.5,fontFamily:"ui-monospace,monospace",outline:"none",resize:"vertical",boxSizing:"border-box"}}/>
-      {err&&<div style={{fontSize:11.5,color:C.red,background:"#F5EDEC",padding:"8px 11px",borderRadius:7,lineHeight:1.5}}>{err}</div>}
+      {err&&<div style={{fontSize:11.5,color:C.red,background:"#F7E7E4",padding:"8px 11px",borderRadius:7,lineHeight:1.5}}>{err}</div>}
       {prev&&(
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           <div style={{fontSize:11.5,fontWeight:600,color:C.green}}>✓ {prev.length} review{prev.length===1?"":"s"} lista{prev.length===1?"":"s"} para cargar</div>
@@ -16244,11 +16380,373 @@ function ReviewPaste({reviews, onSave}) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   COMPARATIVO DE TÉCNICOS · ÚLTIMAS 8 SEMANAS — Dashboard Ejecutivo
+   PARETO — un patrón, dos preguntas.
+   Ordena de mayor a menor y encima dibuja el acumulado: se ve de un golpe
+   cuántas propiedades concentran la mayor parte del problema. Donde la línea
+   cruza el 80% termina "lo que de verdad mueve la aguja".
    ═══════════════════════════════════════════════════════════════════════════ */
-var TC_PAL = ["#3E3F3F","#E9826A","#3d6b52","#938B8A","#9a5020","#5a4a7a","#4a5a7a","#8a3030"];
+function ParetoChart({rows, unidad, colorTop}){
+  if(!rows||!rows.length) return null;
+  var total = rows.reduce(function(a,r){return a+r.v;},0);
+  var acc = 0;
+  var data = rows.map(function(r){
+    acc += r.v;
+    return {name:r.name, corto:String(r.name).length>13?String(r.name).slice(0,12)+"…":r.name,
+            v:r.v, pct: total? Math.round(acc/total*1000)/10 : 0};
+  });
+  var corte = data.findIndex(function(d){return d.pct>=80;});
+  return (
+    <div>
+      <ResponsiveContainer width="100%" height={230}>
+        <ComposedChart data={data} margin={{top:8,right:10,left:-18,bottom:0}}>
+          <CartesianGrid strokeDasharray="3 3" stroke={C.gray} vertical={false}/>
+          <XAxis dataKey="corto" tick={{fontSize:9.5,fill:C.earth}} axisLine={false} tickLine={false} interval={0} angle={-32} textAnchor="end" height={54}/>
+          <YAxis yAxisId="l" tick={{fontSize:10,fill:C.earth}} axisLine={false} tickLine={false}/>
+          <YAxis yAxisId="r" orientation="right" domain={[0,100]} tick={{fontSize:10,fill:C.taupe}} axisLine={false} tickLine={false} width={34} tickFormatter={function(v){return v+"%";}}/>
+          <Tooltip contentStyle={{borderRadius:8,fontSize:12,border:"1px solid "+C.gray}}
+            formatter={function(v,k){ return k==="pct" ? [v+"%","Acumulado"] : [v+" "+unidad,"Cantidad"]; }}
+            labelFormatter={function(l,p){ return (p&&p[0]&&p[0].payload.name)||l; }}/>
+          <Bar yAxisId="l" dataKey="v" radius={[4,4,0,0]}>
+            {data.map(function(d,i){ return <Cell key={i} fill={(corte<0||i<=corte)?(colorTop||C.peach):C.earth}/>; })}
+          </Bar>
+          <Line yAxisId="r" type="monotone" dataKey="pct" stroke={C.black} strokeWidth={1.5} dot={{r:2.5,fill:C.black}}/>
+        </ComposedChart>
+      </ResponsiveContainer>
+      <div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6,marginTop:6,textWrap:"pretty"}}>
+        {corte===0
+          ? <span>Una sola concentra el 80% del total — <b style={{color:C.black}}>{data[0].name}</b>.</span>
+          : corte>0
+            ? <span>Las primeras <b style={{color:C.black}}>{corte+1}</b> concentran el 80% del total.</span>
+            : <span>El total está repartido de forma parecida entre todas.</span>}
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Propiedades con más tiempo sin limpieza profunda ═══
+   El motor ya sabe excluir las pausadas y las que tienen las profundas
+   quitadas en la configuración, así que este bloque usa su mismo cálculo: la
+   configuración manda y la regla no se duplica aquí. */
+function ProfundasAnalisis({reps, props, schedules}){
+  const [abierto,setAbierto] = useState(true);
+  var hoy = SCHED.hoyGT();
+  var estado = [];
+  try{
+    estado = SCHED.estadoProfundas({
+      hoy:hoy, props:props||[],
+      historial:(reps||[]).map(function(r){ return {propiedad:r.propiedad, tipo:r.categoria, fecha:r.fecha}; }),
+      programadas:schedules||[]
+    });
+  }catch(_){ estado=[]; }
+
+  /* Las que nunca registraron una profunda no entran al pareto: no tienen días
+     de atraso que sumar, y meterlas con un número inventado falsearía la línea
+     acumulada. Van aparte, que es donde además se leen mejor. */
+  var sinRegistro = estado.filter(function(e){ return e.diasDesde==null; });
+  var conAtraso   = estado.filter(function(e){ return e.diasDesde!=null && e.atrasoDias>0; })
+                          .sort(function(a,b){ return b.atrasoDias-a.atrasoDias; });
+  /* La gráfica solo dibuja las 12 peores —más barras no se leen—, pero el
+     contador del encabezado cuenta TODAS: si dijera 12 con 20 atrasadas,
+     estaría escondiendo el problema justo donde se va a mirar primero. */
+  var rows = conAtraso.slice(0,12).map(function(e){ return {name:e.propiedad, v:e.atrasoDias}; });
+
+  if(!estado.length) return null;
+
+  return (
+    <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.line,padding:"18px",marginTop:24}}>
+      <button onClick={function(){setAbierto(function(x){return !x;});}} style={{width:"100%",display:"flex",alignItems:"start",justifyContent:"space-between",gap:12,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left",fontFamily:"Montserrat,sans-serif"}}>
+        <div>
+          <div style={{fontSize:10.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Limpiezas profundas</div>
+          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:20,fontWeight:400,color:C.black,marginTop:5}}>Las que llevan más tiempo sin una</div>
+        </div>
+        <span style={{display:"flex",alignItems:"center",gap:9,flexShrink:0,paddingTop:3}}>
+          {conAtraso.length>0&&<span style={{fontSize:11,fontWeight:700,color:C.attentionText,background:"#F8ECE9",padding:"3px 10px",borderRadius:"var(--sa-pill)",whiteSpace:"nowrap"}}>{conAtraso.length} atrasada{conAtraso.length===1?"":"s"}</span>}
+          <span style={{display:"inline-flex",transform:abierto?"rotate(180deg)":"none",transition:"transform .36s cubic-bezier(.22,.61,.36,1)"}}><Icon name="chevronDown" size={16} stroke={C.earth}/></span>
+        </span>
+      </button>
+
+      {abierto&&(
+        <div style={{marginTop:16}}>
+          {rows.length>0
+            ? <div>
+                <ParetoChart rows={rows} unidad="días de atraso"/>
+                {conAtraso.length>rows.length&&<div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6,marginTop:4}}>La gráfica muestra las 12 más atrasadas de {conAtraso.length}.</div>}
+              </div>
+            : <div style={{background:C.surfaceWarm,borderRadius:10,padding:"18px 16px",textAlign:"center",fontSize:12.5,color:C.earth,lineHeight:1.6}}>Ninguna propiedad va atrasada con su profunda. Así se ve cuando el motor está al día.</div>}
+
+          {sinRegistro.length>0&&(
+            <div style={{marginTop:16,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"13px 15px"}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Sin ninguna profunda registrada</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {sinRegistro.map(function(e){
+                  return <span key={e.propiedad} style={{fontSize:11.5,fontWeight:600,color:C.black,background:"#fff",border:"1px solid "+C.gray,borderRadius:"var(--sa-pill)",padding:"5px 11px"}}>{e.propiedad}</span>;
+                })}
+              </div>
+              <div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6,marginTop:9,textWrap:"pretty"}}>No aparecen en la gráfica porque no hay una fecha desde la que contar: puede que nunca se les haya hecho, o que la primera no se registró.</div>
+            </div>
+          )}
+
+          <div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6,marginTop:14,textWrap:"pretty",borderTop:"1px solid "+C.line,paddingTop:12}}>
+            Quedan fuera las propiedades en pausa y las que tienen las profundas quitadas en <b>Configuración › Reglas por propiedad</b>. Si una no debería estar aquí, ahí se ajusta.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══ Daños reportados — el pareto y la programación en el mismo lugar ═══
+   El pareto contesta "dónde se rompe más". Al tocar una propiedad se abre la
+   lista de sus daños abiertos y se puede mandar UN mantenimiento que cubra
+   varios a la vez: antes había que entrar daño por daño y el técnico recibía un
+   correo por cada uno para el mismo apartamento. */
+function DanosAnalisis({reps, props, vendors, reservas, schedules, onSvSchedules, onUpsert}){
+  const [abierto,setAbierto] = useState(true);
+  const [sel,setSel]         = useState("");
+  const [items,setItems]     = useState({});
+  const [tec,setTec]         = useState("");
+  const [fecha,setFecha]     = useState("");
+  const [nota,setNota]       = useState("");
+  const [enviado,setEnviado] = useState("");
+  var hoy = SCHED.hoyGT();
+
+  /* Un daño está abierto mientras siga en "Pendiente" y nadie le haya montado
+     una reparación. Mismo criterio que la alerta del encabezado. */
+  function abiertoDano(r){
+    if(!r || !isDanos(r.categoria)) return false;
+    if((r.dmgStatus||"pendiente")!=="pendiente") return false;
+    if(r.mantProgramado) return false;
+    return !(schedules||[]).some(function(x){ return x && String(x.danoId||"")===String(r.id) && x.estado!=="cancelada"; });
+  }
+
+  var porProp = {};
+  (reps||[]).forEach(function(r){
+    if(!abiertoDano(r) || !r.propiedad) return;
+    if(!porProp[r.propiedad]) porProp[r.propiedad]=[];
+    /* Un reporte puede traer varios daños; cada uno cuenta por separado. */
+    var ds = (r.danios&&r.danios.length)?r.danios:[{desc:r.descripcion||"Daño reportado"}];
+    ds.forEach(function(d,idx){ porProp[r.propiedad].push({rep:r, idx:idx, d:d||{}}); });
+  });
+
+  var todas = Object.keys(porProp).map(function(p){ return {name:p, v:porProp[p].length}; })
+    .sort(function(a,b){ return b.v-a.v; });
+  var totalAbiertos = todas.reduce(function(a,r){return a+r.v;},0);
+  var ranking = todas.slice(0,12);
+
+  var lista = sel ? (porProp[sel]||[]) : [];
+  var marcados = lista.filter(function(it){ return items[it.rep.id+":"+it.idx]; });
+
+  var mants = (vendors||[]).filter(function(v){
+    if(!v||!v.email||v.active===false) return false;
+    if(v.tipo==="externo") return true;
+    return String(v.categoria||"").toLowerCase().indexOf("mantenimiento")>=0;
+  });
+
+  /* Las próximas cinco salidas de esa propiedad: reparar el día que sale un
+     huésped es lo que menos estorba. El admin puede escribir otra fecha. */
+  function salidasDe(p){
+    var out=(reservas||[]).filter(function(r){
+      return r && normalize(r.propiedad||"")===normalize(p||"") && String(r.checkOut||"").slice(0,10)>=hoy;
+    }).map(function(r){ return String(r.checkOut).slice(0,10); }).sort();
+    return out.filter(function(f,i){ return out.indexOf(f)===i; }).slice(0,5);
+  }
+  var salidas = salidasDe(sel);
+
+  function elegir(p){
+    var nuevo = (p===sel) ? "" : p;
+    setSel(nuevo); setItems({}); setTec(""); setNota(""); setEnviado("");
+    setFecha(nuevo ? (salidasDe(nuevo)[0]||"") : "");
+  }
+
+  function programar(){
+    var v=mants.find(function(x){ return String(x.email||"").toLowerCase()===tec; });
+    if(!v||!fecha||!marcados.length) return;
+    var p=propParts(sel);
+    var pObj=(props||[]).find(function(x){ return x.name===sel; })||{};
+    var tocados=[];
+    marcados.forEach(function(it){ if(tocados.indexOf(it.rep)<0) tocados.push(it.rep); });
+    var resumen=marcados.map(function(it,i){
+      var d=it.d||{};
+      return (i+1)+". "+(d.pieza?d.pieza+" — ":"")+(d.desc||"Daño")+(d.reparacion?" · reparación sugerida: "+d.reparacion:"");
+    }).join("\n");
+    /* UNA sola visita, aunque cubra varios daños: el técnico va una vez. */
+    var sc={
+      id:"sc_mant_"+Date.now(), key:fecha+"|"+normalize(sel)+"|mant",
+      fecha:fecha, hora:SCHED.HORA_INI, horaFin:SCHED.HORA_FIN,
+      propiedad:sel, zona:p.zona, edificio:p.edificio, unidad:p.unidad,
+      habitaciones:parseInt(pObj.cuartos,10)||1, tipo:"Mantenimiento",
+      entradaHoy:false, codigoAcceso:pObj.codigoAcceso||"",
+      vendorId:v.id, vendorEmail:String(v.email||"").toLowerCase(),
+      orden:1, estado:"confirmada", origen:"manual", danoId:String(tocados[0].id),
+      motivo: marcados.length>1 ? ("reparación de "+marcados.length+" daños reportados") : "reparación de daño reportado",
+      generadoEn:hoy, notificadoEn:hoy
+    };
+    onSvSchedules&&onSvSchedules((schedules||[]).concat([sc]));
+    try{
+      notifyTemplate([v.notifEmail||v.email], "mantenimientoProgramado", {
+        tecnico: vendorDisplay(v), propiedad: sel,
+        fecha: fmtDate(fecha), dia: schedDiaNombre(fecha), hora: SCHED.HORA_INI+" a "+SCHED.HORA_FIN,
+        reportadoEl: fmtDate(tocados[0].fecha),
+        total: String(marcados.length),
+        dano: resumen, nota: nota||"",
+        url: (typeof location!=="undefined"? location.origin+location.pathname : "")+"?rep="+encodeURIComponent(tocados[0].id)
+      });
+    }catch(_){}
+    /* Cada reporte tocado queda marcado, para que no vuelva a salir como
+       abierto ni aquí ni en la alerta del encabezado. */
+    tocados.forEach(function(r){
+      onUpsert&&onUpsert(Object.assign({},r,{mantProgramado:{fecha:fecha, email:String(v.email||"").toLowerCase(), nombre:vendorDisplay(v), programadoEn:hoy, nota:nota||""}}));
+    });
+    setEnviado(vendorDisplay(v)+" · "+fmtDate(fecha)+" · "+marcados.length+" daño"+(marcados.length===1?"":"s"));
+    setSel(""); setItems({});
+  }
+
+  var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6};
+  var IN={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:14,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44,color:C.black};
+  var listo = !!(tec&&fecha&&marcados.length);
+
+  if(!ranking.length&&!enviado) return null;
+
+  return (
+    <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.line,padding:"18px",marginTop:24}}>
+      <button onClick={function(){setAbierto(function(x){return !x;});}} style={{width:"100%",display:"flex",alignItems:"start",justifyContent:"space-between",gap:12,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left",fontFamily:"Montserrat,sans-serif"}}>
+        <div>
+          <div style={{fontSize:10.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Daños reportados</div>
+          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:20,fontWeight:400,color:C.black,marginTop:5}}>Dónde se rompe más</div>
+        </div>
+        <span style={{display:"flex",alignItems:"center",gap:9,flexShrink:0,paddingTop:3}}>
+          {ranking.length>0&&<span style={{fontSize:11,fontWeight:700,color:C.red,background:"#F7E7E4",padding:"3px 10px",borderRadius:"var(--sa-pill)",whiteSpace:"nowrap"}}>{totalAbiertos} abiertos</span>}
+          <span style={{display:"inline-flex",transform:abierto?"rotate(180deg)":"none",transition:"transform .36s cubic-bezier(.22,.61,.36,1)"}}><Icon name="chevronDown" size={16} stroke={C.earth}/></span>
+        </span>
+      </button>
+
+      {abierto&&(
+        <div style={{marginTop:16}}>
+          {enviado&&<div style={{background:"#E8F2ED",border:"1px solid #CFE3D6",borderRadius:10,padding:"11px 14px",marginBottom:14,fontSize:12,color:C.green,fontWeight:600,lineHeight:1.6}}>Mantenimiento programado — {enviado}. El técnico ya recibió el correo con la lista de lo que va a reparar.</div>}
+
+          {ranking.length>0&&<ParetoChart rows={ranking} unidad="daños abiertos" colorTop={C.red}/>}
+          {todas.length>ranking.length&&<div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6,marginTop:4}}>La gráfica muestra las 12 propiedades con más daños abiertos, de {todas.length}.</div>}
+
+          {ranking.length>0&&(
+            <div style={{marginTop:16,borderTop:"1px solid "+C.line,paddingTop:14}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:9}}>Toca una propiedad para programar la reparación</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {todas.map(function(r){
+                  var act=sel===r.name;
+                  return <button key={r.name} onClick={function(){elegir(r.name);}} style={{padding:"0 14px",minHeight:40,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(act?C.black:C.line),background:act?C.black:"#fff",color:act?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{r.name} · {r.v}</button>;
+                })}
+              </div>
+            </div>
+          )}
+
+          {sel&&(
+            <div style={{marginTop:14,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"15px",display:"flex",flexDirection:"column",gap:14}}>
+              <div>
+                <span style={LBL}>Qué se va a reparar</span>
+                <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                  {lista.map(function(it){
+                    var k=it.rep.id+":"+it.idx, on=!!items[k];
+                    return (
+                      <button key={k} onClick={function(){setItems(function(x){var nx=Object.assign({},x); if(nx[k]) delete nx[k]; else nx[k]=true; return nx;});}} style={{display:"flex",alignItems:"start",gap:10,textAlign:"left",background:on?"#fff":"transparent",border:"1.5px solid "+(on?C.black:C.gray),borderRadius:10,padding:"10px 12px",cursor:"pointer",fontFamily:"Montserrat,sans-serif",minHeight:44}}>
+                        <span style={{flexShrink:0,width:17,height:17,borderRadius:5,border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",display:"flex",alignItems:"center",justifyContent:"center",marginTop:1}}>{on&&<Icon name="check" size={11} stroke="#fff"/>}</span>
+                        <span style={{minWidth:0}}>
+                          {it.d.pieza&&<span style={{display:"block",fontSize:10,fontWeight:700,color:C.attentionText,letterSpacing:".1em",textTransform:"uppercase",marginBottom:3}}>{it.d.pieza}</span>}
+                          <span style={{display:"block",fontSize:12.5,fontWeight:600,color:C.black,lineHeight:1.5}}>{it.d.desc||"Daño reportado"}</span>
+                          <span style={{display:"block",fontSize:11,color:C.taupe,marginTop:3}}>Reportado el {fmtDate(it.rep.fecha)}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <span style={LBL}>Técnico</span>
+                <select value={tec} onChange={function(e){setTec(e.target.value);}} style={IN}>
+                  <option value="">Escoge quién lo repara</option>
+                  {mants.map(function(v){ return <option key={v.email} value={String(v.email).toLowerCase()}>{vendorDisplay(v)}</option>; })}
+                </select>
+              </div>
+              <div>
+                <span style={LBL}>Fecha</span>
+                {salidas.length>0&&(
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:9}}>
+                    {salidas.map(function(f){
+                      var act=fecha===f;
+                      return <button key={f} onClick={function(){setFecha(f);}} style={{padding:"0 13px",minHeight:40,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(act?C.black:C.gray),background:act?C.black:"#fff",color:act?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{fmtDate(f)}</button>;
+                    })}
+                  </div>
+                )}
+                <input type="date" value={fecha||""} min={hoy} onChange={function(e){setFecha(e.target.value);}} style={IN}/>
+                <div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6,marginTop:6,textWrap:"pretty"}}>{salidas.length>0?"Las fechas sugeridas son los próximos checkouts de esta propiedad: reparar el día que sale un huésped es lo que menos estorba. Puedes escribir otra.":"No hay checkouts próximos registrados para esta propiedad, así que escoge la fecha a mano."}</div>
+              </div>
+              <div>
+                <span style={LBL}>Nota para el técnico <span style={{fontWeight:600,letterSpacing:".04em",textTransform:"none",color:C.taupe}}>· opcional</span></span>
+                <textarea rows={2} value={nota} onChange={function(e){setNota(e.target.value);}} placeholder="Lleva repuesto, el portón abre hasta las 8…" style={Object.assign({},IN,{resize:"vertical",lineHeight:1.6})}/>
+              </div>
+              <button disabled={!listo} onClick={programar} style={{width:"100%",padding:"14px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:listo?C.black:C.gray,color:listo?"#fff":C.taupe,fontSize:13,fontWeight:700,cursor:listo?"pointer":"not-allowed",fontFamily:"Montserrat,sans-serif"}}>
+                {marcados.length?("Programar y avisar al técnico · "+marcados.length+" daño"+(marcados.length===1?"":"s")):"Escoge al menos un daño"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   COMPARATIVO DE TÉCNICOS — Dashboard Ejecutivo
+   ═══════════════════════════════════════════════════════════════════════════ */
+var TC_PAL = ["#3E3F3F","#E9826A","#3d6b52","#938B8A","#9a5020","#5a4a7a","#4a5a7a","#C0392B"];
+/* Rangos rápidos del comparativo. El default sigue siendo 8 semanas; los demás
+   existen porque "¿cómo venimos este año?" y "¿cómo fue la semana pasada?" son
+   preguntas distintas y antes solo se podía contestar una. */
+var TC_RANGOS = [
+  {k:"w1",  label:"Última semana",  semanas:1},
+  {k:"w4",  label:"Últimas 4 sem.", semanas:4},
+  {k:"w8",  label:"Últimas 8 sem.", semanas:8},
+  {k:"w13", label:"Último trimestre", semanas:13},
+  {k:"mes", label:"Último mes",     mes:true},
+  {k:"anio",label:"Todo el año",    anio:true},
+  {k:"cust",label:"Fechas exactas", custom:true},
+];
+/* Semanas de lunes a domingo que cubren un rango. */
+function tcSemanas(from, to){
+  var d=new Date(from+"T12:00:00");
+  d.setDate(d.getDate()-((d.getDay()+6)%7));
+  var out=[], guard=0;
+  while(guard++<120){
+    var e=new Date(d); e.setDate(d.getDate()+6);
+    var f0=d.toISOString().slice(0,10);
+    if(f0>to) break;
+    out.push({from:f0, to:e.toISOString().slice(0,10),
+      label:("0"+d.getDate()).slice(-2)+"/"+("0"+(d.getMonth()+1)).slice(-2)});
+    d.setDate(d.getDate()+7);
+  }
+  return out.length?out:[{from:from,to:to,label:fmtDate(from)}];
+}
+function tcRango(k, cFrom, cTo){
+  var hoy=SCHED.hoyGT();
+  var def=TC_RANGOS.find(function(x){return x.k===k;})||TC_RANGOS[2];
+  if(def.custom) return {from:cFrom||hoy, to:cTo||hoy, label:"Fechas exactas"};
+  if(def.anio)   return {from:hoy.slice(0,4)+"-01-01", to:hoy, label:def.label};
+  if(def.mes){
+    var d=new Date(hoy+"T12:00:00"); d.setMonth(d.getMonth()-1);
+    return {from:d.toISOString().slice(0,10), to:hoy, label:def.label};
+  }
+  var n=new Date(hoy+"T12:00:00");
+  n.setDate(n.getDate()-((n.getDay()+6)%7));           /* lunes de esta semana */
+  var fin=new Date(n); fin.setDate(n.getDate()-1);      /* domingo pasado */
+  var ini=new Date(n); ini.setDate(n.getDate()-def.semanas*7);
+  return {from:ini.toISOString().slice(0,10), to:fin.toISOString().slice(0,10), label:def.label};
+}
+
 var TC_METRICS = [
   {k:"ingresos",     label:"Ingresos",       short:"Q",     fmt:function(v){return "Q"+Math.round(v||0).toLocaleString("es-GT");}, hi:"max"},
+  /* Promedio semanal de trabajos: la métrica que compara parejo cuando el
+     período no mide 8 semanas. Un total de 40 trabajos no dice lo mismo en una
+     semana que en un trimestre. */
+  {k:"promSemanal",  label:"Promedio semanal",short:"/sem", fmt:function(v){return v==null?"—":(Math.round((v||0)*10)/10).toFixed(1);}, hi:"max"},
   {k:"rating",       label:"Rating limpieza",short:"★",     fmt:function(v){return v==null?"—":v.toFixed(2);},                     hi:"max"},
   {k:"limpiezas",    label:"Limpiezas",      short:"Limp.", fmt:function(v){return String(v||0);},                                hi:"max"},
   {k:"profundas",    label:"Profundas",      short:"Prof.", fmt:function(v){return String(v||0);},                                hi:"max"},
@@ -16258,9 +16756,14 @@ function TechCompare8w({reps, vendors, reviews, rvCasos}) {
   const [metric,setMetric] = useState("ingresos");
   const [sortK, setSortK]  = useState("ingresos");
   const [focus, setFocus]  = useState("__all");
+  const [rango, setRango]  = useState("w8");
+  const [cFrom, setCFrom]  = useState("");
+  const [cTo,   setCTo]    = useState("");
+  const [tabla, setTabla]  = useState(false);
 
-  var weeks = last8Weeks();
-  var from  = weeks[0].from, to = weeks[weeks.length-1].to;
+  var rg    = tcRango(rango, cFrom, cTo);
+  var from  = rg.from, to = rg.to;
+  var weeks = tcSemanas(from, to);
   var att   = rvAttribute(reviews, reps, rvCasos);
 
   var groups = techFilterGroups(reps, vendors, function(r){return isCleaning(r.categoria)||r.categoria==="Supervisión";});
@@ -16278,10 +16781,12 @@ function TechCompare8w({reps, vendors, reviews, rvCasos}) {
       nReviews: rv.length,
       rating: rv.length ? rv.reduce(function(s,x){return s+x.score;},0)/rv.length : null,
       trabajos: mine.length,
+      promSemanal: weeks.length ? mine.length/weeks.length : null,
       weekly: weeks.map(function(w){
         var wm = mine.filter(function(r){return r.fecha>=w.from&&r.fecha<=w.to;});
         var wr = rv.filter(function(x){return x.rep.fecha>=w.from&&x.rep.fecha<=w.to;});
         return {
+          promSemanal: wm.length,   /* por semana, el promedio ES el conteo */
           ingresos: wm.reduce(function(s,r){return s+pgEffTotal(r,vendors);},0),
           limpiezas: wm.filter(function(r){return isTradClean(r.categoria);}).length,
           profundas: wm.filter(function(r){return r.categoria==="Limpieza profunda";}).length,
@@ -16325,118 +16830,163 @@ function TechCompare8w({reps, vendors, reviews, rvCasos}) {
     var vals=data.map(function(r){return r.weekly[i][metric];}).filter(function(v){return v!=null;});
     if(!vals.length) return {label:w.label, v:0};
     var sum=vals.reduce(function(a,b){return a+b;},0);
-    return {label:w.label, v: metric==="rating" ? Math.round(sum/vals.length*100)/100 : sum};
+    var promedia = (metric==="rating"||metric==="promSemanal");
+    return {label:w.label, v: promedia ? Math.round(sum/vals.length*100)/100 : sum};
   });
 
   var noRatings = !data.some(function(r){return r.rating!=null;});
 
-  if(!data.length) return null;
+  if(!groups.length) return null;
 
   return (
     <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.line,padding:"18px",marginTop:24}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:12,flexWrap:"wrap",marginBottom:4}}>
         <div>
           <div style={{fontSize:10.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Comparativo de técnicos</div>
-          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:20,fontWeight:400,color:C.black,marginTop:5}}>Últimas 8 semanas</div>
+          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:20,fontWeight:400,color:C.black,marginTop:5}}>{rg.label}</div>
         </div>
-        <div style={{fontSize:11,color:C.taupe,textAlign:"right",lineHeight:1.5}}>{fmtDate(from)} → {fmtDate(to)}<br/><span style={{fontSize:10}}>Período fijo — no depende de los filtros de arriba</span></div>
+        <div style={{fontSize:11,color:C.taupe,textAlign:"right",lineHeight:1.5}}>{fmtDate(from)} → {fmtDate(to)}<br/><span style={{fontSize:10}}>{weeks.length} semana{weeks.length===1?"":"s"} · no depende de los filtros de arriba</span></div>
       </div>
 
-      {/* Tabla comparativa */}
-      <div style={{overflowX:"auto",marginTop:16,marginBottom:20}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5,minWidth:560}}>
-          <thead>
-            <tr>
-              <th style={{textAlign:"left",padding:"8px 10px",fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".12em",textTransform:"uppercase",borderBottom:"1px solid "+C.gray}}>Técnico</th>
-              {TC_METRICS.map(function(m){
-                var act=sortK===m.k;
-                return <th key={m.k} onClick={function(){setSortK(m.k);}} style={{textAlign:"right",padding:"8px 10px",fontSize:9.5,fontWeight:700,color:act?C.black:C.taupe,letterSpacing:".12em",textTransform:"uppercase",borderBottom:"1px solid "+(act?C.black:C.gray),cursor:"pointer",whiteSpace:"nowrap"}}>{m.label}</th>;
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map(function(r){
-              return (
-                <tr key={r.g.value}>
-                  <td style={{padding:"11px 10px",borderBottom:"1px solid "+C.line,fontWeight:600,color:C.black,whiteSpace:"nowrap"}}>
-                    <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:r.color,marginRight:8}}/>{r.g.label}
-                  </td>
-                  {TC_METRICS.map(function(m){
-                    var v=r[m.k], isBest=v!=null&&best[m.k]!=null&&v===best[m.k]&&data.length>1;
-                    return (
-                      <td key={m.k} style={{padding:"11px 10px",borderBottom:"1px solid "+C.line,textAlign:"right",whiteSpace:"nowrap",fontWeight:isBest?700:500,color:isBest?C.green:(m.k==="rating"?rvColor(v):C.black)}}>
-                        {m.fmt(v)}
-                        {m.k==="rating"&&r.nReviews>0&&<span style={{display:"block",fontSize:9.5,color:C.taupe,fontWeight:400}}>{r.nReviews} review{r.nReviews===1?"":"s"}</span>}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      {/* Período — 8 semanas sigue siendo el default */}
+      <div style={{marginTop:14,display:"flex",gap:6,flexWrap:"wrap"}}>
+        {TC_RANGOS.map(function(r){
+          var act=rango===r.k;
+          return <button key={r.k} onClick={function(){setRango(r.k);}} style={{padding:"0 14px",minHeight:38,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(act?C.black:C.line),background:act?C.black:"#fff",color:act?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{r.label}</button>;
+        })}
       </div>
-      <div style={{fontSize:10.5,color:C.taupe,lineHeight:1.6,marginTop:-12,marginBottom:14}}>Toca un encabezado para reordenar. En verde, el mejor de cada columna.</div>
-      {noRatings&&(
+      {!data.length&&(
+        <div style={{marginTop:14,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"16px 15px",fontSize:12.5,color:C.earth,lineHeight:1.65,textWrap:"pretty"}}>
+          Sin limpiezas ni supervisiones registradas en este período. Escoge otro rango arriba — o revisa las fechas si acabas de ponerlas a mano.
+        </div>
+      )}
+      {rango==="cust"&&(
+        <div style={{marginTop:11,display:"flex",gap:10,flexWrap:"wrap",alignItems:"end"}}>
+          {[["Desde",cFrom,setCFrom],["Hasta",cTo,setCTo]].map(function(it){
+            return (
+              <div key={it[0]}>
+                <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>{it[0]}</div>
+                <input type="date" value={it[1]||""} onChange={function(e){it[2](e.target.value);}} style={{border:"1.5px solid "+C.gray,borderRadius:14,padding:"9px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",background:"#fff",outline:"none",minHeight:44,color:C.black}}/>
+              </div>
+            );
+          })}
+          {(!cFrom||!cTo)&&<div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6,paddingBottom:12,textWrap:"pretty",maxWidth:220}}>Escoge las dos fechas para ver el comparativo de ese rango.</div>}
+        </div>
+      )}
+
+      {noRatings&&data.length>0&&(
         <div style={{background:"#FDF3EE",border:"1px solid #F2D9CE",borderRadius:9,padding:"11px 13px",marginBottom:18,fontSize:11.5,color:C.earth,lineHeight:1.65}}>
           La columna <b>Rating limpieza</b> está vacía porque todavía no hay reviews de huéspedes importadas. Ve a <b>Calidad › ☆ Rating huéspedes</b> y toca <b>Importar</b> — o carga las reviews pegando una tabla.
         </div>
       )}
 
-      {/* Selector de métrica */}
-      <div style={{borderTop:"1px solid "+C.line,paddingTop:16}}>
-        <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:9}}>Ver métrica</div>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
-          {TC_METRICS.map(function(m){
-            var act=metric===m.k;
-            return <button key={m.k} onClick={function(){setMetric(m.k);setSortK(m.k);}} style={{padding:"7px 13px",borderRadius:100,border:"1.5px solid "+(act?C.black:C.line),background:act?C.black:"#fff",color:act?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{m.label}</button>;
-          })}
-        </div>
-      </div>
-
-      {/* Barras comparativas — una barra por técnico, ordenadas */}
-      {barData.length===0
-        ? <div style={{background:C.surfaceWarm,borderRadius:10,padding:"20px 16px",textAlign:"center",fontSize:12,color:C.earth,lineHeight:1.6}}>Sin datos de <b>{mDef.label.toLowerCase()}</b> en estas 8 semanas.{metric==="rating"?" Importa las reviews en Calidad › Rating huéspedes.":""}</div>
-        : <div style={{display:"flex",flexDirection:"column",gap:9}}>
-            {barData.map(function(r,i){
-              var v=r[metric];
-              var pct=(barMax>0&&v>0)?Math.max(2,(v/barMax)*100):0;
-              var isTop=i===0&&barData.length>1;
-              return (
-                <div key={r.g.value} style={{display:"flex",alignItems:"center",gap:10}}>
-                  <span style={{width:104,flexShrink:0,fontSize:11.5,fontWeight:isTop?700:500,color:C.black,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.g.label}</span>
-                  <span style={{flex:1,background:C.beige,borderRadius:4,height:20,position:"relative",minWidth:40}}>
-                    <span style={{display:"block",width:pct+"%",height:"100%",borderRadius:4,background:mDef.hi==="min"?(v>0?C.red:C.green):(isTop?C.peach:C.earth),transition:"width .36s cubic-bezier(.22,.61,.36,1)"}}/>
-                    {v===0&&<span style={{position:"absolute",left:6,top:0,height:"100%",display:"flex",alignItems:"center",fontSize:10,fontWeight:600,color:mDef.hi==="min"?C.green:C.taupe}}>{mDef.hi==="min"?"ninguna":"—"}</span>}
-                  </span>
-                  <span style={{width:76,flexShrink:0,textAlign:"right",fontSize:12.5,fontWeight:isTop?700:600,color:metric==="rating"?rvColor(v):(mDef.hi==="min"&&v===0?C.green:C.black)}}>{mDef.fmt(v)}</span>
-                </div>
-              );
+      {data.length>0&&(<React.Fragment>
+        {/* Selector de métrica */}
+        <div style={{borderTop:"1px solid "+C.line,paddingTop:16}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:9}}>Ver métrica</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
+            {TC_METRICS.map(function(m){
+              var act=metric===m.k;
+              return <button key={m.k} onClick={function(){setMetric(m.k);setSortK(m.k);}} style={{padding:"0 15px",borderRadius:"var(--sa-pill)",minHeight:44,border:"1.5px solid "+(act?C.black:C.line),background:act?C.black:"#fff",color:act?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{m.label}</button>;
             })}
-          </div>}
-
-      {/* Evolución semanal de UN técnico — evita la maraña de líneas */}
-      <div style={{borderTop:"1px solid "+C.line,marginTop:20,paddingTop:16}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:11}}>
-          <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase"}}>Semana por semana</div>
-          <select value={focus} onChange={function(e){setFocus(e.target.value);}} style={{border:"1px solid "+C.gray,borderRadius:6,padding:"7px 10px",fontSize:12,fontFamily:"Montserrat,sans-serif",background:"#fff",outline:"none",maxWidth:210}}>
-            <option value="__all">Promedio del equipo</option>
-            {sorted.map(function(r){return <option key={r.g.value} value={r.g.value}>{r.g.label}</option>;})}
-          </select>
+          </div>
         </div>
-        <ResponsiveContainer width="100%" height={190}>
-          <BarChart data={weekSeries} margin={{top:4,right:8,left:-16,bottom:0}}>
-            <CartesianGrid strokeDasharray="3 3" stroke={C.gray} vertical={false}/>
-            <XAxis dataKey="label" tick={{fontSize:10,fill:C.earth}} axisLine={false} tickLine={false}/>
-            <YAxis tick={{fontSize:10,fill:C.earth}} axisLine={false} tickLine={false} domain={metric==="rating"?[3,5]:[0,"auto"]} allowDecimals={metric==="rating"}/>
-            <Tooltip contentStyle={{borderRadius:8,fontSize:12,border:"1px solid "+C.gray}} formatter={function(v){return [mDef.fmt(v),mDef.label];}} labelFormatter={function(l){return "Semana del "+l;}}/>
-            <Bar dataKey="v" fill={focusColor} radius={[4,4,0,0]}/>
-          </BarChart>
-        </ResponsiveContainer>
-        <div style={{fontSize:10.5,color:C.taupe,lineHeight:1.6,marginTop:8}}>{focus==="__all"?"Promedio de todo el equipo por semana.":"Solo "+(focusRow?focusRow.g.label:"")+". Cambia el técnico en el menú para comparar su curva."} Las semanas van de lunes a domingo.</div>
-      </div>
+
+        {/* Barras comparativas — una barra por técnico, ordenadas */}
+        {barData.length===0
+          ? <div style={{background:C.surfaceWarm,borderRadius:10,padding:"20px 16px",textAlign:"center",fontSize:12,color:C.earth,lineHeight:1.6}}>Sin datos de <b>{mDef.label.toLowerCase()}</b> en este período.{metric==="rating"?" Importa las reviews en Calidad › Rating huéspedes.":""}</div>
+          : <div style={{display:"flex",flexDirection:"column",gap:9}}>
+              {barData.map(function(r,i){
+                var v=r[metric];
+                var pct=(barMax>0&&v>0)?Math.max(2,(v/barMax)*100):0;
+                var isTop=i===0&&barData.length>1;
+                return (
+                  <div key={r.g.value} style={{display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{width:104,flexShrink:0,fontSize:11.5,fontWeight:isTop?700:500,color:C.black,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.g.label}</span>
+                    <span style={{flex:1,background:C.beige,borderRadius:4,height:20,position:"relative",minWidth:40}}>
+                      <span style={{display:"block",width:pct+"%",height:"100%",borderRadius:4,background:mDef.hi==="min"?(v>0?C.red:C.green):(isTop?C.peach:C.earth),transition:"width .36s cubic-bezier(.22,.61,.36,1)"}}/>
+                      {v===0&&<span style={{position:"absolute",left:6,top:0,height:"100%",display:"flex",alignItems:"center",fontSize:10,fontWeight:600,color:mDef.hi==="min"?C.green:C.taupe}}>{mDef.hi==="min"?"ninguna":"—"}</span>}
+                    </span>
+                    <span style={{width:76,flexShrink:0,textAlign:"right",fontSize:12.5,fontWeight:isTop?700:600,color:metric==="rating"?rvColor(v):(mDef.hi==="min"&&v===0?C.green:C.black)}}>{mDef.fmt(v)}</span>
+                  </div>
+                );
+              })}
+            </div>}
+
+        {/* Evolución semanal de UN técnico — evita la maraña de líneas */}
+        <div style={{borderTop:"1px solid "+C.line,marginTop:20,paddingTop:16}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:11}}>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase"}}>Semana por semana</div>
+            <select value={focus} onChange={function(e){setFocus(e.target.value);}} style={{border:"1px solid "+C.gray,borderRadius:6,padding:"7px 10px",fontSize:12,fontFamily:"Montserrat,sans-serif",background:"#fff",outline:"none",maxWidth:210}}>
+              <option value="__all">Promedio del equipo</option>
+              {sorted.map(function(r){return <option key={r.g.value} value={r.g.value}>{r.g.label}</option>;})}
+            </select>
+          </div>
+          <ResponsiveContainer width="100%" height={190}>
+            <BarChart data={weekSeries} margin={{top:4,right:8,left:-16,bottom:0}}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.gray} vertical={false}/>
+              <XAxis dataKey="label" tick={{fontSize:10,fill:C.earth}} axisLine={false} tickLine={false}/>
+              <YAxis tick={{fontSize:10,fill:C.earth}} axisLine={false} tickLine={false} domain={metric==="rating"?[3,5]:[0,"auto"]} allowDecimals={metric==="rating"}/>
+              <Tooltip contentStyle={{borderRadius:8,fontSize:12,border:"1px solid "+C.gray}} formatter={function(v){return [mDef.fmt(v),mDef.label];}} labelFormatter={function(l){return "Semana del "+l;}}/>
+              <Bar dataKey="v" fill={focusColor} radius={[4,4,0,0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+          <div style={{fontSize:12,color:C.taupe,lineHeight:1.6,marginTop:8}}>{focus==="__all"?"Promedio de todo el equipo por semana.":"Solo "+(focusRow?focusRow.g.label:"")+". Cambia el técnico en el menú para comparar su curva."} Las semanas van de lunes a domingo.</div>
+        </div>
+        {/* Tabla comparativa, minimizada */}
+        <div style={{borderTop:"1px solid "+C.line,marginTop:20,paddingTop:14}}>
+          <button onClick={function(){setTabla(function(x){return !x;});}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,background:"none",border:"none",padding:0,cursor:"pointer",fontFamily:"Montserrat,sans-serif",minHeight:44}}>
+            <span style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase"}}>Tabla con todas las métricas</span>
+            <span style={{display:"flex",alignItems:"center",gap:7,flexShrink:0}}>
+              <span style={{fontSize:11,color:C.taupe}}>{sorted.length} técnico{sorted.length===1?"":"s"}</span>
+              <span style={{display:"inline-flex",transform:tabla?"rotate(180deg)":"none",transition:"transform .36s cubic-bezier(.22,.61,.36,1)"}}><Icon name="chevronDown" size={16} stroke={C.earth}/></span>
+            </span>
+          </button>
+          {tabla&&(
+            <div style={{marginTop:12}}>
+                {/* Tabla comparativa: al final y cerrada por defecto. Es el detalle,
+                    no la entrada — lo primero que se lee son las barras. */}
+        <div style={{overflowX:"auto",marginTop:16,marginBottom:20}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5,minWidth:560}}>
+            <thead>
+              <tr>
+                <th style={{textAlign:"left",padding:"8px 10px",fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".12em",textTransform:"uppercase",borderBottom:"1px solid "+C.gray}}>Técnico</th>
+                {TC_METRICS.map(function(m){
+                  var act=sortK===m.k;
+                  return <th key={m.k} onClick={function(){setSortK(m.k);}} style={{textAlign:"right",padding:"8px 10px",fontSize:9.5,fontWeight:700,color:act?C.black:C.taupe,letterSpacing:".12em",textTransform:"uppercase",borderBottom:"1px solid "+(act?C.black:C.gray),cursor:"pointer",whiteSpace:"nowrap"}}>{m.label}</th>;
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map(function(r){
+                return (
+                  <tr key={r.g.value}>
+                    <td style={{padding:"11px 10px",borderBottom:"1px solid "+C.line,fontWeight:600,color:C.black,whiteSpace:"nowrap"}}>
+                      <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:r.color,marginRight:8}}/>{r.g.label}
+                    </td>
+                    {TC_METRICS.map(function(m){
+                      var v=r[m.k], isBest=v!=null&&best[m.k]!=null&&v===best[m.k]&&data.length>1;
+                      return (
+                        <td key={m.k} style={{padding:"11px 10px",borderBottom:"1px solid "+C.line,textAlign:"right",whiteSpace:"nowrap",fontWeight:isBest?700:500,color:isBest?C.green:(m.k==="rating"?rvColor(v):C.black)}}>
+                          {m.fmt(v)}
+                          {m.k==="rating"&&r.nReviews>0&&<span style={{display:"block",fontSize:9.5,color:C.taupe,fontWeight:400}}>{r.nReviews} review{r.nReviews===1?"":"s"}</span>}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div style={{fontSize:12,color:C.taupe,lineHeight:1.6,marginTop:-12,marginBottom:14}}>Toca un encabezado para reordenar. En verde, el mejor de cada columna.</div>
+            </div>
+          )}
+        </div>
+      </React.Fragment>)}
     </div>
   );
 }
 
+try{ if(window.__samSplashOff) window.__samSplashOff(); }catch(_){}
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
