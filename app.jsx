@@ -51,6 +51,12 @@ function withAutoPagador(list){
     if(r && r.categoria==="Limpieza tradicional" && r.pagadoPor!=="Spacio AM"){
       return Object.assign({},r,{pagadoPor:"Spacio AM"});
     }
+    /* El mantenimiento lo paga el dueño de la propiedad, no Spacio AM. Solo se
+       rellena cuando está vacío: si alguien ya eligió Airbnb, Seguro o Spacio
+       AM, esa decisión manda. */
+    if(r && r.categoria==="Mantenimiento" && !r.pagadoPor){
+      return Object.assign({},r,{pagadoPor:"Dueño"});
+    }
     return r;
   });
 }
@@ -2273,7 +2279,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
           reps={reps} reviews={reviews} rvCasos={rvCasos} onSvP={onSvP} onSvV={onSvV} canNom={canNotif} codigos={codigos||{}} schedErr={schedErr} onUpsert={onUpsert}/>
       </div>
       <div style={{display:tab==="qa"?"block":"none"}}>
-        <AdminQAPanel reps={reps} vendors={vendors} reviews={reviews} onSvReviews={onSvReviews} rvCasos={rvCasos} onSvRvCasos={onSvRvCasos} rvIA={rvIA} onSvRvIA={onSvRvIA} onQA={qaUpdate} onSelect={setDetail} onUpdate={onUpsert} isAdmin={true} me={adminVendor}/>
+        <AdminQAPanel reps={reps} vendors={vendors} reviews={reviews} onSvReviews={onSvReviews} rvCasos={rvCasos} onSvRvCasos={onSvRvCasos} rvIA={rvIA} onSvRvIA={onSvRvIA} onQA={qaUpdate} onSelect={setDetail} onUpdate={onUpsert} isAdmin={true} me={adminVendor} props={props} reservas={reservas||[]} schedules={schedules||[]} onSvSchedules={onSvSchedules}/>
       </div>
       {/* Adelantos: gestión completa solo para el admin principal. Un admin secundario
           ve únicamente los suyos y puede solicitar, como cualquier colaborador. */}
@@ -3307,7 +3313,7 @@ function ExecDash({reps,vendors,reviews,rvCasos,props,reservas,schedules,onSvSch
       <TechCompare8w reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos}/>
 
       {/* ── Análisis de limpiezas profundas y de daños ── */}
-      <ProfundasAnalisis reps={reps} props={props} schedules={schedules}/>
+      <ProfundasAnalisis reps={reps} props={props} vendors={vendors} schedules={schedules} onSvSchedules={onSvSchedules}/>
       <DanosAnalisis reps={reps} props={props} vendors={vendors} reservas={reservas} schedules={schedules} onSvSchedules={onSvSchedules} onUpsert={onUpsert}/>
 
     </div>
@@ -11351,7 +11357,7 @@ function QuickEditTotal({rep, vendors, onSave}) {
 
 
 /* ─── Admin QA Panel — full quality review across all cleanings + daños + resumen */
-function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos, rvIA, onSvRvIA, onQA, onQAForm, onSelect, onUpdate, isAdmin, me}) {
+function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos, rvIA, onSvRvIA, onQA, onQAForm, onSelect, onUpdate, isAdmin, me, props, reservas, schedules, onSvSchedules}) {
   const [sec,      setSec]      = useState("limpiezas"); /* limpiezas | danios | resumen */
   const [filter,   setFilter]   = useState("all"); /* all | pendiente | aprobada | correccion */
   const [selVend,  setSelVend]  = useState("Todos");
@@ -11399,7 +11405,12 @@ function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos
   var IS = {border:"1px solid "+C.gray,borderRadius:6,padding:"7px 10px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",width:"100%"};
 
   var daniosAll = (reps||[]).filter(function(r){return isDanos(r.categoria);});
-  var urgAlta   = daniosAll.filter(function(r){return r.urgencia==="alta"&&r.dmgStatus!=="resuelto";}).length;
+  /* Con la urgencia efectiva —la del pareto cuando nadie la puso a mano—, que es
+     la que el tablero muestra. */
+  var uaQA = urgenciaPorApto(reps, reviews);
+  var urgAlta   = daniosAll.filter(function(r){
+    return (r.urgencia||uaQA.mapa[r.propiedad]||"baja")==="alta" && r.dmgStatus!=="resuelto";
+  }).length;
 
   async function approveAll(){
     var pend = pendScope;
@@ -11424,7 +11435,7 @@ function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos
         })}
       </div>
 
-      {sec==="danios"&&<DamageBoard reps={reps} vendors={vendors} me={me} isAdmin={isAdmin} onUpdate={onUpdate} onSelect={onSelect}/>}
+      {sec==="danios"&&<DamageBoard reps={reps} vendors={vendors} me={me} isAdmin={isAdmin} onUpdate={onUpdate} onSelect={onSelect} reviews={reviews} props={props} reservas={reservas} schedules={schedules} onSvSchedules={onSvSchedules}/>}
       {sec==="mant"&&isAdmin&&<MaintBoard reps={reps} vendors={vendors} me={me} onUpdate={onUpdate} onSelect={onSelect}/>}
       {sec==="rating"&&isAdmin&&<GuestRatingBoard reviews={reviews||[]} reps={reps} vendors={vendors} onSvReviews={onSvReviews} casos={rvCasos||[]} onSvCasos={onSvRvCasos} rvIA={rvIA||{}} onSvRvIA={onSvRvIA} onSelect={onSelect} me={me}/>}
       {sec==="resumen"&&isAdmin&&<TechSummary reps={reps} vendors={vendors}/>}
@@ -11914,31 +11925,57 @@ function SupervisionForm({rep, vendors, reps, onCancel, onSubmit}) {
    Compartido: supervisión y administrador. */
 var DMG_URG = [["alta","Alta","#C0392B","#F7E7E4"],["media","Media","#9a5020","#F5EBE5"],["baja","Baja","#3d6b52","#E8F2ED"]];
 var DMG_STA = [["pendiente","Pendiente"],["proceso","En proceso"],["resuelto","Resuelto"]];
-function DamageBoard({reps, vendors, me, isAdmin, onUpdate, onSelect}) {
-  const [fU,  setFU]  = useState("todas");
+function DamageBoard({reps, vendors, me, isAdmin, onUpdate, onSelect, reviews, props, reservas, schedules, onSvSchedules}) {
+  const [fU, setFU] = useState("todas");
+  const [fO, setFO] = useState("");        /* origen: "" | huesped | previo */
+  const [fP, setFP] = useState("");        /* propiedad */
   const [com, setCom] = useState({});
+  const [msel, setMsel] = useState({});    /* reportes marcados para actuar en lote */
+  const [prog, setProg] = useState(false); /* panel de programación abierto */
+  const [tec, setTec] = useState("");
+  const [fecha, setFecha] = useState("");
+  const [nota, setNota] = useState("");
+  const [aviso, setAviso] = useState("");
+  var hoy = SCHED.hoyGT();
   var vMap={}; (vendors||[]).forEach(function(v){if(v.email)vMap[v.email]=vendorDisplay(v);});
   var danios=(reps||[]).filter(function(r){return isDanos(r.categoria);});
+
+  /* La urgencia se calcula por apartamento a partir del pareto; la que alguien
+     puso a mano siempre gana. */
+  var ua = urgenciaPorApto(reps, reviews);
+  function urgDe(r){ return r.urgencia || ua.mapa[r.propiedad] || "baja"; }
+  function esManual(r){ return !!r.urgencia; }
+
   var rank={alta:0,media:1,baja:2};
   var sorted=danios.slice().sort(function(a,b){
-    var ra=(a.dmgStatus==="resuelto")?10:(rank[a.urgencia]!==undefined?rank[a.urgencia]:3);
-    var rb=(b.dmgStatus==="resuelto")?10:(rank[b.urgencia]!==undefined?rank[b.urgencia]:3);
+    var ra=(a.dmgStatus==="resuelto")?10:rank[urgDe(a)];
+    var rb=(b.dmgStatus==="resuelto")?10:rank[urgDe(b)];
     if(ra!==rb)return ra-rb;
     return (b.createdAt||b.id)-(a.createdAt||a.id);
   });
   var list=sorted.filter(function(r){
+    if(fP && r.propiedad!==fP) return false;
+    if(fO && !dmgOrigenes(r)[fO]) return false;
     if(fU==="todas")return true;
     if(fU==="resuelto")return r.dmgStatus==="resuelto";
-    if(fU==="sin")return !r.urgencia&&r.dmgStatus!=="resuelto";
-    return r.urgencia===fU&&r.dmgStatus!=="resuelto";
+    return urgDe(r)===fU && r.dmgStatus!=="resuelto";
   });
   var cnt={
-    alta:  danios.filter(function(r){return r.urgencia==="alta"&&r.dmgStatus!=="resuelto";}).length,
-    media: danios.filter(function(r){return r.urgencia==="media"&&r.dmgStatus!=="resuelto";}).length,
-    baja:  danios.filter(function(r){return r.urgencia==="baja"&&r.dmgStatus!=="resuelto";}).length,
-    sin:   danios.filter(function(r){return !r.urgencia&&r.dmgStatus!=="resuelto";}).length,
-    res:   danios.filter(function(r){return r.dmgStatus==="resuelto";}).length,
+    alta: danios.filter(function(r){return urgDe(r)==="alta"&&r.dmgStatus!=="resuelto";}).length,
+    media:danios.filter(function(r){return urgDe(r)==="media"&&r.dmgStatus!=="resuelto";}).length,
+    baja: danios.filter(function(r){return urgDe(r)==="baja"&&r.dmgStatus!=="resuelto";}).length,
+    res:  danios.filter(function(r){return r.dmgStatus==="resuelto";}).length,
   };
+  var cntOrig={
+    huesped: danios.filter(function(r){return dmgOrigenes(r).huesped;}).length,
+    previo:  danios.filter(function(r){return dmgOrigenes(r).previo;}).length,
+  };
+
+  /* El pareto en lista: la misma cuenta del dashboard, pero aquí se lee como un
+     ranking y cada fila filtra el tablero. */
+  var pd = ua.pareto;
+  var propsConDano = pd.data;
+
   function upd(r,patch){ onUpdate&&onUpdate(Object.assign({},r,patch)); }
   function setUrg(r,u){
     upd(r,{urgencia:u});
@@ -11952,42 +11989,167 @@ function DamageBoard({reps, vendors, me, isAdmin, onUpdate, onSelect}) {
     upd(r,{dmgComments:(r.dmgComments||[]).concat([c])});
     setCom(function(p){var u=Object.assign({},p);u[r.id]="";return u;});
   }
+
+  /* ── acciones en lote ── */
+  var marcados = list.filter(function(r){ return msel[r.id]; });
+  var propsMarcadas = marcados.map(function(r){return r.propiedad;})
+    .filter(function(p,i,a){ return a.indexOf(p)===i; });
+  var unSoloApto = propsMarcadas.length===1 ? propsMarcadas[0] : "";
+  var mants = mantVendors(vendors);
+  var salidas = unSoloApto ? salidasDeProp(reservas, unSoloApto, hoy) : [];
+  var puedeProgramar = !!(onSvSchedules && unSoloApto);
+
+  function toggleSel(r){ setMsel(function(p){ var u=Object.assign({},p); if(u[r.id]) delete u[r.id]; else u[r.id]=true; return u; }); }
+  function limpiar(){ setMsel({}); setProg(false); setTec(""); setNota(""); }
+  function estadoLote(st){
+    var n=marcados.length;
+    marcados.forEach(function(r){ upd(r,{dmgStatus:st}); });
+    setAviso(n+" reporte"+(n===1?"":"s")+" → "+((DMG_STA.find(function(x){return x[0]===st;})||["",st])[1])+".");
+    limpiar();
+  }
+  function programarLote(){
+    var v=mants.find(function(x){ return String(x.email||"").toLowerCase()===tec; });
+    /* Un mantenimiento cubre todos los daños marcados de ese apartamento: el
+       técnico va una vez y el correo lleva la lista completa. */
+    var items=[];
+    marcados.forEach(function(r){
+      var ds=(r.danios&&r.danios.length)?r.danios:[{desc:r.descripcion||"Daño reportado"}];
+      ds.forEach(function(d,idx){ items.push({rep:r, idx:idx, d:d||{}}); });
+    });
+    var res=mantDesdeDanos({items:items, propiedad:unSoloApto, vendor:v, fecha:fecha, nota:nota,
+      props:props, schedules:schedules, onSvSchedules:onSvSchedules, onUpsert:onUpdate});
+    if(!res) return;
+    setAviso("Mantenimiento programado — "+res.resumen+". El técnico ya recibió el correo.");
+    limpiar();
+  }
+  var listoProg = !!(tec&&fecha&&marcados.length&&unSoloApto);
+  var IN={boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:14,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44,color:C.black};
+
   return (
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
-      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-        {[["todas","Todos ("+danios.length+")"],["alta","🔴 Alta ("+cnt.alta+")"],["media","🟡 Media ("+cnt.media+")"],["baja","🟢 Baja ("+cnt.baja+")"],["sin","Sin clasificar ("+cnt.sin+")"],["resuelto","✓ Resueltos ("+cnt.res+")"]].map(function(it){
-          var s=fU===it[0];
-          return <button key={it[0]} onClick={function(){setFU(it[0]);}} style={{padding:"6px 12px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>{it[1]}</button>;
-        })}
+      {aviso&&<div style={{background:"#E8F2ED",border:"1px solid #CFE3D6",borderRadius:10,padding:"11px 14px",fontSize:12,color:C.green,fontWeight:600,lineHeight:1.6}}>{aviso}</div>}
+
+      {/* ── El pareto, en lista ── */}
+      {propsConDano.length>0&&(
+        <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:14,overflow:"hidden"}}>
+          <div style={{padding:"13px 15px 11px"}}>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Daños abiertos</div>
+            <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:19,fontWeight:400,color:C.black,marginTop:4}}>Dónde se rompe más</div>
+            <div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6,marginTop:5,textWrap:"pretty"}}>
+              {pd.corte>=0
+                ? <span>Los primeros <b style={{color:C.black}}>{pd.corte+1}</b> apartamentos concentran el 80% de los daños abiertos. Toca uno para ver solo los suyos.</span>
+                : <span>Los daños están repartidos de forma parecida entre los apartamentos. Toca uno para ver solo los suyos.</span>}
+            </div>
+          </div>
+          {propsConDano.map(function(f,i){
+            var act=fP===f.name, en80=pd.corte<0||i<=pd.corte;
+            return (
+              <button key={f.name} onClick={function(){ setFP(act?"":f.name); setMsel({}); setProg(false); }}
+                style={{width:"100%",display:"grid",gridTemplateColumns:"24px 1fr auto 46px",gap:10,alignItems:"center",padding:"11px 15px",borderTop:"1px solid "+C.line,background:act?C.surfaceWarm:"#fff",border:"none",borderLeft:"3px solid "+(act?C.black:(en80?C.red:"transparent")),cursor:"pointer",fontFamily:"Montserrat,sans-serif",textAlign:"left"}}>
+                <span className="t-num" style={{fontSize:11,fontWeight:700,color:en80?C.red:C.taupe}}>{f.rank}</span>
+                <span style={{fontSize:12.5,fontWeight:600,color:C.black,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.name}</span>
+                <span className="t-num" style={{fontSize:12.5,fontWeight:700,color:C.black}}>{f.v}</span>
+                <span className="t-num" style={{fontSize:11,color:C.taupe,textAlign:"right"}}>{f.pct}%</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Filtros ── */}
+      <div style={{display:"flex",flexDirection:"column",gap:7}}>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {[["todas","Todos ("+danios.length+")"],["alta","Alta ("+cnt.alta+")"],["media","Media ("+cnt.media+")"],["baja","Baja ("+cnt.baja+")"],["resuelto","Resueltos ("+cnt.res+")"]].map(function(it){
+            var on=fU===it[0];
+            return <button key={it[0]} onClick={function(){setFU(it[0]);}} style={{padding:"7px 13px",minHeight:34,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",color:on?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{it[1]}</button>;
+          })}
+        </div>
+        {/* Los del huésped saliente son los que se reclaman a Airbnb. */}
+        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+          {DMG_ORIGEN_TAGS.map(function(t){
+            var on=fO===t[0];
+            return <button key={t[0]} onClick={function(){setFO(on?"":t[0]);}} style={{padding:"7px 13px",minHeight:34,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(on?t[2]:C.gray),background:on?t[3]:"#fff",color:on?t[2]:C.earth,fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{t[1]} ({cntOrig[t[0]]})</button>;
+          })}
+          {fP&&<button onClick={function(){setFP("");}} style={{padding:"7px 13px",minHeight:34,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.black,background:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{fP} ×</button>}
+        </div>
       </div>
+
+      {/* ── Barra de acciones en lote ── */}
+      {marcados.length>0&&(
+        <div style={{position:"sticky",top:8,zIndex:20,background:C.black,borderRadius:14,padding:"12px 14px",display:"flex",flexDirection:"column",gap:10,boxShadow:"var(--sa-shadow-md)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+            <span style={{fontSize:12,fontWeight:700,color:"#fff"}}>{marcados.length} marcado{marcados.length===1?"":"s"}</span>
+            <span style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+              {DMG_STA.map(function(x){
+                return <button key={x[0]} onClick={function(){estadoLote(x[0]);}} style={{padding:"6px 12px",minHeight:34,borderRadius:"var(--sa-pill)",border:"1.5px solid rgba(255,255,255,.35)",background:"transparent",color:"#fff",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{x[1]}</button>;
+              })}
+            </span>
+            {puedeProgramar&&<button onClick={function(){ setProg(function(x){return !x;}); if(!fecha) setFecha(salidas[0]||""); }} style={{padding:"6px 12px",minHeight:34,borderRadius:"var(--sa-pill)",border:"none",background:"#fff",color:C.black,fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Programar mantenimiento</button>}
+            <button onClick={limpiar} style={{marginLeft:"auto",padding:"6px 10px",minHeight:34,borderRadius:"var(--sa-pill)",border:"none",background:"transparent",color:"rgba(255,255,255,.75)",fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Quitar</button>
+          </div>
+          {!unSoloApto&&<div style={{fontSize:11,color:"rgba(255,255,255,.75)",lineHeight:1.6,textWrap:"pretty"}}>Para programar una visita marca daños de un mismo apartamento: el técnico va a una dirección, no a {propsMarcadas.length}.</div>}
+          {prog&&puedeProgramar&&(
+            <div style={{background:"#fff",borderRadius:11,padding:"12px",display:"flex",flexDirection:"column",gap:9}}>
+              <select value={tec} onChange={function(e){setTec(e.target.value);}} style={Object.assign({},IN,{width:"100%"})}>
+                <option value="">¿Quién lo repara?…</option>
+                {mants.map(function(v){ return <option key={v.email} value={String(v.email).toLowerCase()}>{vendorDisplay(v)}</option>; })}
+              </select>
+              {salidas.length>0&&(
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {salidas.map(function(f){
+                    var on=fecha===f;
+                    return <button key={f} onClick={function(){setFecha(f);}} style={{padding:"0 12px",minHeight:38,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",color:on?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{fmtDate(f)}</button>;
+                  })}
+                </div>
+              )}
+              <input type="date" value={fecha||""} min={hoy} onChange={function(e){setFecha(e.target.value);}} style={Object.assign({},IN,{width:"100%"})}/>
+              <div style={{fontSize:11,color:C.taupe,lineHeight:1.6,textWrap:"pretty"}}>{salidas.length>0?"Las fechas sugeridas son los próximos checkouts de este apartamento.":"Sin checkouts próximos registrados: escoge la fecha a mano."}</div>
+              <input value={nota} onChange={function(e){setNota(e.target.value);}} placeholder="Nota para el técnico (opcional)" style={Object.assign({},IN,{width:"100%"})}/>
+              <button disabled={!listoProg} onClick={programarLote} style={{padding:"13px",minHeight:46,borderRadius:"var(--sa-pill)",border:"none",background:listoProg?C.black:C.gray,color:listoProg?"#fff":C.taupe,fontSize:12.5,fontWeight:700,cursor:listoProg?"pointer":"not-allowed",fontFamily:"Montserrat,sans-serif"}}>Programar y avisar al técnico</button>
+            </div>
+          )}
+        </div>
+      )}
+
       {list.length===0&&<div style={{textAlign:"center",padding:"32px",color:C.taupe,fontSize:13}}>Sin reportes de daños en esta categoría.</div>}
       {list.map(function(r){
-        var u=DMG_URG.find(function(x){return x[0]===r.urgencia;});
+        var urg=urgDe(r);
+        var u=DMG_URG.find(function(x){return x[0]===urg;});
         var st=r.dmgStatus||"pendiente";
         var comments=r.dmgComments||[];
+        var orig=dmgOrigenes(r);
+        var on=!!msel[r.id];
         return (
-          <div key={r.id} style={{background:"#fff",borderRadius:12,border:"1.5px solid "+(st==="resuelto"?C.line:u?u[2]+"44":C.line),overflow:"hidden",opacity:st==="resuelto"?.7:1}}>
+          <div key={r.id} style={{background:"#fff",borderRadius:12,border:"1.5px solid "+(on?C.black:(st==="resuelto"?C.line:u?u[2]+"44":C.line)),overflow:"hidden",opacity:st==="resuelto"?.7:1}}>
             {u&&st!=="resuelto"&&<div style={{height:4,background:u[2]}}></div>}
             <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"start",gap:8}}>
+                <button onClick={function(){toggleSel(r);}} aria-label="Marcar" style={{flexShrink:0,width:20,height:20,borderRadius:6,border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",marginTop:2,padding:0}}>{on&&<Icon name="check" size={12} stroke="#fff"/>}</button>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:14,fontWeight:600,color:C.black}}>{r.propiedad}</div>
                   <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{vMap[r.reportadoPor]||r.reportadoPor} · {fmtDate(r.fecha)}</div>
+                  {(orig.huesped||orig.previo)&&(
+                    <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:6}}>
+                      {DMG_ORIGEN_TAGS.map(function(t){
+                        return orig[t[0]] ? <span key={t[0]} style={{fontSize:9.5,fontWeight:700,color:t[2],background:t[3],padding:"3px 9px",borderRadius:"var(--sa-pill)",letterSpacing:".06em"}}>{t[1]}</span> : null;
+                      })}
+                    </div>
+                  )}
                 </div>
-                <button onClick={function(){onSelect&&onSelect(r);}} style={{fontSize:11,padding:"5px 10px",borderRadius:5,border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",fontWeight:600,flexShrink:0}}>Ver fotos →</button>
+                <button onClick={function(){onSelect&&onSelect(r);}} style={{fontSize:11,padding:"5px 10px",borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",fontWeight:600,flexShrink:0}}>Ver detalle</button>
               </div>
               {r.descripcion&&<div style={{fontSize:12.5,color:C.black,lineHeight:1.55,background:C.surfaceWarm,padding:"9px 12px",borderRadius:8}}>{r.descripcion}</div>}
               <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
                 <div>
-                  <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Urgencia</div>
+                  <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Urgencia {esManual(r)?"· a mano":"· del pareto"}</div>
                   <div style={{display:"flex",gap:5}}>
-                    {DMG_URG.map(function(x){var s=r.urgencia===x[0];return <button key={x[0]} onClick={function(){setUrg(r,s?"":x[0]);}} style={{padding:"5px 12px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s?x[2]:C.gray),background:s?x[3]:"#fff",color:s?x[2]:C.earth,fontSize:11,fontWeight:700,cursor:"pointer"}}>{x[1]}</button>;})}
+                    {DMG_URG.map(function(x){var on2=urg===x[0];return <button key={x[0]} onClick={function(){setUrg(r,(esManual(r)&&r.urgencia===x[0])?"":x[0]);}} style={{padding:"5px 12px",minHeight:32,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(on2?x[2]:C.gray),background:on2?x[3]:"#fff",color:on2?x[2]:C.earth,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif",opacity:(on2&&!esManual(r))?.78:1}}>{x[1]}</button>;})}
                   </div>
                 </div>
                 <div>
                   <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Estado</div>
                   <div style={{display:"flex",gap:5}}>
-                    {DMG_STA.map(function(x){var s=st===x[0];return <button key={x[0]} onClick={function(){upd(r,{dmgStatus:x[0]});}} style={{padding:"5px 12px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s?C.black:C.gray),background:s?C.black:"#fff",color:s?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>{x[1]}</button>;})}
+                    {DMG_STA.map(function(x){var on2=st===x[0];return <button key={x[0]} onClick={function(){upd(r,{dmgStatus:x[0]});}} style={{padding:"5px 12px",minHeight:32,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(on2?C.black:C.gray),background:on2?C.black:"#fff",color:on2?"#fff":C.earth,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{x[1]}</button>;})}
                   </div>
                 </div>
               </div>
@@ -12002,8 +12164,8 @@ function DamageBoard({reps, vendors, me, isAdmin, onUpdate, onSelect}) {
                 </div>
               )}
               <div style={{display:"flex",gap:7}}>
-                <input placeholder={isAdmin?"Responder a supervisión…":"Comentario para el administrador…"} value={com[r.id]||""} onChange={function(e){var v=e.target.value;setCom(function(p){var x=Object.assign({},p);x[r.id]=v;return x;});}} onKeyDown={function(e){if(e.key==="Enter")addCom(r);}} style={{flex:1,border:"1px solid "+C.gray,borderRadius:7,padding:"8px 11px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none"}}/>
-                <button onClick={function(){addCom(r);}} style={{padding:"8px 14px",borderRadius:7,border:"none",background:C.black,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Enviar</button>
+                <input placeholder={isAdmin?"Responder a supervisión…":"Comentario para el administrador…"} value={com[r.id]||""} onChange={function(e){var v=e.target.value;setCom(function(p){var x=Object.assign({},p);x[r.id]=v;return x;});}} style={{flex:1,minWidth:0,boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:14,padding:"9px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",minHeight:42}}/>
+                <button onClick={function(){addCom(r);}} style={{padding:"8px 14px",minHeight:42,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",flexShrink:0}}>Enviar</button>
               </div>
             </div>
           </div>
@@ -13841,6 +14003,7 @@ function PagosHistory({pagos, vendors, company, isAdmin, meEmails, meNames, reps
   const [fTipo, setFTipo] = useState("Todos");
   const [fDesde,setFDesde]= useState("");
   const [fHasta,setFHasta]= useState("");
+  const [herr,  setHerr]  = useState(false);
   var mine=(meEmails||[]).map(function(e){return (e||"").toLowerCase().trim();}).filter(Boolean);
   /* Un correo cambiado dejaba comprobantes viejos invisibles para su dueño: el
      nombre sirve de respaldo para reconocerlos. */
@@ -13916,10 +14079,6 @@ function PagosHistory({pagos, vendors, company, isAdmin, meEmails, meNames, reps
         </div>
       </div>
 
-      {isAdmin&&onSvPagos&&<RestaurarPagos pagos={pagos} onSvPagos={onSvPagos}/>}
-      {isAdmin&&onSvPagos&&<RecuperarPagos pagos={pagos} onSvPagos={onSvPagos}/>}
-      {isAdmin&&onSvPagos&&<ReconstruirPagos reps={reps||[]} vendors={vendors} pagos={pagos} onSvPagos={onSvPagos}/>}
-
       {/* Lo que suma lo que se está viendo — la pregunta real detrás del historial. */}
       {list.length>0&&(
         <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"14px 18px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",boxShadow:"var(--sa-shadow-sm)"}}>
@@ -13963,6 +14122,28 @@ function PagosHistory({pagos, vendors, company, isAdmin, meEmails, meNames, reps
               );
             })}
           </div>}
+
+      {/* Herramientas de reparación del historial: al final y cerradas. No son
+          el día a día —se usan cuando faltan comprobantes— y ocupaban la
+          primera pantalla del historial. */}
+      {isAdmin&&onSvPagos&&(
+        <div style={{marginTop:22,background:"#fff",borderRadius:14,border:"1px solid "+C.gray,overflow:"hidden"}}>
+          <button onClick={function(){setHerr(function(x){return !x;});}} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,background:"none",border:"none",padding:"14px 18px",cursor:"pointer",textAlign:"left",fontFamily:"Montserrat,sans-serif"}}>
+            <span style={{minWidth:0}}>
+              <span style={{display:"block",fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Herramientas del historial</span>
+              <span style={{display:"block",fontSize:11.5,color:C.taupe,marginTop:5,lineHeight:1.6,textWrap:"pretty"}}>Restaurar desde una versión anterior del Sheet, releer los respaldos o reconstruir comprobantes desde los trabajos ya pagados. Solo si falta algo.</span>
+            </span>
+            <span style={{display:"inline-flex",flexShrink:0,transform:herr?"rotate(180deg)":"none",transition:"transform .36s cubic-bezier(.22,.61,.36,1)"}}><Icon name="chevronDown" size={16} stroke={C.earth}/></span>
+          </button>
+          {herr&&(
+            <div style={{padding:"0 12px 12px"}}>
+              <RestaurarPagos pagos={pagos} onSvPagos={onSvPagos}/>
+              <RecuperarPagos pagos={pagos} onSvPagos={onSvPagos}/>
+              <ReconstruirPagos reps={reps||[]} vendors={vendors} pagos={pagos} onSvPagos={onSvPagos}/>
+            </div>
+          )}
+        </div>
+      )}
 
       {sel&&<PagoComprobanteModal pago={sel} company={company} isAdmin={isAdmin} focusEmail={focusEmail} onClose={function(){setSel(null);}} onSvPagos={onSvPagos} pagos={pagos}/>}
     </div>
@@ -15177,17 +15358,21 @@ function Loader() {
     return function(){clearInterval(t);};
   },[]);
   return (
-    <div style={{position:"fixed",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:C.alabaster,padding:24,textAlign:"center",zIndex:9998}}>
-      <img src={LOGO_WORDMARK} alt="Spacio AM" style={{width:172,maxWidth:"70vw",height:"auto",display:"block",marginBottom:30}}/>
-      <div className="sa-spin" style={{width:26,height:26,boxSizing:"border-box",borderRadius:"50%",border:"2px solid "+C.gray,borderTopColor:C.peach}}/>
-      <div style={{marginTop:22,fontSize:12,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif"}}>
-        {secs<4?"Conectando con tu información…":secs<8?"Esto puede tardar unos segundos…":"Verificando conexión…"}
+    <div style={{position:"fixed",inset:0,background:C.alabaster,fontFamily:"Montserrat,sans-serif",zIndex:9998}}>
+      <div style={{position:"absolute",left:0,right:0,top:"50%",transform:"translateY(-50%)",display:"flex",flexDirection:"column",alignItems:"center"}}>
+        <img src={LOGO_WORDMARK} alt="Spacio AM" style={{width:172,maxWidth:"70vw",height:"auto",display:"block",marginBottom:30}}/>
+        <div className="sa-spin" style={{width:26,height:26,boxSizing:"border-box",borderRadius:"50%",border:"2px solid "+C.gray,borderTopColor:C.peach}}/>
       </div>
-      {secs>=7&&(
-        <div style={{marginTop:14,fontSize:12,color:C.taupe,fontFamily:"Montserrat,sans-serif",maxWidth:280,lineHeight:1.7,textWrap:"pretty"}}>
-          La primera carga puede tardar unos 10 segundos. El app se abre solo en cuanto termine.
+      <div style={{position:"absolute",left:0,right:0,top:"calc(50% + 98px)",padding:"0 24px",textAlign:"center"}}>
+        <div style={{fontSize:12,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>
+          {secs<4?"Conectando con tu información…":secs<8?"Esto puede tardar unos segundos…":"Verificando conexión…"}
         </div>
-      )}
+        {secs>=7&&(
+          <div style={{marginTop:14,fontSize:12,color:C.taupe,maxWidth:280,marginLeft:"auto",marginRight:"auto",lineHeight:1.7,textWrap:"pretty"}}>
+            La primera carga puede tardar unos 10 segundos. El app se abre solo en cuanto termine.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -16385,34 +16570,190 @@ function ReviewPaste({reviews, onSave}) {
    cuántas propiedades concentran la mayor parte del problema. Donde la línea
    cruza el 80% termina "lo que de verdad mueve la aguja".
    ═══════════════════════════════════════════════════════════════════════════ */
-function ParetoChart({rows, unidad, colorTop}){
-  if(!rows||!rows.length) return null;
-  var total = rows.reduce(function(a,r){return a+r.v;},0);
-  var acc = 0;
-  var data = rows.map(function(r){
-    acc += r.v;
-    return {name:r.name, corto:String(r.name).length>13?String(r.name).slice(0,12)+"…":r.name,
-            v:r.v, pct: total? Math.round(acc/total*1000)/10 : 0};
+/* ═══ Los tags de origen del daño ═══
+   El técnico ya elige el origen daño por daño en el formulario ("Estaba antes"
+   / "Lo dejó el huésped"). Esto lo sube al reporte para poder verlo de un
+   vistazo y filtrar por él: los del huésped saliente son los que se reclaman
+   a Airbnb. */
+var DMG_ORIGEN_TAGS = [["huesped","Huésped saliente","#B54D36","#F8ECE9"],["previo","Problema previo","#3B6691","#E8EEF4"]];
+function dmgOrigenes(r){
+  var out={};
+  ((r&&r.danios)||[]).forEach(function(d){
+    var o=normalize((d&&d.origen)||"");
+    if(o.indexOf("huesped")>=0) out.huesped=1;
+    else if(o.indexOf("antes")>=0) out.previo=1;
   });
-  var corte = data.findIndex(function(d){return d.pct>=80;});
+  return out;
+}
+
+/* ═══ Urgencia por apartamento ═══
+   La urgencia dejó de decidirse reporte por reporte: se calcula por
+   apartamento y sale del mismo pareto de daños abiertos.
+     · alta  — el apartamento está dentro del 80% del pareto
+     · media — está en la cola del 20%, pero su rating de huésped va por debajo
+               del promedio de todos
+     · baja  — el resto
+   Es un DEFAULT, no una imposición: si alguien puso la urgencia a mano, esa
+   manda y el tablero la marca como puesta a mano. */
+function urgenciaPorApto(reps, reviews){
+  var abiertos={};
+  (reps||[]).forEach(function(r){
+    if(!r||!isDanos(r.categoria)||!r.propiedad) return;
+    if((r.dmgStatus||"pendiente")==="resuelto") return;
+    var n=(r.danios&&r.danios.length)?r.danios.length:1;
+    abiertos[r.propiedad]=(abiertos[r.propiedad]||0)+n;
+  });
+  var rows=Object.keys(abiertos).map(function(p){ return {name:p, v:abiertos[p]}; })
+    .sort(function(a,b){ return b.v-a.v; });
+  var pd=paretoData(rows);
+  var corte = pd.corte<0 ? pd.data.length-1 : pd.corte;
+  var en80={};
+  pd.data.forEach(function(d,i){ if(i<=corte) en80[d.name]=1; });
+  /* Rating de limpieza que dejó el huésped, por apartamento y en total. Se
+     compara con el promedio general, que es lo que el equipo ya usa como línea. */
+  var sum={}, n={}, tot=0, totN=0;
+  (reviews||[]).forEach(function(rv){
+    var sc=rvCleanScore(rv); if(sc==null||!rv||!rv.propiedad) return;
+    var k=rvPropKey(rv.propiedad);
+    sum[k]=(sum[k]||0)+sc; n[k]=(n[k]||0)+1; tot+=sc; totN++;
+  });
+  var media = totN ? tot/totN : null;
+  function promDe(p){ var k=rvPropKey(p); return n[k] ? sum[k]/n[k] : null; }
+  var mapa={};
+  Object.keys(abiertos).forEach(function(p){
+    if(en80[p]){ mapa[p]="alta"; return; }
+    var pr=promDe(p);
+    mapa[p] = (media!=null && pr!=null && pr<media) ? "media" : "baja";
+  });
+  return {mapa:mapa, media:media, prom:promDe, pareto:pd, en80:en80};
+}
+
+/* ═══ Un mantenimiento que cubre varios daños del mismo apartamento ═══
+   Vive aquí y no dentro de un bloque porque se programa desde tres lugares:
+   el pareto del dashboard, el tablero de daños de Calidad y el detalle del
+   reporte. El técnico va UNA vez, aunque el correo liste cinco daños. */
+function mantDesdeDanos(o){
+  var items=o.items||[], v=o.vendor, fecha=o.fecha, sel=o.propiedad;
+  if(!v||!fecha||!items.length) return null;
+  var p=propParts(sel);
+  var pObj=(o.props||[]).find(function(x){ return x.name===sel; })||{};
+  var hoy=SCHED.hoyGT();
+  var tocados=[];
+  items.forEach(function(it){ if(tocados.indexOf(it.rep)<0) tocados.push(it.rep); });
+  var resumen=items.map(function(it,i){
+    var d=it.d||{};
+    return (i+1)+". "+(d.pieza?d.pieza+" — ":"")+(d.desc||"Daño")+(d.reparacion?" · reparación sugerida: "+d.reparacion:"");
+  }).join("\n");
+  var sc={
+    id:"sc_mant_"+Date.now(), key:fecha+"|"+normalize(sel)+"|mant",
+    fecha:fecha, hora:SCHED.HORA_INI, horaFin:SCHED.HORA_FIN,
+    propiedad:sel, zona:p.zona, edificio:p.edificio, unidad:p.unidad,
+    habitaciones:parseInt(pObj.cuartos,10)||1, tipo:"Mantenimiento",
+    entradaHoy:false, codigoAcceso:pObj.codigoAcceso||"",
+    vendorId:v.id, vendorEmail:String(v.email||"").toLowerCase(),
+    orden:1, estado:"confirmada", origen:"manual", danoId:String(tocados[0].id),
+    motivo: items.length>1 ? ("reparación de "+items.length+" daños reportados") : "reparación de daño reportado",
+    generadoEn:hoy, notificadoEn:hoy
+  };
+  o.onSvSchedules&&o.onSvSchedules((o.schedules||[]).concat([sc]));
+  try{
+    notifyTemplate([v.notifEmail||v.email], "mantenimientoProgramado", {
+      tecnico: vendorDisplay(v), propiedad: sel,
+      fecha: fmtDate(fecha), dia: schedDiaNombre(fecha), hora: SCHED.HORA_INI+" a "+SCHED.HORA_FIN,
+      reportadoEl: fmtDate(tocados[0].fecha),
+      total: String(items.length),
+      dano: resumen, nota: o.nota||"",
+      url: (typeof location!=="undefined"? location.origin+location.pathname : "")+"?rep="+encodeURIComponent(tocados[0].id)
+    });
+  }catch(_){}
+  /* Cada reporte tocado queda marcado, para que no vuelva a salir como abierto
+     ni en el pareto ni en la alerta del encabezado. */
+  tocados.forEach(function(r){
+    o.onUpsert&&o.onUpsert(Object.assign({},r,{mantProgramado:{fecha:fecha, email:String(v.email||"").toLowerCase(), nombre:vendorDisplay(v), programadoEn:hoy, nota:o.nota||""}}));
+  });
+  return {resumen:vendorDisplay(v)+" · "+fmtDate(fecha)+" · "+items.length+" daño"+(items.length===1?"":"s"), tocados:tocados.length};
+}
+
+/* Los técnicos que pueden tomar un mantenimiento. */
+function mantVendors(vendors){
+  return (vendors||[]).filter(function(v){
+    if(!v||!v.email||v.active===false) return false;
+    if(v.tipo==="externo") return true;
+    return String(v.categoria||"").toLowerCase().indexOf("mantenimiento")>=0;
+  });
+}
+/* Las próximas cinco salidas de una propiedad: reparar el día que sale un
+   huésped es lo que menos estorba. */
+function salidasDeProp(reservas, p, hoy){
+  var out=(reservas||[]).filter(function(r){
+    return r && normalize(r.propiedad||"")===normalize(p||"") && String(r.checkOut||"").slice(0,10)>=hoy;
+  }).map(function(r){ return String(r.checkOut).slice(0,10); }).sort();
+  return out.filter(function(f,i){ return out.indexOf(f)===i; }).slice(0,5);
+}
+
+/* Los datos del pareto, aparte de la gráfica: la tabla del 80% y el cálculo de
+   urgencia usan exactamente el mismo corte. */
+function paretoData(rows){
+  var total=(rows||[]).reduce(function(a,r){return a+r.v;},0), acc=0;
+  var data=(rows||[]).map(function(r,i){
+    acc+=r.v;
+    return {name:r.name, v:r.v, rank:i+1, pct: total? Math.round(acc/total*1000)/10 : 0};
+  });
+  return {data:data, corte:data.findIndex(function(d){return d.pct>=80;}), total:total};
+}
+
+/* La tabla del 80%: solo las que concentran el problema. Antes debajo de la
+   gráfica iba una lista con todas las propiedades y no se leía. */
+function Pareto80Table({pd, unidad, sel, onPick, accion, colorTop}){
+  var filas = pd.corte<0 ? pd.data : pd.data.slice(0, pd.corte+1);
+  if(!filas.length) return null;
+  var GR={display:"grid",gridTemplateColumns:"26px 1fr auto 52px",gap:10,alignItems:"center"};
+  return (
+    <div style={{marginTop:14,border:"1px solid "+C.line,borderRadius:12,overflow:"hidden"}}>
+      <div style={Object.assign({},GR,{padding:"9px 12px",background:C.surfaceWarm,fontSize:9,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase"})}>
+        <span>#</span><span>Propiedad</span><span>{unidad}</span><span style={{textAlign:"right"}}>Acum.</span>
+      </div>
+      {filas.map(function(f){
+        var act=sel===f.name;
+        return (
+          <div key={f.name} style={{borderTop:"1px solid "+C.line,background:act?C.surfaceWarm:"#fff"}}>
+            <div onClick={onPick?function(){onPick(f.name);}:undefined} style={Object.assign({},GR,{padding:"11px 12px",cursor:onPick?"pointer":"default"})}>
+              <span className="t-num" style={{fontSize:11,fontWeight:700,color:colorTop||C.attentionText}}>{f.rank}</span>
+              <span style={{fontSize:12.5,fontWeight:600,color:C.black,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.name}</span>
+              <span className="t-num" style={{fontSize:12.5,fontWeight:700,color:C.black}}>{f.v}</span>
+              <span className="t-num" style={{fontSize:11.5,color:C.taupe,textAlign:"right"}}>{f.pct}%</span>
+            </div>
+            {accion?accion(f,act):null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ParetoChart({rows, unidad, colorTop, onPick, sel}){
+  if(!rows||!rows.length) return null;
+  var pd = paretoData(rows), data = pd.data, corte = pd.corte;
   return (
     <div>
       <ResponsiveContainer width="100%" height={230}>
         <ComposedChart data={data} margin={{top:8,right:10,left:-18,bottom:0}}>
           <CartesianGrid strokeDasharray="3 3" stroke={C.gray} vertical={false}/>
-          <XAxis dataKey="corto" tick={{fontSize:9.5,fill:C.earth}} axisLine={false} tickLine={false} interval={0} angle={-32} textAnchor="end" height={54}/>
+          <XAxis dataKey="rank" tick={{fontSize:11,fill:C.earth}} axisLine={false} tickLine={false} interval={0} height={22}/>
           <YAxis yAxisId="l" tick={{fontSize:10,fill:C.earth}} axisLine={false} tickLine={false}/>
           <YAxis yAxisId="r" orientation="right" domain={[0,100]} tick={{fontSize:10,fill:C.taupe}} axisLine={false} tickLine={false} width={34} tickFormatter={function(v){return v+"%";}}/>
           <Tooltip contentStyle={{borderRadius:8,fontSize:12,border:"1px solid "+C.gray}}
             formatter={function(v,k){ return k==="pct" ? [v+"%","Acumulado"] : [v+" "+unidad,"Cantidad"]; }}
             labelFormatter={function(l,p){ return (p&&p[0]&&p[0].payload.name)||l; }}/>
-          <Bar yAxisId="l" dataKey="v" radius={[4,4,0,0]}>
-            {data.map(function(d,i){ return <Cell key={i} fill={(corte<0||i<=corte)?(colorTop||C.peach):C.earth}/>; })}
+          <Bar yAxisId="l" dataKey="v" radius={[4,4,0,0]} cursor={onPick?"pointer":"default"}
+            onClick={onPick?function(d){ onPick((d&&(d.name||(d.payload&&d.payload.name)))||""); }:undefined}>
+            {data.map(function(d,i){ return <Cell key={i} fill={sel&&sel===d.name?C.black:((corte<0||i<=corte)?(colorTop||C.peach):C.earth)}/>; })}
           </Bar>
           <Line yAxisId="r" type="monotone" dataKey="pct" stroke={C.black} strokeWidth={1.5} dot={{r:2.5,fill:C.black}}/>
         </ComposedChart>
       </ResponsiveContainer>
       <div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6,marginTop:6,textWrap:"pretty"}}>
+        {onPick&&<span style={{color:C.earth,fontWeight:600}}>Toca una barra para trabajar esa propiedad. </span>}
         {corte===0
           ? <span>Una sola concentra el 80% del total — <b style={{color:C.black}}>{data[0].name}</b>.</span>
           : corte>0
@@ -16427,8 +16768,12 @@ function ParetoChart({rows, unidad, colorTop}){
    El motor ya sabe excluir las pausadas y las que tienen las profundas
    quitadas en la configuración, así que este bloque usa su mismo cálculo: la
    configuración manda y la regla no se duplica aquí. */
-function ProfundasAnalisis({reps, props, schedules}){
+function ProfundasAnalisis({reps, props, vendors, schedules, onSvSchedules}){
   const [abierto,setAbierto] = useState(true);
+  const [sel,setSel] = useState("");
+  const [tec,setTec] = useState("");
+  const [fecha,setFecha] = useState("");
+  const [hecho,setHecho] = useState("");
   var hoy = SCHED.hoyGT();
   var estado = [];
   try{
@@ -16449,6 +16794,40 @@ function ProfundasAnalisis({reps, props, schedules}){
      contador del encabezado cuenta TODAS: si dijera 12 con 20 atrasadas,
      estaría escondiendo el problema justo donde se va a mirar primero. */
   var rows = conAtraso.slice(0,12).map(function(e){ return {name:e.propiedad, v:e.atrasoDias}; });
+  var pd = paretoData(rows);
+
+  /* Quien puede tomar una profunda: el equipo de limpieza, no los proveedores
+     externos de mantenimiento. */
+  var tecs = (vendors||[]).filter(function(v){
+    return v && v.email && v.active!==false && v.tipo!=="externo";
+  });
+  function elegir(p){
+    var n=(p===sel)?"":p;
+    setSel(n); setTec(""); setHecho("");
+    setFecha(n?SCHED.shift(hoy,1):"");
+  }
+  /* La profunda entra a la ruta como cualquier otra: no sale un correo suelto,
+     la lleva la confirmación de las 6:00 pm que el técnico ya espera. */
+  function programar(){
+    var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===tec; });
+    if(!v||!fecha||!sel) return;
+    var pp=propParts(sel);
+    var pObj=(props||[]).find(function(x){ return x.name===sel; })||{};
+    var hab=parseInt(pObj.cuartos,10)||1;
+    onSvSchedules&&onSvSchedules((schedules||[]).concat([{
+      id:"sc_prof_"+Date.now(), key:fecha+"|"+normalize(sel)+"|prof",
+      fecha:fecha, hora:SCHED.HORA_INI, horaFin:SCHED.HORA_FIN,
+      propiedad:sel, zona:pp.zona, edificio:pp.edificio, unidad:pp.unidad,
+      habitaciones:hab, tipo:"Limpieza profunda",
+      entradaHoy:false, codigoAcceso:pObj.codigoAcceso||"",
+      vendorId:v.id, vendorEmail:String(v.email||"").toLowerCase(),
+      orden:1, minutos:SCHED.minutosLimpieza(hab,"Limpieza profunda"), viaje:0,
+      estado:"confirmada", origen:"manual",
+      motivo:"limpieza profunda programada desde el dashboard", generadoEn:hoy
+    }]));
+    setHecho(sel+" → "+vendorDisplay(v)+" · "+fmtDate(fecha));
+    setSel(""); setTec("");
+  }
 
   if(!estado.length) return null;
 
@@ -16467,21 +16846,34 @@ function ProfundasAnalisis({reps, props, schedules}){
 
       {abierto&&(
         <div style={{marginTop:16}}>
+          {hecho&&<div style={{background:"#E8F2ED",border:"1px solid #CFE3D6",borderRadius:10,padding:"11px 14px",marginBottom:14,fontSize:12,color:C.green,fontWeight:600,lineHeight:1.6}}>Limpieza profunda programada — {hecho}. Le llega en la confirmación de la ruta de las 6:00 pm.</div>}
           {rows.length>0
             ? <div>
-                <ParetoChart rows={rows} unidad="días de atraso"/>
+                <ParetoChart rows={rows} unidad="días de atraso" onPick={elegir} sel={sel}/>
                 {conAtraso.length>rows.length&&<div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6,marginTop:4}}>La gráfica muestra las 12 más atrasadas de {conAtraso.length}.</div>}
+                <Pareto80Table pd={pd} unidad="días" sel={sel} onPick={elegir} accion={function(f,act){
+                  if(!act) return null;
+                  var listo=!!(tec&&fecha);
+                  return (
+                    <div style={{padding:"0 12px 13px",display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                      <select value={tec} onChange={function(e){setTec(e.target.value);}} style={{flex:"1 1 150px",minWidth:0,boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:14,padding:"9px 11px",fontSize:12,fontFamily:"Montserrat,sans-serif",background:"#fff",outline:"none"}}>
+                        <option value="">¿Quién la hace?…</option>
+                        {tecs.map(function(v){ return <option key={v.email} value={String(v.email).toLowerCase()}>{vendorDisplay(v)}</option>; })}
+                      </select>
+                      <input type="date" value={fecha} min={hoy} onChange={function(e){setFecha(e.target.value);}} style={{flex:"1 1 130px",minWidth:0,boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:14,padding:"9px 11px",fontSize:12,fontFamily:"Montserrat,sans-serif",background:"#fff",outline:"none"}}/>
+                      <button onClick={programar} disabled={!listo} style={{padding:"10px 16px",minHeight:42,borderRadius:"var(--sa-pill)",border:"none",background:listo?C.black:C.gray,color:"#fff",fontSize:12,fontWeight:700,cursor:listo?"pointer":"default",flexShrink:0}}>Programar</button>
+                    </div>
+                  );
+                }}/>
               </div>
             : <div style={{background:C.surfaceWarm,borderRadius:10,padding:"18px 16px",textAlign:"center",fontSize:12.5,color:C.earth,lineHeight:1.6}}>Ninguna propiedad va atrasada con su profunda. Así se ve cuando el motor está al día.</div>}
 
           {sinRegistro.length>0&&(
             <div style={{marginTop:16,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"13px 15px"}}>
               <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Sin ninguna profunda registrada</div>
-              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                {sinRegistro.map(function(e){
-                  return <span key={e.propiedad} style={{fontSize:11.5,fontWeight:600,color:C.black,background:"#fff",border:"1px solid "+C.gray,borderRadius:"var(--sa-pill)",padding:"5px 11px"}}>{e.propiedad}</span>;
-                })}
-              </div>
+              {/* Antes aquí venía la lista completa de propiedades: un muro de
+                  píldoras que no se leía. El dato que importa es cuántas son. */}
+              <div style={{fontSize:13,fontWeight:700,color:C.black}}>{sinRegistro.length} propiedad{sinRegistro.length===1?"":"es"}</div>
               <div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6,marginTop:9,textWrap:"pretty"}}>No aparecen en la gráfica porque no hay una fecha desde la que contar: puede que nunca se les haya hecho, o que la primera no se registró.</div>
             </div>
           )}
@@ -16536,21 +16928,20 @@ function DanosAnalisis({reps, props, vendors, reservas, schedules, onSvSchedules
   var lista = sel ? (porProp[sel]||[]) : [];
   var marcados = lista.filter(function(it){ return items[it.rep.id+":"+it.idx]; });
 
-  var mants = (vendors||[]).filter(function(v){
-    if(!v||!v.email||v.active===false) return false;
-    if(v.tipo==="externo") return true;
-    return String(v.categoria||"").toLowerCase().indexOf("mantenimiento")>=0;
-  });
-
-  /* Las próximas cinco salidas de esa propiedad: reparar el día que sale un
-     huésped es lo que menos estorba. El admin puede escribir otra fecha. */
-  function salidasDe(p){
-    var out=(reservas||[]).filter(function(r){
-      return r && normalize(r.propiedad||"")===normalize(p||"") && String(r.checkOut||"").slice(0,10)>=hoy;
-    }).map(function(r){ return String(r.checkOut).slice(0,10); }).sort();
-    return out.filter(function(f,i){ return out.indexOf(f)===i; }).slice(0,5);
-  }
+  var pd = paretoData(ranking);
+  var mants = mantVendors(vendors);
+  function salidasDe(p){ return salidasDeProp(reservas, p, hoy); }
   var salidas = salidasDe(sel);
+
+  /* Los reportes de la propiedad seleccionada, con sus daños dentro: el estado
+     se cambia por reporte, que es donde vive, y los daños se marcan uno por uno
+     para meterlos en la misma visita. */
+  var porReporte = [];
+  (sel?(porProp[sel]||[]):[]).forEach(function(it){
+    var g=porReporte.find(function(x){ return x.rep===it.rep; });
+    if(!g){ g={rep:it.rep, items:[]}; porReporte.push(g); }
+    g.items.push(it);
+  });
 
   function elegir(p){
     var nuevo = (p===sel) ? "" : p;
@@ -16560,44 +16951,10 @@ function DanosAnalisis({reps, props, vendors, reservas, schedules, onSvSchedules
 
   function programar(){
     var v=mants.find(function(x){ return String(x.email||"").toLowerCase()===tec; });
-    if(!v||!fecha||!marcados.length) return;
-    var p=propParts(sel);
-    var pObj=(props||[]).find(function(x){ return x.name===sel; })||{};
-    var tocados=[];
-    marcados.forEach(function(it){ if(tocados.indexOf(it.rep)<0) tocados.push(it.rep); });
-    var resumen=marcados.map(function(it,i){
-      var d=it.d||{};
-      return (i+1)+". "+(d.pieza?d.pieza+" — ":"")+(d.desc||"Daño")+(d.reparacion?" · reparación sugerida: "+d.reparacion:"");
-    }).join("\n");
-    /* UNA sola visita, aunque cubra varios daños: el técnico va una vez. */
-    var sc={
-      id:"sc_mant_"+Date.now(), key:fecha+"|"+normalize(sel)+"|mant",
-      fecha:fecha, hora:SCHED.HORA_INI, horaFin:SCHED.HORA_FIN,
-      propiedad:sel, zona:p.zona, edificio:p.edificio, unidad:p.unidad,
-      habitaciones:parseInt(pObj.cuartos,10)||1, tipo:"Mantenimiento",
-      entradaHoy:false, codigoAcceso:pObj.codigoAcceso||"",
-      vendorId:v.id, vendorEmail:String(v.email||"").toLowerCase(),
-      orden:1, estado:"confirmada", origen:"manual", danoId:String(tocados[0].id),
-      motivo: marcados.length>1 ? ("reparación de "+marcados.length+" daños reportados") : "reparación de daño reportado",
-      generadoEn:hoy, notificadoEn:hoy
-    };
-    onSvSchedules&&onSvSchedules((schedules||[]).concat([sc]));
-    try{
-      notifyTemplate([v.notifEmail||v.email], "mantenimientoProgramado", {
-        tecnico: vendorDisplay(v), propiedad: sel,
-        fecha: fmtDate(fecha), dia: schedDiaNombre(fecha), hora: SCHED.HORA_INI+" a "+SCHED.HORA_FIN,
-        reportadoEl: fmtDate(tocados[0].fecha),
-        total: String(marcados.length),
-        dano: resumen, nota: nota||"",
-        url: (typeof location!=="undefined"? location.origin+location.pathname : "")+"?rep="+encodeURIComponent(tocados[0].id)
-      });
-    }catch(_){}
-    /* Cada reporte tocado queda marcado, para que no vuelva a salir como
-       abierto ni aquí ni en la alerta del encabezado. */
-    tocados.forEach(function(r){
-      onUpsert&&onUpsert(Object.assign({},r,{mantProgramado:{fecha:fecha, email:String(v.email||"").toLowerCase(), nombre:vendorDisplay(v), programadoEn:hoy, nota:nota||""}}));
-    });
-    setEnviado(vendorDisplay(v)+" · "+fmtDate(fecha)+" · "+marcados.length+" daño"+(marcados.length===1?"":"s"));
+    var res=mantDesdeDanos({items:marcados, propiedad:sel, vendor:v, fecha:fecha, nota:nota,
+      props:props, schedules:schedules, onSvSchedules:onSvSchedules, onUpsert:onUpsert});
+    if(!res) return;
+    setEnviado(res.resumen);
     setSel(""); setItems({});
   }
 
@@ -16624,37 +16981,58 @@ function DanosAnalisis({reps, props, vendors, reservas, schedules, onSvSchedules
         <div style={{marginTop:16}}>
           {enviado&&<div style={{background:"#E8F2ED",border:"1px solid #CFE3D6",borderRadius:10,padding:"11px 14px",marginBottom:14,fontSize:12,color:C.green,fontWeight:600,lineHeight:1.6}}>Mantenimiento programado — {enviado}. El técnico ya recibió el correo con la lista de lo que va a reparar.</div>}
 
-          {ranking.length>0&&<ParetoChart rows={ranking} unidad="daños abiertos" colorTop={C.red}/>}
+          {ranking.length>0&&<ParetoChart rows={ranking} unidad="daños abiertos" colorTop={C.red} onPick={elegir} sel={sel}/>}
           {todas.length>ranking.length&&<div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6,marginTop:4}}>La gráfica muestra las 12 propiedades con más daños abiertos, de {todas.length}.</div>}
 
-          {ranking.length>0&&(
-            <div style={{marginTop:16,borderTop:"1px solid "+C.line,paddingTop:14}}>
-              <div style={{fontSize:9.5,fontWeight:700,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:9}}>Toca una propiedad para programar la reparación</div>
-              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                {todas.map(function(r){
-                  var act=sel===r.name;
-                  return <button key={r.name} onClick={function(){elegir(r.name);}} style={{padding:"0 14px",minHeight:40,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(act?C.black:C.line),background:act?C.black:"#fff",color:act?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{r.name} · {r.v}</button>;
-                })}
+          {/* Antes debajo iba una píldora por propiedad —todas—, y con veinte
+              apartamentos era un muro. Queda la tabla del 80%: las que
+              concentran el problema, con su botón para programar. */}
+          {ranking.length>0&&<Pareto80Table pd={pd} unidad="daños" sel={sel} onPick={elegir} colorTop={C.red} accion={function(f,act){
+            if(act) return null;
+            return (
+              <div style={{padding:"0 12px 11px"}}>
+                <button onClick={function(){elegir(f.name);}} style={{padding:"7px 14px",minHeight:36,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Programar reparación</button>
               </div>
-            </div>
-          )}
+            );
+          }}/>}
 
           {sel&&(
             <div style={{marginTop:14,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"15px",display:"flex",flexDirection:"column",gap:14}}>
               <div>
                 <span style={LBL}>Qué se va a reparar</span>
-                <div style={{display:"flex",flexDirection:"column",gap:7}}>
-                  {lista.map(function(it){
-                    var k=it.rep.id+":"+it.idx, on=!!items[k];
+                <div style={{display:"flex",flexDirection:"column",gap:11}}>
+                  {porReporte.map(function(g){
+                    var st=g.rep.dmgStatus||"pendiente";
+                    var orig=dmgOrigenes(g.rep);
                     return (
-                      <button key={k} onClick={function(){setItems(function(x){var nx=Object.assign({},x); if(nx[k]) delete nx[k]; else nx[k]=true; return nx;});}} style={{display:"flex",alignItems:"start",gap:10,textAlign:"left",background:on?"#fff":"transparent",border:"1.5px solid "+(on?C.black:C.gray),borderRadius:10,padding:"10px 12px",cursor:"pointer",fontFamily:"Montserrat,sans-serif",minHeight:44}}>
-                        <span style={{flexShrink:0,width:17,height:17,borderRadius:5,border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",display:"flex",alignItems:"center",justifyContent:"center",marginTop:1}}>{on&&<Icon name="check" size={11} stroke="#fff"/>}</span>
-                        <span style={{minWidth:0}}>
-                          {it.d.pieza&&<span style={{display:"block",fontSize:10,fontWeight:700,color:C.attentionText,letterSpacing:".1em",textTransform:"uppercase",marginBottom:3}}>{it.d.pieza}</span>}
-                          <span style={{display:"block",fontSize:12.5,fontWeight:600,color:C.black,lineHeight:1.5}}>{it.d.desc||"Daño reportado"}</span>
-                          <span style={{display:"block",fontSize:11,color:C.taupe,marginTop:3}}>Reportado el {fmtDate(it.rep.fecha)}</span>
-                        </span>
-                      </button>
+                      <div key={g.rep.id} style={{display:"flex",flexDirection:"column",gap:7}}>
+                        <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                          <span style={{fontSize:11,color:C.taupe}}>Reportado el {fmtDate(g.rep.fecha)}</span>
+                          {DMG_ORIGEN_TAGS.map(function(t){
+                            return orig[t[0]] ? <span key={t[0]} style={{fontSize:9.5,fontWeight:700,color:t[2],background:t[3],padding:"2px 8px",borderRadius:"var(--sa-pill)",letterSpacing:".06em"}}>{t[1]}</span> : null;
+                          })}
+                          {/* El estado se cambia aquí: si ya se resolvió o alguien
+                              lo está atendiendo, no hace falta programar nada. */}
+                          <span style={{display:"flex",gap:4,marginLeft:"auto"}}>
+                            {DMG_STA.map(function(x){
+                              var on=st===x[0];
+                              return <button key={x[0]} onClick={function(){ onUpsert&&onUpsert(Object.assign({},g.rep,{dmgStatus:x[0]})); }} style={{padding:"5px 11px",minHeight:32,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",color:on?"#fff":C.earth,fontSize:10.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{x[1]}</button>;
+                            })}
+                          </span>
+                        </div>
+                        {g.items.map(function(it){
+                          var k=it.rep.id+":"+it.idx, on=!!items[k];
+                          return (
+                            <button key={k} onClick={function(){setItems(function(x){var nx=Object.assign({},x); if(nx[k]) delete nx[k]; else nx[k]=true; return nx;});}} style={{display:"flex",alignItems:"start",gap:10,textAlign:"left",background:on?"#fff":"transparent",border:"1.5px solid "+(on?C.black:C.gray),borderRadius:10,padding:"10px 12px",cursor:"pointer",fontFamily:"Montserrat,sans-serif",minHeight:44}}>
+                              <span style={{flexShrink:0,width:17,height:17,borderRadius:5,border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",display:"flex",alignItems:"center",justifyContent:"center",marginTop:1}}>{on&&<Icon name="check" size={11} stroke="#fff"/>}</span>
+                              <span style={{minWidth:0}}>
+                                {it.d.pieza&&<span style={{display:"block",fontSize:10,fontWeight:700,color:C.attentionText,letterSpacing:".1em",textTransform:"uppercase",marginBottom:3}}>{it.d.pieza}</span>}
+                                <span style={{display:"block",fontSize:12.5,fontWeight:600,color:C.black,lineHeight:1.5}}>{it.d.desc||"Daño reportado"}</span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     );
                   })}
                 </div>
