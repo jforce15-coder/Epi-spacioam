@@ -571,6 +571,10 @@ function vendorTipo(v) {
 
 
 const MOTIVOS_AJUSTE = ["Tokens de lavado","Transporte","Limpieza pendiente","Día doble","Servicio adicional","Compras adicionales","Otro"];
+/* Motivos de un adelanto gestionado por el administrador. El más común es corregir
+   un pago de más (error del sistema, del banco o humano): el saldo se recupera como
+   un adelanto normal. */
+const MOTIVOS_ADELANTO = ["Error de pago — se pagó de más","Adelanto de salario","Emergencia o gasto imprevisto","Préstamo acordado","Otro"];
 
 /* ═══ AJUSTES · TRABAJO REALIZADO ═══════════════════════════════════════════
    Antes era texto libre, y el mismo concepto entraba escrito de seis maneras: las
@@ -15658,6 +15662,7 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
                 <div>
                   <div style={{fontSize:15,fontWeight:700,color:C.black}}>{a.vendorName||a.vendorEmail}{!a.vendorEmail&&<span style={{fontSize:9,fontWeight:700,color:C.red,background:"#F7E7E4",padding:"2px 7px",borderRadius:"var(--sa-pill)",marginLeft:8,letterSpacing:".06em"}}>SIN LIGAR</span>}</div>
                   <div style={{fontSize:11,color:C.earth,marginTop:2}}>{esPl?"Planilla · quincenal · ":""}Inicio {fmtDMY(advStart(a))}{a.dpiNumber?" \u00b7 DPI "+a.dpiNumber:""}{a.unified?" \u00b7 "+advContracts(a).length+" contratos unificados":""}</div>
+                  {a.motivo&&<div style={{fontSize:11,color:C.earth,marginTop:3}}><span style={{fontWeight:700,color:C.black}}>Motivo:</span> {a.motivo}{a.creadoPorAdmin&&!a.firma?<span style={{marginLeft:7,fontSize:8.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:C.earth,background:C.surfaceWarm,border:"1px solid "+C.line,padding:"2px 7px",borderRadius:"var(--sa-pill)"}}>Gestión admin</span>:null}</div>}
                 </div>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase"}}>Saldo</div>
@@ -15765,6 +15770,12 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
   const [cuotas,setCuotas]= useState(8);
   const [fecha,setFecha] = useState(todayStr());
   const [dpiNum,setDpiNum]= useState("");
+  const [motivo,setMotivo]= useState(MOTIVOS_ADELANTO[0]);
+  const [motivoOtro,setMotivoOtro]= useState("");
+  /* El admin gestiona el adelanto sin necesidad de que el técnico apruebe: por
+     defecto queda ACTIVO de inmediato. Puede activar el flujo de firma si quiere
+     el contrato firmado antes de cobrar. */
+  const [pedirFirma,setPedirFirma]= useState(false);
   const [err,setErr]     = useState("");
   var vendor = internos.find(function(v){return v.id===vid;});
   /* Colaborador de planilla: no tiene ingreso por trabajos — su adelanto se descuenta
@@ -15781,26 +15792,36 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
   var qCuota = Math.max(0, parseFloat(quincenal||0)||0);
   if(esPlanilla){ maxTotal = nomLiquidacion(vendor, ADV_PAGOS); maxWeekly = 0; }
   var disponible = Math.max(0, maxTotal - saldoVigente);
-  /* Tope de cuota semanal: 25% del promedio de ingreso semanal (últimas 8 semanas). */
-  var minCuotas = (maxWeekly>0 && montoN>0) ? Math.min(12, Math.ceil(montoN/maxWeekly)) : 1;
+  /* Sin mínimo de cuotas: el administrador reparte el adelanto en las semanas que
+     decida (1 a 12). El tope del 25% queda solo como referencia, no como límite. */
+  var minCuotas = 1;
   var semanal = cuotas>0?Math.ceil(montoN/cuotas):0;
-  var ok = vendor && montoN>0 && montoN<=disponible && (esPlanilla || maxWeekly<=0 || semanal<=maxWeekly);
+  var motivoFinal = motivo==="Otro" ? motivoOtro.trim() : motivo;
+  var ok = vendor && montoN>0 && montoN<=disponible && !!motivoFinal;
   useEffect(function(){ if(!esPlanilla && cuotas<minCuotas) setCuotas(minCuotas); },[minCuotas,esPlanilla]);
   function crear(){
     setErr("");
     if(!vendor) return setErr("Elige un técnico interno.");
     if(!(montoN>0)) return setErr("Ingresa el monto del adelanto.");
     if(montoN>disponible) return setErr("El monto excede el disponible del técnico (Q"+disponible.toLocaleString()+").");
-    /* Adelanto iniciado por el admin: primero le llega al TÉCNICO para subir DPI y firmar.
-       Queda 'pendiente_tecnico' (NO cobra) hasta que el técnico complete y el admin deposite. */
+    if(!motivoFinal) return setErr("Escribe el motivo del adelanto.");
+    /* Adelanto gestionado por el admin. Por defecto queda ACTIVO de inmediato (no
+       necesita aprobación ni firma del técnico). Si el admin pidió firma, va al
+       flujo 'pendiente_tecnico' como antes. */
+    var activarYa = !pedirFirma;
     var adv={id:"adv_"+Date.now(), vendorEmail:vendor.email, vendorName:vendorDisplay(vendor), dpiNumber:dpiNum||"", dpiPhoto:null, firma:null,
-      monto:montoN, fechaDeposito:fecha, fechaInicio:fecha,
-      status:"pendiente_tecnico", createdAt:Date.now(), pausas:[], creadoPorAdmin:true};
+      monto:montoN, fechaDeposito:fecha, fechaInicio:fecha, motivo:motivoFinal,
+      status:activarYa?"activo":"pendiente_tecnico", createdAt:Date.now(), pausas:[], creadoPorAdmin:true};
     if(esPlanilla){ adv.modo="quincenal"; adv.cobroQuincenal=qCuota; adv.cobroSemanal=0; adv.cuotas=qCuota>0?Math.ceil(montoN/qCuota):0; }
     else { adv.cuotas=cuotas; adv.cobroSemanal=semanal; }
     adv.contractText=buildContractText(adv);
     onCreate(adv);
-    try{ notifyTemplate(resolveNotifRecipients("adelantoFirma", ADV_VENDORS, [vendor.email]), "adelantoFirma", {tecnico:vendorDisplay(vendor), monto:"Q"+montoN.toLocaleString(), cuotas:esPlanilla?(qCuota>0?Math.ceil(montoN/qCuota)+" quincenas":"a la liquidación"):(cuotas+" semanas"), cuota:esPlanilla?(qCuota>0?"Q"+qCuota.toLocaleString()+"/quincena":"sin cuota"):"Q"+semanal.toLocaleString()}); }catch(_){}
+    try{
+      var cuotasTxt=esPlanilla?(qCuota>0?Math.ceil(montoN/qCuota)+" quincenas":"a la liquidación"):(cuotas+" semanas");
+      var cuotaTxt=esPlanilla?(qCuota>0?"Q"+qCuota.toLocaleString()+"/quincena":"sin cuota"):"Q"+semanal.toLocaleString();
+      if(activarYa) notifyTemplate(resolveNotifRecipients("adelantoDepositado", ADV_VENDORS, [vendor.email]), "adelantoDepositado", {tecnico:vendorDisplay(vendor), monto:"Q"+montoN.toLocaleString(), fecha:fmtDate(fecha), cuota:cuotaTxt, cuotas:cuotasTxt});
+      else notifyTemplate(resolveNotifRecipients("adelantoFirma", ADV_VENDORS, [vendor.email]), "adelantoFirma", {tecnico:vendorDisplay(vendor), monto:"Q"+montoN.toLocaleString(), cuotas:cuotasTxt, cuota:cuotaTxt});
+    }catch(_){}
     onClose();
   }
   return (
@@ -15820,6 +15841,9 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
               ? <>Máx. = liquidación estimada a hoy (indemnización + prestaciones proporcionales): <b style={{color:"#fff"}}>Q{maxTotal.toLocaleString()}</b>{saldoVigente>0?" · Vigente: Q"+saldoVigente.toLocaleString():""}</>
               : <>Máx. (25% del ingreso semanal promedio × 12 cuotas; ingreso 8 sem. Q{sum8.toLocaleString()}): <b style={{color:"#fff"}}>Q{maxTotal.toLocaleString()}</b>{saldoVigente>0?" · Vigente: Q"+saldoVigente.toLocaleString():""}</>}</div>
           </div>
+          <F label="Motivo del adelanto"><select value={motivo} onChange={function(e){setMotivo(e.target.value);setErr("");}}>{MOTIVOS_ADELANTO.map(function(m){return <option key={m} value={m}>{m}</option>;})}</select></F>
+          {motivo==="Otro"&&<F label="Especifica el motivo"><input value={motivoOtro} onChange={function(e){setMotivoOtro(e.target.value);setErr("");}} placeholder="Escribe el motivo"/></F>}
+          {motivo===MOTIVOS_ADELANTO[0]&&<div style={{fontSize:11.5,color:C.earth,lineHeight:1.6,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:10,padding:"10px 12px",marginTop:-4,textWrap:"pretty"}}>Se le pagó de más por un error del sistema, del banco o humano. El monto de más se registra como adelanto y se recupera con el descuento que definas abajo.</div>}
           <F label={"Monto (máx. Q"+disponible.toLocaleString()+")"}><input type="number" inputMode="numeric" value={monto} placeholder={"Ej. "+Math.min(500,disponible||500)} onChange={function(e){setMonto(e.target.value);setErr("");}}/></F>
           {esPlanilla ? (
             <div>
@@ -15833,12 +15857,12 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
             </div>
           ) : (
           <div>
-            <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:9}}>Cuotas semanales{minCuotas>1?" — mín. "+minCuotas:""} · máx. 12</div>
+            <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:9}}>Cuotas semanales · máx. 12</div>
             <div style={{display:"flex",alignItems:"center",gap:14}}>
-              <input type="range" min={minCuotas} max="12" value={cuotas} onChange={function(e){setCuotas(parseInt(e.target.value));}} style={{flex:1,accentColor:C.peach}}/>
+              <input type="range" min={1} max="12" value={cuotas} onChange={function(e){setCuotas(parseInt(e.target.value));}} style={{flex:1,accentColor:C.peach}}/>
               <span style={{fontSize:15,fontWeight:700,color:C.black,minWidth:64,textAlign:"right"}}>{cuotas} sem.</span>
             </div>
-            {maxWeekly>0&&<div style={{fontSize:12,color:semanal>maxWeekly?C.attentionText:C.earth,marginTop:8,lineHeight:1.5,fontWeight:semanal>maxWeekly?700:400}}>Cuota Q{semanal.toLocaleString()} · tope Q{maxWeekly.toLocaleString()} (25% del ingreso semanal promedio){semanal>maxWeekly?" — excede el tope":""}</div>}
+            {maxWeekly>0&&<div style={{fontSize:12,color:C.earth,marginTop:8,lineHeight:1.5}}>Cuota Q{semanal.toLocaleString()} · referencia del 25% del ingreso: Q{maxWeekly.toLocaleString()}{semanal>maxWeekly?" (la cuota la supera; el admin decide)":""}</div>}
           </div>
           )}
           <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
@@ -15851,11 +15875,20 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
             </div>
           )}
           {err&&<Err msg={err}/>}
+          {/* Gestión directa del admin: activar sin esperar la firma del técnico. */}
+          <label style={{display:"flex",alignItems:"flex-start",gap:11,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"12px 14px",cursor:"pointer"}}>
+            <input type="checkbox" checked={pedirFirma} onChange={function(e){setPedirFirma(e.target.checked);}} style={{width:18,height:18,marginTop:1,accentColor:C.peach,flexShrink:0,cursor:"pointer"}}/>
+            <span style={{fontSize:12,color:C.earth,lineHeight:1.6}}>
+              <b style={{color:C.black}}>Pedir la firma del técnico antes de activar.</b> Si lo dejas desmarcado, el adelanto queda <b style={{color:C.black}}>activo de inmediato</b> — lo gestiona el administrador sin aprobación del técnico.
+            </span>
+          </label>
           <div style={{display:"flex",gap:10,marginTop:4}}>
             <button onClick={onClose} style={{flex:1,padding:"13px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
-            <button onClick={crear} disabled={!ok} style={{flex:2,padding:"0 15px",borderRadius:"var(--sa-pill)",minHeight:44,border:"none",background:ok?C.green:C.gray,color:"#fff",fontSize:11.5,fontWeight:700,cursor:ok?"pointer":"not-allowed"}}>{esPlanilla?"Enviar al colaborador →":"Enviar al técnico →"}</button>
+            <button onClick={crear} disabled={!ok} style={{flex:2,padding:"0 15px",borderRadius:"var(--sa-pill)",minHeight:44,border:"none",background:ok?C.green:C.gray,color:"#fff",fontSize:11.5,fontWeight:700,cursor:ok?"pointer":"not-allowed"}}>{pedirFirma?(esPlanilla?"Enviar al colaborador →":"Enviar al técnico →"):"Crear y activar →"}</button>
           </div>
-          <div style={{fontSize:12,color:C.earth,textAlign:"center",lineHeight:1.6}}>Le llegará {esPlanilla?"al colaborador":"al técnico"} para que suba su DPI y firme el contrato. Cuando firme, sube el comprobante de depósito para activarlo.</div>
+          <div style={{fontSize:12,color:C.earth,textAlign:"center",lineHeight:1.6}}>{pedirFirma
+            ? <>Le llegará {esPlanilla?"al colaborador":"al técnico"} para que suba su DPI y firme el contrato. Cuando firme, sube el comprobante de depósito para activarlo.</>
+            : <>Queda activo de inmediato y el descuento {esPlanilla?(qCuota>0?"quincenal":"a la liquidación"):"semanal"} empieza automáticamente. No requiere aprobación del técnico.</>}</div>
         </div>
         )}
       </div>
