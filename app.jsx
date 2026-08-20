@@ -8188,7 +8188,7 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
           {notiTotal>0&&(
             <button onClick={function(e){e.stopPropagation();setNotiOpen(true);}} title={notiTotal+" pendiente"+(notiTotal===1?"":"s")} aria-label={"Notificaciones ("+notiTotal+")"}
               style={{position:"relative",display:"inline-flex",alignItems:"center",justifyContent:"center",width:40,height:40,borderRadius:"var(--sa-pill)",border:"none",background:"transparent",cursor:"pointer",flexShrink:0,padding:0}}>
-              <Icon name="alert" size={23} stroke="#3B6691"/>
+              <Icon name="alert" size={23} width={1.75} stroke="var(--color-info,#3B6691)" color="var(--color-info,#3B6691)" style={{stroke:"var(--color-info,#3B6691)"}}/>
               <span style={{position:"absolute",top:-1,right:-1,minWidth:18,height:18,boxSizing:"border-box",padding:"0 5px",borderRadius:"var(--sa-pill)",background:C.peach,color:"#fff",fontSize:10.5,fontWeight:700,fontVariantNumeric:"tabular-nums",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 1px 3px rgba(0,0,0,.28)"}}>{notiTotal>99?"99+":notiTotal}</span>
             </button>
           )}
@@ -10179,6 +10179,205 @@ function CancelarModal({sched, tecnico, paga, tarifa, monto, onClose, onConfirm}
   );
 }
 
+/* ═══ FERIADOS NACIONALES DE GUATEMALA ══════════════════════════════════════
+   Precargados para elegir el día doble sin buscar el calendario. Semana Santa
+   varía cada año (jueves–sábado según la Pascua); el resto son fechas fijas del
+   Código de Trabajo. Se cargan 2026, 2027, 2028 y 2030. */
+var FERIADOS_GT = {
+  "2026":[["2026-01-01","Año Nuevo"],["2026-04-02","Jueves Santo"],["2026-04-03","Viernes Santo"],["2026-04-04","Sábado Santo"],["2026-05-01","Día del Trabajo"],["2026-06-30","Día del Ejército"],["2026-08-15","Día de la Asunción (capital)"],["2026-09-15","Día de la Independencia"],["2026-10-20","Día de la Revolución"],["2026-11-01","Día de Todos los Santos"],["2026-12-24","Nochebuena"],["2026-12-25","Navidad"],["2026-12-31","Fin de Año"]],
+  "2027":[["2027-01-01","Año Nuevo"],["2027-03-25","Jueves Santo"],["2027-03-26","Viernes Santo"],["2027-03-27","Sábado Santo"],["2027-05-01","Día del Trabajo"],["2027-06-30","Día del Ejército"],["2027-08-15","Día de la Asunción (capital)"],["2027-09-15","Día de la Independencia"],["2027-10-20","Día de la Revolución"],["2027-11-01","Día de Todos los Santos"],["2027-12-24","Nochebuena"],["2027-12-25","Navidad"],["2027-12-31","Fin de Año"]],
+  "2028":[["2028-01-01","Año Nuevo"],["2028-04-13","Jueves Santo"],["2028-04-14","Viernes Santo"],["2028-04-15","Sábado Santo"],["2028-05-01","Día del Trabajo"],["2028-06-30","Día del Ejército"],["2028-08-15","Día de la Asunción (capital)"],["2028-09-15","Día de la Independencia"],["2028-10-20","Día de la Revolución"],["2028-11-01","Día de Todos los Santos"],["2028-12-24","Nochebuena"],["2028-12-25","Navidad"],["2028-12-31","Fin de Año"]],
+  "2030":[["2030-01-01","Año Nuevo"],["2030-04-18","Jueves Santo"],["2030-04-19","Viernes Santo"],["2030-04-20","Sábado Santo"],["2030-05-01","Día del Trabajo"],["2030-06-30","Día del Ejército"],["2030-08-15","Día de la Asunción (capital)"],["2030-09-15","Día de la Independencia"],["2030-10-20","Día de la Revolución"],["2030-11-01","Día de Todos los Santos"],["2030-12-24","Nochebuena"],["2030-12-25","Navidad"],["2030-12-31","Fin de Año"]]
+};
+function feriadoNombre(f){ var k=String(f||"").slice(0,10); var l=FERIADOS_GT[k.slice(0,4)]||[]; for(var i=0;i<l.length;i++) if(l[i][0]===k) return l[i][1]; return ""; }
+
+/* Categorías que pueden pagarse doble en feriado: limpiezas, supervisión y ajustes. */
+var DOBLE_CATS = ["Limpieza tradicional","Limpieza profunda","Supervisión","Ajuste"];
+
+/* ═══ DÍA DOBLE — pago al doble por trabajar un feriado ══════════════════════
+   El administrador elige la fecha (los feriados vienen precargados), marca las
+   rutas del día que se pagan doble y aplica. Doblar cambia la tarifa del
+   FORMULARIO de esa limpieza (total ×2), no la programación. Se guarda la tarifa
+   base para poder revertir. Un formulario que no tenía programación ese día se
+   marca con alerta, pero igual se puede doblar. */
+function DiaDoblePanel({schedules, reps, vendors, onUpsert, hoy, onAviso, onLog}){
+  const [abierto,setAbierto] = useState(false);
+  const [fd,setFd]           = useState("");
+  const [sel,setSel]         = useState({});
+
+  var repsDia = React.useMemo(function(){
+    if(!fd) return [];
+    return (reps||[]).filter(function(r){ return DOBLE_CATS.indexOf(String(r.categoria||""))>=0 && String(r.fecha||"").slice(0,10)===fd; })
+      .sort(function(a,b){ return String(a.propiedad||"").localeCompare(String(b.propiedad||""),"es",{numeric:true}); });
+  },[reps,fd]);
+  var schedDia = React.useMemo(function(){
+    if(!fd) return [];
+    return (schedules||[]).filter(function(s){ return String(s.fecha||"").slice(0,10)===fd && String(s.estado||"")!=="cancelada"; });
+  },[schedules,fd]);
+
+  var progKey={}; schedDia.forEach(function(s){ progKey[normalize(s.propiedad||"")]=1; });
+  var repKey={};  repsDia.forEach(function(r){ repKey[normalize(r.propiedad||"")]=1; });
+  var rutasSinForm = schedDia.filter(function(s){ return !repKey[normalize(s.propiedad||"")]; })
+    .sort(function(a,b){ return String(a.propiedad||"").localeCompare(String(b.propiedad||""),"es",{numeric:true}); });
+
+  /* Al cambiar de fecha, se preselecciona lo que ya está en doble. */
+  React.useEffect(function(){
+    var init={}; repsDia.forEach(function(r){ if(r.diaDoble) init[r.id]=1; });
+    setSel(init);
+  /* eslint-disable-next-line */
+  },[fd]);
+
+  function tecOf(r){
+    var em=String(r.reportadoPor||"").toLowerCase().trim();
+    var v=(vendors||[]).find(function(x){ return String(x.email||"").toLowerCase()===em; });
+    return v?vendorDisplay(v):(em||"—");
+  }
+  function baseDe(r){ return parseFloat(r.diaDobleBase!=null?r.diaDobleBase:r.total)||0; }
+
+  var marcados = repsDia.filter(function(r){ return sel[r.id]; });
+  var totalDoble = marcados.reduce(function(s,r){ return s+baseDe(r)*2; },0);
+
+  function toggle(id){ setSel(function(p){ var u=Object.assign({},p); if(u[id]) delete u[id]; else u[id]=1; return u; }); }
+  function todos(){ var u={}; repsDia.forEach(function(r){ u[r.id]=1; }); setSel(u); }
+  function ninguno(){ setSel({}); }
+
+  function aplicar(){
+    var n=0;
+    repsDia.forEach(function(r){
+      var quiere=!!sel[r.id], esDoble=!!r.diaDoble;
+      if(quiere && !esDoble){
+        var base=parseFloat(r.total)||0;
+        onUpsert(Object.assign({},r,{ total:String(base*2), diaDoble:true, diaDobleBase:String(base), diaDobleFecha:hoy, ajustadoPorAdmin:true })); n++;
+      } else if(!quiere && esDoble){
+        var b=parseFloat(r.diaDobleBase!=null?r.diaDobleBase:(parseFloat(r.total)||0)/2)||0;
+        var rr=Object.assign({},r,{ total:String(b), diaDoble:false, ajustadoPorAdmin:true }); delete rr.diaDobleBase; delete rr.diaDobleFecha;
+        onUpsert(rr); n++;
+      }
+    });
+    if(!n){ onAviso&&onAviso("No hubo cambios: lo marcado ya estaba como lo dejaste.", true); return; }
+    onLog&&onLog("manual","Día doble — "+n+" formulario"+(n===1?"":"s")+" ajustado"+(n===1?"":"s")+" el "+fd+(feriadoNombre(fd)?" ("+feriadoNombre(fd)+")":""));
+    onAviso&&onAviso("Pago doble actualizado en "+n+" formulario"+(n===1?"":"s")+".", true);
+  }
+
+  var CHIP={fontSize:10.5,fontWeight:700,padding:"4px 10px",minHeight:30,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",fontFamily:"Montserrat,sans-serif"};
+
+  return (
+    <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:16,boxShadow:"var(--sa-shadow-sm)",overflow:"hidden"}}>
+      <button onClick={function(){setAbierto(!abierto);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"15px 18px",background:"none",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"Montserrat,sans-serif"}}>
+        <span style={{minWidth:0}}>
+          <span style={{display:"block",fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Feriados</span>
+          <span style={{display:"block",fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:19,color:C.black,marginTop:4}}>Día doble</span>
+        </span>
+        <span style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+          {fd&&marcados.length>0&&<span style={{fontSize:9.5,fontWeight:700,color:C.attentionText,letterSpacing:".06em",whiteSpace:"nowrap"}}>{marcados.length} en doble</span>}
+          <span style={{fontSize:11,color:C.taupe}}>{abierto?"▴":"▾"}</span>
+        </span>
+      </button>
+      {abierto&&(
+        <div style={{borderTop:"1px solid "+C.line,padding:"14px 18px 18px",display:"flex",flexDirection:"column",gap:13}}>
+          <div style={{fontSize:11.5,color:C.earth,lineHeight:1.7,textWrap:"pretty"}}>
+            Elige un día —los feriados nacionales vienen cargados— y marca las limpiezas que se pagan doble. Al aplicar, la tarifa del formulario de cada limpieza marcada se pone al doble. Puedes desmarcar y volver a aplicar para dejarla como estaba.
+          </div>
+
+          {/* Selección de fecha */}
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+            <label style={{display:"flex",flexDirection:"column",gap:5}}>
+              <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".12em",textTransform:"uppercase"}}>Feriado</span>
+              <select value={feriadoNombre(fd)?fd:""} onChange={function(e){ if(e.target.value) setFd(e.target.value); }} style={{fontSize:12.5,padding:"9px 11px",minHeight:44,borderRadius:10,border:"1px solid "+C.gray,fontFamily:"Montserrat,sans-serif",background:"#fff",color:C.black,minWidth:210}}>
+                <option value="">Elegir feriado…</option>
+                {Object.keys(FERIADOS_GT).sort().map(function(y){
+                  return (
+                    <optgroup key={y} label={y}>
+                      {FERIADOS_GT[y].map(function(h){ return <option key={h[0]} value={h[0]}>{h[1]} · {fmtDate(h[0])}</option>; })}
+                    </optgroup>
+                  );
+                })}
+              </select>
+            </label>
+            <label style={{display:"flex",flexDirection:"column",gap:5}}>
+              <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".12em",textTransform:"uppercase"}}>O cualquier día</span>
+              <input type="date" value={fd} onChange={function(e){ setFd(e.target.value); }} style={{fontSize:12.5,padding:"9px 11px",minHeight:44,borderRadius:10,border:"1px solid "+C.gray,fontFamily:"Montserrat,sans-serif",color:C.black}}/>
+            </label>
+          </div>
+
+          {fd&&(
+            <>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
+                <div style={{fontSize:13.5,fontWeight:600,color:C.black}}>
+                  {schedDiaNombre(fd)} {fmtDate(fd)}
+                  {feriadoNombre(fd)&&<span style={{marginLeft:8,fontSize:10,fontWeight:700,color:C.attentionText,background:C.attentionTint,padding:"3px 9px",borderRadius:"var(--sa-pill)",letterSpacing:".04em"}}>{feriadoNombre(fd)}</span>}
+                </div>
+                <div style={{fontSize:11,color:C.earth}}>{repsDia.length} formulario{repsDia.length===1?"":"s"}</div>
+              </div>
+
+              {repsDia.length>0&&(
+                <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                  <button onClick={todos} style={CHIP}>Marcar todo</button>
+                  <button onClick={ninguno} style={CHIP}>Quitar todo</button>
+                </div>
+              )}
+
+              {repsDia.length===0
+                ? <div style={{fontSize:11.5,color:C.taupe,background:C.surfaceWarm,borderRadius:10,padding:"12px 13px",lineHeight:1.6,textWrap:"pretty"}}>Todavía no hay formularios (limpieza, supervisión o ajuste) para ese día. Aparecerán aquí conforme el equipo los entregue.</div>
+                : (
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {repsDia.map(function(r){
+                      var on=!!sel[r.id], base=baseDe(r), b=BADGE[r.categoria]||BADGE["Limpieza tradicional"];
+                      var esLimp=esLimpiezaCat(r.categoria);
+                      var sinProg=esLimp&&!progKey[normalize(r.propiedad||"")];
+                      var tipoTxt=r.categoria==="Limpieza profunda"?"Profunda":r.categoria==="Limpieza tradicional"?"Tradicional":r.categoria;
+                      return (
+                        <label key={r.id} style={{display:"flex",alignItems:"flex-start",gap:11,background:on?C.attentionTint:C.surfaceWarm,border:"1px solid "+(on?"var(--sa-attention)":C.line),borderRadius:12,padding:"11px 13px",cursor:"pointer"}}>
+                          <input type="checkbox" checked={on} onChange={function(){toggle(r.id);}} style={{width:18,height:18,marginTop:2,accentColor:C.peach,flexShrink:0,cursor:"pointer"}}/>
+                          <span style={{flex:1,minWidth:0}}>
+                            <span style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                              <span style={{fontSize:12.5,fontWeight:600,color:C.black}}>{r.propiedad||"—"}</span>
+                              <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",padding:"2px 7px",borderRadius:"var(--sa-pill)",background:b.bg,color:b.tx}}>{tipoTxt}</span>
+                              {sinProg&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:C.orange,background:"#F5EBE5",border:"1px solid #E3D5C8",padding:"2px 7px",borderRadius:"var(--sa-pill)"}}>Sin programación</span>}
+                              {r.diaDoble&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:C.attentionText,background:C.attentionTint,padding:"2px 7px",borderRadius:"var(--sa-pill)"}}>Doble aplicado</span>}
+                            </span>
+                            <span style={{display:"block",fontSize:11,color:C.earth,marginTop:3}}>{tecOf(r)}</span>
+                          </span>
+                          <span style={{textAlign:"right",flexShrink:0,fontVariantNumeric:"tabular-nums"}}>
+                            <span style={{display:"block",fontSize:13,fontWeight:700,color:C.black}}>Q {(on?base*2:base).toLocaleString()}</span>
+                            <span style={{display:"block",fontSize:10,color:C.taupe,marginTop:2}}>{on?"base Q "+base.toLocaleString():"tarifa"}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+
+              {/* Rutas del día que aún no tienen formulario */}
+              {rutasSinForm.length>0&&(
+                <div style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"11px 13px"}}>
+                  <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".12em",textTransform:"uppercase",marginBottom:7}}>Programadas sin formulario aún · {rutasSinForm.length}</div>
+                  <div style={{fontSize:11,color:C.earth,lineHeight:1.6,marginBottom:8,textWrap:"pretty"}}>Estas limpiezas están en la ruta del día pero todavía no tienen formulario, así que no hay tarifa que doblar. Vuelve cuando el técnico las entregue.</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                    {rutasSinForm.map(function(s){
+                      return <div key={s.id} style={{fontSize:11.5,color:C.black}}>{s.propiedad}{SCHED.esProfunda(s.tipo)?<span style={{color:C.taupe}}> · profunda</span>:null}</div>;
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {repsDia.length>0&&(
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",borderTop:"1px solid "+C.line,paddingTop:13}}>
+                  <div style={{fontSize:11.5,color:C.earth}}>
+                    {marcados.length} marcada{marcados.length===1?"":"s"}
+                    {marcados.length>0&&<span style={{color:C.black,fontWeight:700}}> · Q {totalDoble.toLocaleString()} a pagar</span>}
+                  </div>
+                  <button onClick={aplicar} disabled={!repsDia.length} style={{padding:"12px 20px",minHeight:44,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",letterSpacing:".03em"}}>Aplicar pago doble</button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, schedErr, onUpsert}) {
   /* Abre en HOY: la ruta que el equipo está corriendo ahora mismo es la que el
      administrador necesita ver al entrar, no la de mañana. */
@@ -10825,6 +11024,9 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
         </div>
       )}
 
+      {/* Día doble — pago al doble por feriado */}
+      <DiaDoblePanel schedules={schedules} reps={reps} vendors={vendors} onUpsert={onUpsert} hoy={hoy} onAviso={aviso} onLog={bitacora}/>
+
       {/* Ausencias por aprobar */}
       {pendAus.length>0&&(
         <div style={{background:"#FBF6EC",border:"1px solid #E8DCC4",borderRadius:14,padding:"15px 16px"}}>
@@ -10946,17 +11148,24 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
       )}
 
       {/* Selector de día */}
-      <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:2}}>
-        {[-1,0,1,2,3,4,5,6].map(function(n){
-          var fx=SCHED.shift(hoy,n), sel=dia===n;
-          var cnt=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===fx; }).length;
-          return (
-            <button key={n} onClick={function(){setDia(n);}} style={{flexShrink:0,padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>
-              {n===-1?"Ayer":n===0?"Hoy":n===1?"Mañana":schedDiaNombre(fx).slice(0,3)+" "+String(fx).slice(8,10)}
-              {cnt>0&&<span style={{marginLeft:6,opacity:.65,fontVariantNumeric:"tabular-nums"}}>{cnt}</span>}
-            </button>
-          );
-        })}
+      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:2,flex:1,minWidth:0}}>
+          {[-1,0,1,2,3,4,5,6].map(function(n){
+            var fx=SCHED.shift(hoy,n), sel=dia===n;
+            var cnt=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===fx; }).length;
+            return (
+              <button key={n} onClick={function(){setDia(n);}} style={{flexShrink:0,padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>
+                {n===-1?"Ayer":n===0?"Hoy":n===1?"Mañana":schedDiaNombre(fx).slice(0,3)+" "+String(fx).slice(8,10)}
+                {cnt>0&&<span style={{marginLeft:6,opacity:.65,fontVariantNumeric:"tabular-nums"}}>{cnt}</span>}
+              </button>
+            );
+          })}
+        </div>
+        {/* Ir a un día específico */}
+        <label style={{display:"flex",alignItems:"center",gap:7,flexShrink:0}}>
+          <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase"}}>Ir a</span>
+          <input type="date" value={fecha} onChange={function(e){ if(e.target.value) setDia(SCHED.dias(hoy,e.target.value)); }} style={{fontSize:12,padding:"9px 11px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,fontFamily:"Montserrat,sans-serif",color:C.black,background:"#fff"}}/>
+        </label>
       </div>
 
       {/* Estado del día */}
