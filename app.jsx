@@ -8089,16 +8089,24 @@ function NotiCenter({open, onClose, notis, onDismiss, onSnooze}){
    baja desde arriba, se queda ~5s y se va sola; al tocarlo abre el centro. */
 function NotiToast({item, onOpen, onClose}){
   var [show,setShow]=useState(false);
+  var [dy,setDy]=useState(0);
+  var startY=React.useRef(null), dragging=React.useRef(false);
   var W="rgba(255,255,255,";
   React.useEffect(function(){
     var a=requestAnimationFrame(function(){ setShow(true); });
     var t=setTimeout(function(){ setShow(false); setTimeout(onClose,340); },5000);
     return function(){ cancelAnimationFrame(a); clearTimeout(t); };
   },[]);
+  /* Swipe-up para ocultar antes de los 5s, como en iOS: el banner sigue al dedo
+     y, si se pasa el umbral, sale hacia arriba y se cierra. */
+  function tStart(e){ startY.current=e.touches&&e.touches[0]?e.touches[0].clientY:null; dragging.current=true; }
+  function tMove(e){ if(startY.current==null) return; var y=e.touches&&e.touches[0]?e.touches[0].clientY:null; if(y==null) return; setDy(Math.min(0,y-startY.current)); }
+  function tEnd(){ if(startY.current==null) return; var v=dy; startY.current=null; dragging.current=false; if(v<-36){ setShow(false); setDy(0); setTimeout(onClose,300); } else { setDy(0); } }
   return (
-    <div onClick={function(){ onOpen&&onOpen(); setShow(false); setTimeout(onClose,200); }}
-      style={{position:"fixed",top:"max(12px,env(safe-area-inset-top))",left:"50%",width:"calc(100% - 24px)",maxWidth:400,zIndex:400,cursor:"pointer",transform:"translateX(-50%) translateY("+(show?"0":"-150%")+")",opacity:show?1:0,transition:"transform .4s cubic-bezier(0.22,0.61,0.36,1),opacity .3s cubic-bezier(0.22,0.61,0.36,1)"}}>
-      <div style={{display:"flex",alignItems:"flex-start",gap:12,borderRadius:22,padding:"13px 16px",background:"rgba(58,58,60,.7)",backdropFilter:"blur(40px) saturate(180%) brightness(1.08)",WebkitBackdropFilter:"blur(40px) saturate(180%) brightness(1.08)",border:"1px solid "+W+".14)",boxShadow:"0 18px 50px rgba(0,0,0,.35),inset 0 1px 0 "+W+".45),inset 0 0 0 1px "+W+".07)"}}>
+    <div onClick={function(){ if(dy) return; onOpen&&onOpen(); setShow(false); setTimeout(onClose,200); }}
+      onTouchStart={tStart} onTouchMove={tMove} onTouchEnd={tEnd}
+      style={{position:"fixed",top:"max(12px,env(safe-area-inset-top))",left:"50%",width:"calc(100% - 24px)",maxWidth:400,zIndex:400,cursor:"pointer",touchAction:"pan-x",transform:"translateX(-50%) translateY("+(show?dy+"px":"-150%")+")",opacity:show?1:0,transition:dragging.current?"opacity .3s":"transform .4s cubic-bezier(0.22,0.61,0.36,1),opacity .3s cubic-bezier(0.22,0.61,0.36,1)"}}>
+      <div style={{display:"flex",alignItems:"flex-start",gap:12,borderRadius:22,padding:"13px 16px",background:"rgba(58,58,60,.52)",backdropFilter:"blur(40px) saturate(180%) brightness(1.08)",WebkitBackdropFilter:"blur(40px) saturate(180%) brightness(1.08)",border:"1px solid "+W+".14)",boxShadow:"0 18px 50px rgba(0,0,0,.35),inset 0 1px 0 "+W+".45),inset 0 0 0 1px "+W+".07)"}}>
         <div style={{flexShrink:0,width:30,height:30,borderRadius:9,background:C.peach,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="alert" size={17} stroke="#fff"/></div>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:9,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",color:W+".6)",marginBottom:2}}>Spacio AM · ahora</div>
@@ -8139,11 +8147,16 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
     /* Primer uso jamás (sin registro): memoriza en silencio, no floodea. */
     if(seenRef.current==null){ var boot={}; keys.forEach(function(k){ boot[k]=1; }); seenRef.current=boot; _saveSeen(boot); return; }
     var nuevos=notisVis.filter(function(n){ return n.ts!=null && !seenRef.current[notiKey(n)]; });
-    /* Marca TODO lo visible como visto (con o sin push), así nunca reaparece. */
-    var changed=false, u=Object.assign({},seenRef.current);
-    keys.forEach(function(k){ if(!u[k]){ u[k]=1; changed=true; } });
-    if(changed){ seenRef.current=u; _saveSeen(u); }
-    if(nuevos.length) setToasts(function(p){ return p.concat(nuevos.slice(-3)); });
+    /* Tope de 2 push por sesión. SOLO las 2 mostradas se marcan como vistas; el
+       resto NO — quedan pendientes y se anuncian (de 2 en 2) en el próximo
+       inicio de sesión. Mientras tanto, ya se ven en el centro. */
+    var toShow=nuevos.slice(0,2);
+    if(toShow.length){
+      var u=Object.assign({},seenRef.current);
+      toShow.forEach(function(n){ u[notiKey(n)]=1; });
+      seenRef.current=u; _saveSeen(u);
+      setToasts(function(p){ return p.concat(toShow).slice(-2); });
+    }
   },[visSig]);
   /* El badge muestra lo de los últimos 7 días; si ya no hay nada reciente,
      muestra el número de todas las anteriores. */
