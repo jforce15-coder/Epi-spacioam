@@ -2140,9 +2140,97 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
       onSvNomAjustes((nomAjustes||[]).map(function(a){ return usados[a.id]?Object.assign({},a,{aplicado:true,aplicadoEn:usados[a.id]}):a; }));
     }
   },[vendors,pagos,nomAjustes,adelantos,sheetsOk,pagosReady]);
+
+  /* ── Ausencias: se aplican SOLAS, sin esperar aprobación ──
+     Cuando un técnico avisa que faltará, el reajuste ya no queda "por aprobar":
+     · Para un día FUTURO se reasigna automáticamente con el motor y se avisa a
+       quien le cambió la ruta. El admin no tiene que hacer nada.
+     · Para HOY el motor no decide solo —las rutas ya están corriendo—: se marca
+       "por_asignar" y al abrir la página salta un pop-up donde el admin elige a
+       quién le pasa esas limpiezas.
+     Cada ausencia se transiciona de estado en la misma pasada, así que el efecto
+     no la vuelve a procesar. */
+  const [ausPopup, setAusPopup] = useState(null);
+  useEffect(function(){
+    if(sheetsOk===null || !vendors || !vendors.length) return;
+    var pend=(ausencias||[]).filter(function(a){ return a && (a.estado||"pendiente")==="pendiente"; });
+    if(!pend.length) return;
+    var hoy=SCHED.hoyGT();
+    var tecsAll=schedTecnicos(vendors);
+    var ratings=schedRatings(reviews, reps, rvCasos);
+    var sched=(schedules||[]).slice();
+    var ausNext=(ausencias||[]).slice();
+    var setAus=function(id,patch){ ausNext=ausNext.map(function(x){ return x.id===id?Object.assign({},x,patch):x; }); };
+    var toNotify=[];  /* {email, fecha} para avisar el cambio de ruta */
+    var huboFuturo=false, hayHoy=null;
+    pend.forEach(function(a){
+      var f=String(a.fecha||"").slice(0,10);
+      if(!f || f<hoy){ setAus(a.id,{estado:"aplicada",resueltaEn:hoy,resueltaAuto:true}); return; }
+      if(f===hoy){
+        /* Solo pide asignar si de verdad tenía limpiezas hoy. */
+        var tuyas=sched.filter(function(sc){ return String(sc.fecha).slice(0,10)===hoy && String(sc.vendorEmail||"").toLowerCase()===String(a.vendorEmail||"").toLowerCase() && sc.estado!=="cancelada"; });
+        if(tuyas.length){ if(!hayHoy) hayHoy=a; setAus(a.id,{estado:"por_asignar"}); }
+        else { setAus(a.id,{estado:"aplicada",resueltaEn:hoy,resueltaAuto:true}); }
+        return;
+      }
+      /* Futuro: reasignación automática. */
+      var r=SCHED.reajustePorAusencia({ hoy:hoy, fecha:f, vendorEmail:a.vendorEmail, vendors:vendors,
+        ratings:ratings, ausencias:ausNext, existentes:sched, pesoRating:0.7 });
+      var porId={}; (r.movimientos||[]).forEach(function(m){ if(m.scheduleId) porId[m.scheduleId]=m; });
+      sched=sched.map(function(sc){
+        var m=porId[sc.id]; if(!m) return sc;
+        var v=tecsAll.find(function(x){ return String(x.email||"").toLowerCase()===m.aEmail; });
+        return Object.assign({},sc,{vendorEmail:m.aEmail, vendorId:m.aVendorId||(v&&v.id)||"",
+          orden:m.orden||sc.orden, motivo:"reajuste automático por ausencia · "+(m.motivo||""), estado:"confirmada", reajustada:true});
+      });
+      (r.movimientos||[]).forEach(function(m){ toNotify.push({email:m.aEmail, fecha:f}); });
+      toNotify.push({email:String(a.vendorEmail||"").toLowerCase(), fecha:f});
+      setAus(a.id,{estado:"aplicada",resueltaEn:hoy,resueltaAuto:true,sinCubrir:(r.sinAsignar||[]).length});
+      huboFuturo=true;
+    });
+    if(huboFuturo) onSvSchedules&&onSvSchedules(sched);
+    onSvAusencias&&onSvAusencias(ausNext);
+    /* Avisos: una vez por técnico+fecha, solo su ruta nueva. */
+    var vistos={};
+    toNotify.forEach(function(t){
+      var key=t.email+"|"+t.fecha; if(!t.email||vistos[key]) return; vistos[key]=1;
+      var v=tecsAll.find(function(x){ return String(x.email||"").toLowerCase()===t.email; });
+      if(!v) return;
+      var mias=sched.filter(function(sc){ return String(sc.fecha).slice(0,10)===t.fecha && String(sc.vendorEmail||"").toLowerCase()===t.email; });
+      try{ notifyTemplate([v.notifEmail||v.email], "programacionCambio", {
+        tecnico:vendorDisplay(v), fecha:fmtDate(t.fecha), dia:schedDiaNombre(t.fecha), total:String(mias.length),
+        limpiezas: mias.length ? mias.map(function(sc,i){ return (i+1)+". "+sc.propiedad+" — "+(sc.habitaciones||1)+" hab · "+sc.tipo+(sc.entradaHoy?" · TIENE ENTRADA HOY":""); }).join("\n") : "Sin limpiezas asignadas ese día." }); }catch(_){}
+    });
+    if(hayHoy) setAusPopup(hayHoy);
+  },[ausencias,schedules,vendors,reviews,reps,rvCasos,sheetsOk]);
+
   /* Solo el admin principal (o el acceso por PIN maestro, sin identidad de usuario) edita
      las preferencias de notificaciones; los demás admin ni siquiera ven la pestaña. */
   var canNotif = !adminVendor || isAdminPrincipalVendor(adminVendor, vendors);
+
+  /* El admin eligió quién cubre una ausencia de HOY. Reasigna esas limpiezas,
+     cierra la ausencia y avisa al que las recibe y al que faltó. */
+  function aplicarAusenciaHoy(aus, aEmail, afectadas){
+    var hoy=SCHED.hoyGT();
+    var v=schedTecnicos(vendors).find(function(x){ return String(x.email||"").toLowerCase()===aEmail; });
+    var ids={}; (afectadas||[]).forEach(function(sc){ ids[sc.id]=1; });
+    var n=(schedules||[]).filter(function(sc){ return String(sc.fecha).slice(0,10)===hoy && String(sc.vendorEmail||"").toLowerCase()===aEmail && sc.estado!=="cancelada"; }).length;
+    var upd=(schedules||[]).map(function(sc){
+      if(!ids[sc.id]) return sc; n++;
+      return Object.assign({},sc,{vendorEmail:aEmail, vendorId:(v&&v.id)||"", orden:n, motivo:"cubre ausencia de "+(aus.vendorNombre||""), estado:"confirmada", reajustada:true});
+    });
+    onSvSchedules&&onSvSchedules(upd);
+    onSvAusencias&&onSvAusencias((ausencias||[]).map(function(x){ return x.id===aus.id?Object.assign({},x,{estado:"aplicada",resueltaEn:hoy,cubrePor:aEmail}):x; }));
+    [aEmail, String(aus.vendorEmail||"").toLowerCase()].filter(function(e,i,a){ return e&&a.indexOf(e)===i; }).forEach(function(em){
+      var vv=schedTecnicos(vendors).find(function(x){ return String(x.email||"").toLowerCase()===em; });
+      if(!vv) return;
+      var mias=upd.filter(function(sc){ return String(sc.fecha).slice(0,10)===hoy && String(sc.vendorEmail||"").toLowerCase()===em; });
+      try{ notifyTemplate([vv.notifEmail||vv.email], "programacionCambio", {
+        tecnico:vendorDisplay(vv), fecha:fmtDate(hoy), dia:schedDiaNombre(hoy), total:String(mias.length),
+        limpiezas: mias.length ? mias.map(function(sc,i){ return (i+1)+". "+sc.propiedad+" — "+(sc.habitaciones||1)+" hab · "+sc.tipo+(sc.entradaHoy?" · TIENE ENTRADA HOY":""); }).join("\n") : "Sin limpiezas asignadas hoy." }); }catch(_){}
+    });
+    setAusPopup(null);
+  }
   /* Registra un comprobante nuevo en el historial y lo abre. */
   function pushComprobante(pago){
     var next=[pago].concat(pagos||[]);
@@ -2203,13 +2291,18 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
   /* a) Propiedades con un daño que lleva más de una semana sin programar ni
         revisar. Se cuentan PROPIEDADES, no reportes: al admin le importa a qué
         apartamento tiene que ir. */
-  var alertDanosProps = (function(){
-    var set = {};
+  /* Las tres alertas ahora son notificaciones individuales del centro de
+     notificaciones del encabezado. El badge cuenta el largo de esta lista.
+     Cada item trae id ESTABLE para que "eliminar" persista entre recargas. */
+  var notis = [];
+  /* a) Daños sin programar hace más de una semana. Una notificación por
+        APARTAMENTO —al admin le importa a dónde ir—, con el reporte más viejo. */
+  (function(){
+    var byP = {};
     (reps||[]).forEach(function(r){
       if(!r || !isDanos(r.categoria)) return;
       /* Los estados reales son pendiente · proceso · resuelto. "En proceso" ya
-         fue revisado por alguien, así que no es una alerta: solo cuenta lo que
-         sigue en pendiente. */
+         fue revisado por alguien: solo alerta lo que sigue en pendiente. */
       if((r.dmgStatus||"pendiente")!=="pendiente") return;
       var yaProg = !!r.mantProgramado || (schedules||[]).some(function(x){
         return x && String(x.danoId||"")===String(r.id) && x.estado!=="cancelada";
@@ -2217,22 +2310,46 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
       if(yaProg) return;
       var f=String(r.fecha||"").slice(0,10);
       if(!f || SCHED.dias(f,_hoyAl)<=7) return;
-      if(r.propiedad) set[r.propiedad]=1;
+      if(!r.propiedad) return;
+      var cur=byP[r.propiedad];
+      if(!cur){ byP[r.propiedad]={fecha:f, n:1}; }
+      else { cur.n++; if(f<cur.fecha) cur.fecha=f; }
     });
-    return Object.keys(set).length;
+    Object.keys(byP).forEach(function(p){
+      var o=byP[p];
+      notis.push({ id:"dano-"+p, tipo:"alerta", subcat:"Daños",
+        texto: o.n>1 ? (o.n+" daños sin programar") : "Daño sin programar",
+        contexto: p+" · reportado "+fmtDate(o.fecha),
+        ts: new Date(o.fecha+"T12:00:00").getTime(),
+        abrir: function(){ setTab("qa"); } });
+    });
   })();
-  /* b) Técnicos que pidieron revisar una calificación de huésped. */
-  var alertReviews = rcPend(rvCasos||[]).length;
+  /* b) Solicitudes de revisión de calificación sin responder. */
+  rcPend(rvCasos||[]).forEach(function(c){
+    notis.push({ id:"rev-"+(c.id||c.reviewId||((c.tecnico||"")+(c.checkIn||""))), tipo:"accion", subcat:"Calificaciones",
+      texto: c.tipo==="aclaracion" ? "Pide dejar una aclaración" : "Pide no contar una calificación",
+      contexto: [c.tecnico,c.propiedad].filter(Boolean).join(" · "),
+      ts: c.fecha ? new Date(String(c.fecha).slice(0,10)+"T12:00:00").getTime() : Date.now(),
+      abrir: function(){ setTab("qa"); } });
+  });
   /* c) Propiedades sin profunda en más de 60 días. estadoProfundas ya excluye
-        las pausadas y las que tienen las profundas quitadas a propósito. */
-  var alertProfundas = (function(){
+        pausadas y las que tienen las profundas quitadas a propósito. */
+  (function(){
     try{
-      return SCHED.estadoProfundas({
+      SCHED.estadoProfundas({
         hoy:_hoyAl, props:props,
         historial:(reps||[]).map(function(r){ return {propiedad:r.propiedad, tipo:r.categoria, fecha:r.fecha}; }),
         programadas:schedules||[]
-      }).filter(function(x){ return x.diasDesde===null || x.diasDesde>60; }).length;
-    }catch(_){ return 0; }
+      }).filter(function(x){ return x.diasDesde===null || x.diasDesde>60; })
+      .forEach(function(x){
+        notis.push({ id:"prof-"+x.propiedad, tipo:"alerta", subcat:"Limpiezas profundas",
+          texto: x.diasDesde===null ? "Sin ninguna limpieza profunda registrada" : "Sin limpieza profunda en "+x.diasDesde+" días",
+          contexto: x.propiedad,
+          cuando: x.diasDesde===null ? "—" : x.diasDesde+"d",
+          peso: x.diasDesde===null ? 1e9 : x.diasDesde,
+          abrir: function(){ setTab("sched"); } });
+      });
+    }catch(_){}
   })();
   /* Extraer daños embebidos en un reporte de limpieza → reporte de daños independiente */
   function extractDanios(r) {
@@ -2260,8 +2377,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
       {retryQ&&retryQ.length>0&&<RetryBanner retryQ={retryQ} setRetryQ={setRetryQ} reps={reps} setReps={setReps} onSyncing={function(b,m){}}/>}
       <ResponsiveHeader
         tab={tab} setTab={setTab}
-        alertDanos={alertDanosProps} alertReviews={alertReviews} alertProfundas={alertProfundas}
-        onAlert={function(k){ if(k==="prof") setTab("sched"); else setTab("qa"); }}
+        notis={notis}
         sheetsOk={sheetsOk} adminLabel={adminVendor?vendorDisplay(adminVendor):"Admin"}
         navItems={[["dash","Dashboard","dash"],["form","Formulario","edit"],["sched","Programa","calendar"],["qa","Calidad","star"],["adv","Adelantos","coins"]]}
         onConfig={function(){setTab("cfg");}} configActive={tab==="cfg"}
@@ -2270,6 +2386,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
         wifiProps={props}
         wifiVendor={adminVendor?adminVendor.email:""}
       />
+      {ausPopup&&<AusenciaHoyModal aus={ausPopup} schedules={schedules||[]} vendors={vendors} onClose={function(){setAusPopup(null);}} onApply={aplicarAusenciaHoy}/>}
 
       <div style={{display:tab==="dash"?"block":"none"}}><DashView props={props} reservas={reservas||[]} nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} meEmails={adminVendor?vendorEmailSet(adminVendor):[]} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh} schedules={schedules||[]} onSvSchedules={onSvSchedules} onUpsert={onUpsert} onDelete={onDelete}/></div>
       <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} myReps={reps} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
@@ -7582,6 +7699,7 @@ var ICONS = {
   plus:"M12 5v14M5 12h14",
   alert:"M12 3.2L2.4 19.6a1 1 0 00.87 1.5h17.46a1 1 0 00.87-1.5L12 3.2zM12 9v5M12 17.2v.05",
   refresh:"M20 11a8 8 0 10-2.3 6M20 5v6h-6",
+  info:"M12 21a9 9 0 100-18 9 9 0 000 18zM12 11v5M12 7.5v.05",
   logout:"M9 21H5a1.5 1.5 0 01-1.5-1.5v-15A1.5 1.5 0 015 3h4M16 17l5-5-5-5M21 12H9",
   search:"M11 19a8 8 0 100-16 8 8 0 000 16zM21 21l-4.3-4.3",
   arrowRight:"M5 12h14M13 6l6 6-6 6",
@@ -7706,10 +7824,173 @@ function HeaderFeedback({vendor, onSaveFeedback, isMobile}) {
   );
 }
 
+/* ═══ Ausencia de HOY: el admin elige quién cubre ═══
+   Aparece al abrir la página cuando un técnico avisó que falta HOY y tenía
+   limpiezas asignadas. Las futuras se reasignan solas; estas no, porque la ruta
+   del día ya está corriendo y la decisión es del administrador. */
+function AusenciaHoyModal({aus, schedules, vendors, onClose, onApply}){
+  const [aEmail,setAEmail] = useState("");
+  var hoy=SCHED.hoyGT();
+  var afectadas=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===hoy && String(s.vendorEmail||"").toLowerCase()===String(aus.vendorEmail||"").toLowerCase() && s.estado!=="cancelada"; })
+    .sort(function(a,b){ return (a.orden||0)-(b.orden||0); });
+  var opciones=schedTecnicos(vendors).filter(function(v){ return String(v.email||"").toLowerCase()!==String(aus.vendorEmail||"").toLowerCase() && v.active!==false; });
+  var listo=!!aEmail;
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:9400,background:"rgba(62,63,63,.55)",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div onClick={function(e){e.stopPropagation();}} style={{width:"100%",maxWidth:440,background:"#fff",borderRadius:28,padding:"26px 24px",boxShadow:"var(--sa-shadow-lg)",maxHeight:"88vh",overflowY:"auto"}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:C.attentionText,letterSpacing:".18em",textTransform:"uppercase"}}>Ausencia de hoy</div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:24,fontWeight:400,color:C.black,marginTop:6,lineHeight:1.2}}>{aus.vendorNombre||"Un técnico"} no puede hoy</div>
+        <div style={{fontSize:12.5,color:C.earth,marginTop:8,lineHeight:1.6,textWrap:"pretty"}}>
+          {aus.motivo?("Motivo: "+aus.motivo+". "):""}Tiene {afectadas.length} limpieza{afectadas.length===1?"":"s"} para hoy. Elige quién las cubre.
+        </div>
+        <div style={{margin:"16px 0",display:"flex",flexDirection:"column",gap:7}}>
+          {afectadas.map(function(sc,i){
+            return (
+              <div key={sc.id} style={{display:"flex",alignItems:"center",gap:10,background:C.surfaceWarm,borderRadius:12,padding:"11px 13px"}}>
+                <span className="t-num" style={{fontSize:11,fontWeight:700,color:C.taupe,minWidth:18}}>{i+1}</span>
+                <div style={{minWidth:0,flex:1}}>
+                  <div style={{fontSize:13,fontWeight:600,color:C.black,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sc.propiedad}</div>
+                  <div style={{fontSize:11,color:C.earth,marginTop:2}}>{(sc.habitaciones||1)} hab · {sc.tipo}{sc.entradaHoy?" · entra huésped hoy":""}</div>
+                </div>
+                {sc.entradaHoy&&<span style={{fontSize:9,fontWeight:700,color:C.attentionText,background:"#F8ECE9",padding:"3px 8px",borderRadius:"var(--sa-pill)",letterSpacing:".06em",flexShrink:0}}>PRIORIDAD</span>}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:7}}>¿Quién las cubre hoy?</div>
+        <select value={aEmail} onChange={function(e){setAEmail(e.target.value);}} style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:14,padding:"12px 13px",fontSize:13,fontFamily:"Montserrat,sans-serif",background:"#fff",outline:"none",minHeight:46}}>
+          <option value="">Selecciona un técnico…</option>
+          {opciones.map(function(v){ return <option key={v.email} value={String(v.email).toLowerCase()}>{vendorDisplay(v)}</option>; })}
+        </select>
+        <div style={{display:"flex",gap:9,marginTop:18,flexWrap:"wrap"}}>
+          <button disabled={!listo} onClick={function(){ onApply(aus, aEmail, afectadas); }} style={{flex:1,minWidth:160,padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:listo?C.black:C.gray,color:listo?"#fff":C.taupe,fontSize:12.5,fontWeight:700,cursor:listo?"pointer":"not-allowed",fontFamily:"Montserrat,sans-serif"}}>Asignar y avisar</button>
+          <button onClick={onClose} style={{padding:"13px 18px",minHeight:48,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Ahora no</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Centro de notificaciones — estilo Centro de Notificaciones de iOS ═══
+   Un solo fondo: el overlay oscuro difuminado. Cada notificación es su propia
+   píldora de vidrio; los encabezados de grupo/subcategoría son texto flotando.
+   Genérico: cada fuente arma sus items {id,tipo,subcat,texto,contexto,ts|cuando,
+   abrir}. Aquí solo se agrupa, se pinta el vidrio y se elimina de a una.
+   El logo NO cambia; esto reemplaza las tres píldoras de alerta que había. */
+/* Ventana de 7 días (incluye hoy). Los items con fecha entran a "recientes"; los
+   crónicos sin fecha (profundas) y los más viejos van a "anteriores": solo se
+   revelan cuando ya no queda nada reciente por resolver. */
+function notiSplit(notis){
+  var lim=Date.now()-7*86400000;
+  var rec=[], old=[];
+  (notis||[]).forEach(function(n){ if(n.ts!=null && n.ts>=lim) rec.push(n); else old.push(n); });
+  return {rec:rec, old:old};
+}
+/* Firma de contenido: si el item cambia (otra fecha, otro conteo) o se resuelve,
+   la firma cambia y una eliminación manual vieja deja de aplicarle. Así la
+   notificación es "inteligente" y no queda pegada tras resolverse. */
+function notiKey(n){ return n.id+"|"+(n.texto||"")+"|"+(n.ts!=null?n.ts:(n.cuando||"")); }
+function notiHaceTxt(ms){
+  var ahora=Date.now();
+  var min=Math.round((ahora-ms)/60000);
+  if(min<1) return "ahora";
+  if(min<60) return min+"m";
+  var d=new Date(ms);
+  var dias=(ahora-ms)/86400000;
+  if(dias<1) return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2);
+  return d.toLocaleDateString("es-GT",{day:"numeric",month:"short"});
+}
+var NOTI_TIPOS=[["accion","Necesita tu acción","info"],["alerta","Alertas importantes","alert"]];
+function NotiCenter({open, onClose, notis, onDismiss}){
+  if(!open) return null;
+  var sp=notiSplit(notis);
+  var modoAntiguo = sp.rec.length===0 && sp.old.length>0;
+  var mostrar = sp.rec.length ? sp.rec : sp.old;
+  var byTipo={};
+  (mostrar||[]).forEach(function(n){ (byTipo[n.tipo]=byTipo[n.tipo]||[]).push(n); });
+  var grupos=NOTI_TIPOS.filter(function(t){ return byTipo[t[0]]&&byTipo[t[0]].length; }).map(function(t){
+    var items=byTipo[t[0]], orden=[], mapa={};
+    items.forEach(function(n){ var sub=n.subcat||"General"; if(!mapa[sub]){mapa[sub]=[];orden.push(sub);} mapa[sub].push(n); });
+    return {key:t[0], titulo:t[1], icon:t[2], count:items.length, subs:orden.map(function(sub){ return {label:sub, items:mapa[sub]}; })};
+  });
+  var vacio=grupos.length===0;
+  var W="rgba(255,255,255,";
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:200,background:"rgba(28,28,30,.52)",backdropFilter:"blur(24px) saturate(150%)",WebkitBackdropFilter:"blur(24px) saturate(150%)",display:"flex",justifyContent:"center",alignItems:"flex-start",padding:14}}>
+      <div onClick={function(e){e.stopPropagation();}} style={{width:"100%",maxWidth:420,marginTop:56,maxHeight:"84vh",overflowY:"auto",display:"flex",flexDirection:"column",gap:14}}>
+        <div style={{textAlign:"center",fontSize:10,fontWeight:600,letterSpacing:".16em",textTransform:"uppercase",color:W+".72)"}}>
+          {vacio?"Sin notificaciones. Todo al día."
+            :modoAntiguo?"Nada nuevo en 7 días · "+sp.old.length+" pendiente"+(sp.old.length===1?"":"s")+" de antes"
+            :"Desliza una notificación a la izquierda para eliminarla"}
+        </div>
+        {!modoAntiguo&&sp.old.length>0&&(
+          <div style={{textAlign:"center",fontSize:10.5,color:W+".5)",fontWeight:500}}>Además, {sp.old.length} de más de 7 días — aparecen cuando resuelvas estas.</div>
+        )}
+        {grupos.map(function(g){
+          return (
+            <div key={g.key} style={{display:"flex",flexDirection:"column",gap:10}}>
+              <div style={{display:"flex",alignItems:"center",gap:9,padding:"2px 6px"}}>
+                <Icon name={g.icon} size={17} stroke={W+".92)"}/>
+                <span style={{flex:1,fontSize:11.5,fontWeight:600,letterSpacing:".16em",textTransform:"uppercase",color:W+".92)"}}>{g.titulo}</span>
+                <span style={{fontSize:12,fontWeight:600,fontVariantNumeric:"tabular-nums",color:W+".6)"}}>{g.count}</span>
+              </div>
+              {g.subs.map(function(sub){
+                var MAX=4;
+                var ord=sub.items.slice().sort(function(a,b){
+                  var pa=a.peso!=null?a.peso:(a.ts?(Date.now()-a.ts):0);
+                  var pb=b.peso!=null?b.peso:(b.ts?(Date.now()-b.ts):0);
+                  return pb-pa;
+                });
+                var top=ord.slice(0,MAX), resto=ord.slice(MAX);
+                return (
+                  <div key={sub.label} style={{display:"flex",flexDirection:"column",gap:8}}>
+                    <div style={{padding:"0 6px",fontSize:9.5,fontWeight:600,letterSpacing:".16em",textTransform:"uppercase",color:W+".5)"}}>{sub.label}{sub.items.length>MAX?" · "+sub.items.length:""}</div>
+                    {top.map(function(n){
+                      var cuando=n.cuando!=null?n.cuando:notiHaceTxt(n.ts);
+                      return (
+                        <div key={n.id} className="noti-swipe" style={{display:"flex",overflowX:"auto",scrollSnapType:"x mandatory",scrollbarWidth:"none",msOverflowStyle:"none",borderRadius:22,gap:8}}>
+                          <div onClick={function(){ onClose&&onClose(); n.abrir&&n.abrir(); }} style={{flex:"0 0 100%",scrollSnapAlign:"start",boxSizing:"border-box",display:"flex",alignItems:"flex-start",gap:12,borderRadius:22,padding:"13px 17px",cursor:"pointer",background:"rgba(72,72,74,.42)",backdropFilter:"blur(40px) saturate(180%)",WebkitBackdropFilter:"blur(40px) saturate(180%)",border:"1px solid "+W+".14)",boxShadow:"inset 0 1px 0 "+W+".22)"}}>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:13.5,color:W+".98)",lineHeight:1.4,textWrap:"pretty"}}>{n.texto}</div>
+                              {n.contexto&&<div style={{fontSize:11.5,color:W+".68)",marginTop:3,lineHeight:1.45}}>{n.contexto}</div>}
+                            </div>
+                            <div style={{flexShrink:0,minWidth:34,textAlign:"right",fontSize:10.5,color:W+".6)",fontVariantNumeric:"tabular-nums"}}>{cuando}</div>
+                          </div>
+                          <button onClick={function(){ onDismiss&&onDismiss(n); }} style={{flex:"0 0 80px",scrollSnapAlign:"end",border:"none",cursor:"pointer",borderRadius:22,background:"rgba(192,57,43,.9)",color:"#fff",fontSize:11,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif"}}>Eliminar</button>
+                        </div>
+                      );
+                    })}
+                    {resto.length>0&&(
+                      <div onClick={function(){ onClose&&onClose(); resto[0].abrir&&resto[0].abrir(); }} style={{cursor:"pointer",borderRadius:22,padding:"12px 17px",background:"rgba(72,72,74,.28)",border:"1px dashed "+W+".18)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+                        <span style={{fontSize:12.5,color:W+".82)"}}>y {resto.length} {resto.length===1?"más":"más"} en la lista</span>
+                        <Icon name="chevronRight" size={16} stroke={W+".6)"}/>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Responsive Header Component */
-function ResponsiveHeader({tab, setTab, alertDanos, alertReviews, alertProfundas, onAlert, navItems, onLogout, onConfig, configActive, role, sheetsOk, adminLabel, feedbackVendor, onSaveFeedback, wifiProps, wifiVendor}) {
+function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, configActive, role, sheetsOk, adminLabel, feedbackVendor, onSaveFeedback, wifiProps, wifiVendor}) {
   var sc = useScreen();
   var isMobile = sc.mobile;
+  const [notiOpen,setNotiOpen] = useState(false);
+  const [notiDismiss,setNotiDismiss] = useState(function(){ try{ return JSON.parse(localStorage.getItem("epi:notiDismiss")||"{}")||{}; }catch(_){ return {}; } });
+  function dismissNoti(n){ var k=notiKey(n); setNotiDismiss(function(p){ var u=Object.assign({},p); u[k]=true; try{ localStorage.setItem("epi:notiDismiss",JSON.stringify(u)); }catch(_){}; return u; }); }
+  /* Se filtra por firma de contenido: un item resuelto ya no viene en notis, y si
+     vuelve cambiado, su firma es otra y reaparece — nunca queda pegado. */
+  var notisVis = (notis||[]).filter(function(n){ return !notiDismiss[notiKey(n)]; });
+  /* El badge muestra lo de los últimos 7 días; si ya no hay nada reciente,
+     muestra el número de todas las anteriores. */
+  var _nsp = notiSplit(notisVis);
+  var notiTotal = _nsp.rec.length || _nsp.old.length;
   /* El encabezado completo —etiqueta de admin, contadores, 5 pestañas, Wi-Fi,
      Configuración y Salir— solo cabe a partir de ~1130px, pero se renderiza
      desde 640. En esa franja el grupo derecho se salía de la pantalla.
@@ -7730,22 +8011,16 @@ function ResponsiveHeader({tab, setTab, alertDanos, alertReviews, alertProfundas
           {!isMobile&&<span style={{fontSize:11,color:C.taupe,letterSpacing:".06em",minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{adminLabel||role}</span>}
           {sheetsOk===false&&!compacto&&<span style={{fontSize:9,fontWeight:700,background:"#F7E7E4",color:C.red,padding:"2px 6px",borderRadius:4,letterSpacing:".06em"}}>SIN SHEETS</span>}
           {sheetsOk===true&&!compacto&&<span style={{fontSize:9,fontWeight:700,background:"#E8F2ED",color:C.green,padding:"2px 6px",borderRadius:4,letterSpacing:".06em"}}>● SHEETS</span>}
-          {/* Tres alertas, cada una un pendiente que se resuelve hoy. Van con
-              ícono del set y no con letras: el espacio no da para el rótulo. */}
-          {[["dano","alert",alertDanos,C.red,"#F7E7E4",
-             (alertDanos===1?"1 propiedad":alertDanos+" propiedades")+" con un daño sin programar hace más de una semana"],
-            ["rev","star",alertReviews,C.attentionText,"#F8ECE9",
-             (alertReviews===1?"1 solicitud":alertReviews+" solicitudes")+" de revisión de calificación sin responder"],
-            ["prof","refresh",alertProfundas,C.attentionText,"#F8ECE9",
-             (alertProfundas===1?"1 propiedad":alertProfundas+" propiedades")+" sin limpieza profunda en más de 60 días"]
-          ].map(function(it){
-            var k=it[0], ic=it[1], n=it[2], cl=it[3], bg=it[4], ttl=it[5];
-            if(!n) return null;
-            return <button key={k} onClick={function(e){e.stopPropagation();onAlert&&onAlert(k);}} title={ttl}
-              style={{display:"inline-flex",alignItems:"center",gap:5,background:bg,border:"1px solid "+cl,color:cl,borderRadius:"var(--sa-pill)",padding:"3px 9px",minHeight:26,fontSize:11,fontWeight:700,fontVariantNumeric:"tabular-nums",cursor:"pointer",fontFamily:"Montserrat,sans-serif",flexShrink:0}}>
-              <Icon name={ic} size={12} stroke={cl}/>{n}
-            </button>;
-          })}
+          {/* Antes iban tres píldoras de alerta sueltas; ahora un solo triángulo
+              con el total abre el centro de notificaciones. Solo aparece si hay
+              algo pendiente. */}
+          {notiTotal>0&&(
+            <button onClick={function(e){e.stopPropagation();setNotiOpen(true);}} title={notiTotal+" pendiente"+(notiTotal===1?"":"s")} aria-label={"Notificaciones ("+notiTotal+")"}
+              style={{position:"relative",display:"inline-flex",alignItems:"center",justifyContent:"center",width:40,height:40,borderRadius:"var(--sa-pill)",border:"none",background:"transparent",cursor:"pointer",flexShrink:0,padding:0}}>
+              <Icon name="alert" size={23} stroke="#3B6691"/>
+              <span style={{position:"absolute",top:-1,right:-1,minWidth:18,height:18,boxSizing:"border-box",padding:"0 5px",borderRadius:"var(--sa-pill)",background:C.peach,color:"#fff",fontSize:10.5,fontWeight:700,fontVariantNumeric:"tabular-nums",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 1px 3px rgba(0,0,0,.28)"}}>{notiTotal>99?"99+":notiTotal}</span>
+            </button>
+          )}
         </div>
 
         {/* Comentario — barra superior, no invasivo (antes burbuja flotante) */}
@@ -7791,6 +8066,8 @@ function ResponsiveHeader({tab, setTab, alertDanos, alertReviews, alertProfundas
         );
         return bar([].concat(rest.slice(0,half).map(tabBtn),[dashBtn],rest.slice(half).map(tabBtn)));
       })()}
+
+      <NotiCenter open={notiOpen} onClose={function(){setNotiOpen(false);}} notis={notisVis} onDismiss={dismissNoti}/>
     </>
   );
 }
@@ -11121,7 +11398,7 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
         {tecnico:vendorDisplay(vendor), fecha:fmtDate(fAus), motivo:motivo.trim()||"—"});
     }catch(_){}
     setPedir(false); setFAus(""); setMotivo("");
-    setOk("Aviso enviado. El administrador reasignará tus limpiezas de ese día y te confirmará.");
+    setOk("Aviso enviado. Reasignamos tus limpiezas de ese día automáticamente" + (fAus===SCHED.hoyGT()?" — como es para hoy, el administrador confirma quién las cubre.":"."));
     setTimeout(function(){ setOk(""); }, 6000);
   }
 
@@ -15284,6 +15561,7 @@ function GS() {
     + ".f input,.f select,.f textarea{width:100%;border:1px solid #D8D4CE;border-radius:14px;padding:12px 14px;font-size:14px;color:#3E3F3F;background:#fff;outline:none;transition:border-color .2s,box-shadow .2s;-webkit-appearance:none;appearance:none;}"
     + ".f input:focus,.f select:focus,.f textarea:focus{border-color:#3E3F3F;box-shadow:var(--sa-focus-ring);}"
     + "::-webkit-scrollbar{width:3px;}::-webkit-scrollbar-thumb{background:#D8D4CE;border-radius:3px;}"
+    + ".noti-swipe::-webkit-scrollbar{display:none;height:0;}"
     + "::placeholder{color:#B7B0AE;}"
     + "@media(max-width:639px){.hide-mobile{display:none!important;}.table-cols{grid-template-columns:1fr auto!important;}}"
     + "@media(max-width:639px){.filter-cols{grid-template-columns:1fr 1fr!important;}}"
