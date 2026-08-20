@@ -1,0 +1,9 @@
+ARCHIVOS MODIFICADOS EN ESTA TANDA — subir al repo de GitHub Pages, a la raíz.
+
+  app.jsx      ← reemplazar
+  index.html   ← reemplazar (trae el filtro SVG #lg-refract del Liquid Glass)
+
+Los demás archivos (sched-engine.js, sa-tokens.css, fonts/, email-assets/) NO
+cambiaron en esta tanda; solo súbelos si aún no los tenías desplegados.
+
+Apps Script: sin cambios.
