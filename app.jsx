@@ -7911,7 +7911,7 @@ function NotiRow({n, onOpen, onDismiss, onSnooze}){
   return (
     <div ref={setRef} data-noti-card className="noti-swipe" style={{display:"flex",overflowX:"auto",scrollSnapType:"x mandatory",scrollbarWidth:"none",msOverflowStyle:"none",borderRadius:22,gap:8,willChange:"transform,opacity"}}>
       <button onClick={function(){ onSnooze&&onSnooze(n); }} style={{flex:"0 0 80px",scrollSnapAlign:"start",border:"none",cursor:"pointer",borderRadius:22,background:"rgba(72,72,74,.55)",color:"#fff",fontSize:11,fontWeight:700,letterSpacing:".06em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif"}}>Posponer</button>
-      <div onClick={onOpen} style={{flex:"0 0 100%",scrollSnapAlign:"center",boxSizing:"border-box",display:"flex",alignItems:"flex-start",gap:12,borderRadius:22,padding:"13px 17px",cursor:"pointer",background:"rgba(72,72,74,.42)",backdropFilter:"blur(40px) saturate(180%)",WebkitBackdropFilter:"blur(40px) saturate(180%)",border:"1px solid "+W+".14)",boxShadow:"inset 0 1px 0 "+W+".22)"}}>
+      <div onClick={onOpen} style={{flex:"0 0 100%",scrollSnapAlign:"center",boxSizing:"border-box",display:"flex",alignItems:"flex-start",gap:12,borderRadius:22,padding:"13px 17px",cursor:"pointer",background:"rgba(72,72,74,.42)",backdropFilter:"blur(40px) saturate(180%) brightness(1.08)",WebkitBackdropFilter:"blur(40px) saturate(180%) brightness(1.08)",border:"1px solid "+W+".14)",boxShadow:"0 8px 24px rgba(0,0,0,.18),inset 0 1px 0 "+W+".42),inset 0 0 0 1px "+W+".06)"}}>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:13.5,color:W+".98)",lineHeight:1.4,textWrap:"pretty"}}>{n.texto}</div>
           {n.contexto&&<div style={{fontSize:11.5,color:W+".68)",marginTop:3,lineHeight:1.45}}>{n.contexto}</div>}
@@ -8015,7 +8015,7 @@ function NotiCenter({open, onClose, notis, onDismiss, onSnooze}){
      todo sube junto, igual que en iOS. Al soltar sin pasar el umbral, vuelve a 0
      con transición → bounce-back. Al cerrar, sale del todo hacia arriba. */
   return (
-    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:200,overflow:"hidden",background:"rgba(28,28,30,"+(closing?0:.34)+")",backdropFilter:"blur(24px) saturate(150%)",WebkitBackdropFilter:"blur(24px) saturate(150%)",transform:closing?"translateY(-100%)":(d?"translateY("+d+"px)":"none"),opacity:closing?0:1,borderBottomLeftRadius:revelado?26:0,borderBottomRightRadius:revelado?26:0,transition:draggingRef.current?"none":"transform .34s cubic-bezier(0.22,0.61,0.36,1),background .32s cubic-bezier(0.22,0.61,0.36,1),opacity .32s cubic-bezier(0.22,0.61,0.36,1),border-radius .32s cubic-bezier(0.22,0.61,0.36,1)"}}>
+    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:200,overflow:"hidden",background:"rgba(28,28,30,"+(closing?0:.34)+")",backdropFilter:"blur(30px) saturate(180%) brightness(1.06)",WebkitBackdropFilter:"blur(30px) saturate(180%) brightness(1.06)",transform:closing?"translateY(-100%)":(d?"translateY("+d+"px)":"none"),opacity:closing?0:1,borderBottomLeftRadius:revelado?26:0,borderBottomRightRadius:revelado?26:0,transition:draggingRef.current?"none":"transform .34s cubic-bezier(0.22,0.61,0.36,1),background .32s cubic-bezier(0.22,0.61,0.36,1),opacity .32s cubic-bezier(0.22,0.61,0.36,1),border-radius .32s cubic-bezier(0.22,0.61,0.36,1)"}}>
       <div onClick={function(e){e.stopPropagation();}}
         style={{position:"absolute",top:56,bottom:78,left:"50%",width:"100%",maxWidth:420,transform:"translateX(-50%)",display:"flex",flexDirection:"column"}}>
         <div ref={scrollerRef} onScroll={onScroll} className="noti-swipe" style={{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",display:"flex",flexDirection:"column",gap:14,padding:"0 14px"}}>
@@ -8055,7 +8055,7 @@ function NotiCenter({open, onClose, notis, onDismiss, onSnooze}){
                       );
                     })}
                     {resto.length>0&&(
-                      <div onClick={function(){ onClose&&onClose(); resto[0].abrir&&resto[0].abrir(); }} style={{cursor:"pointer",borderRadius:22,padding:"12px 17px",background:"rgba(72,72,74,.28)",border:"1px dashed "+W+".18)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+                      <div onClick={function(){ onClose&&onClose(); resto[0].abrir&&resto[0].abrir(); }} style={{cursor:"pointer",borderRadius:22,padding:"12px 17px",background:"rgba(72,72,74,.30)",backdropFilter:"blur(30px) saturate(170%) brightness(1.06)",WebkitBackdropFilter:"blur(30px) saturate(170%) brightness(1.06)",border:"1px solid "+W+".10)",boxShadow:"inset 0 1px 0 "+W+".24)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
                         <span style={{fontSize:12.5,color:W+".82)"}}>y {resto.length} {resto.length===1?"más":"más"} en la lista</span>
                         <Icon name="chevronRight" size={16} stroke={W+".6)"}/>
                       </div>
@@ -8098,7 +8098,7 @@ function NotiToast({item, onOpen, onClose}){
   return (
     <div onClick={function(){ onOpen&&onOpen(); setShow(false); setTimeout(onClose,200); }}
       style={{position:"fixed",top:"max(12px,env(safe-area-inset-top))",left:"50%",width:"calc(100% - 24px)",maxWidth:400,zIndex:400,cursor:"pointer",transform:"translateX(-50%) translateY("+(show?"0":"-150%")+")",opacity:show?1:0,transition:"transform .4s cubic-bezier(0.22,0.61,0.36,1),opacity .3s cubic-bezier(0.22,0.61,0.36,1)"}}>
-      <div style={{display:"flex",alignItems:"flex-start",gap:12,borderRadius:22,padding:"13px 16px",background:"rgba(58,58,60,.7)",backdropFilter:"blur(40px) saturate(180%)",WebkitBackdropFilter:"blur(40px) saturate(180%)",border:"1px solid "+W+".14)",boxShadow:"0 18px 50px rgba(0,0,0,.35),inset 0 1px 0 "+W+".22)"}}>
+      <div style={{display:"flex",alignItems:"flex-start",gap:12,borderRadius:22,padding:"13px 16px",background:"rgba(58,58,60,.7)",backdropFilter:"blur(40px) saturate(180%) brightness(1.08)",WebkitBackdropFilter:"blur(40px) saturate(180%) brightness(1.08)",border:"1px solid "+W+".14)",boxShadow:"0 18px 50px rgba(0,0,0,.35),inset 0 1px 0 "+W+".45),inset 0 0 0 1px "+W+".07)"}}>
         <div style={{flexShrink:0,width:30,height:30,borderRadius:9,background:C.peach,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="alert" size={17} stroke="#fff"/></div>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:9,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",color:W+".6)",marginBottom:2}}>Spacio AM · ahora</div>
@@ -8123,17 +8123,26 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
   /* Se filtra por firma de contenido: un item resuelto ya no viene en notis, y si
      vuelve cambiado, su firma es otra y reaparece — nunca queda pegado. */
   var notisVis = (notis||[]).filter(function(n){ var k=notiKey(n); return !notiDismiss[k] && !notiSnooze[k]; });
-  /* Push estilo iOS: al aparecer una notificación NUEVA (con fecha de evento)
-     durante la sesión, se muestra un banner. La primera pasada solo memoriza las
-     que ya existían, para no anunciarlas todas al abrir. */
+  /* Push estilo iOS: una notificación se anuncia como banner UNA sola vez en la
+     vida. Las ya mostradas viven en localStorage (epi:notiSeen) por firma de
+     contenido, así que en el próximo login NO vuelven como push — van directo al
+     centro de notificaciones. Antes el registro vivía en memoria y se perdía en
+     cada sesión: por eso al entrar salían todas otra vez. */
   const [toasts,setToasts] = useState([]);
   var seenRef = React.useRef(null);
+  function _loadSeen(){ try{ return JSON.parse(localStorage.getItem("epi:notiSeen")||"null"); }catch(_){ return null; } }
+  function _saveSeen(o){ try{ localStorage.setItem("epi:notiSeen", JSON.stringify(o)); }catch(_){} }
   var visSig = notisVis.map(notiKey).join("|");
   React.useEffect(function(){
+    if(seenRef.current==null) seenRef.current=_loadSeen();
     var keys=notisVis.map(notiKey);
-    if(seenRef.current==null){ seenRef.current={}; keys.forEach(function(k){ seenRef.current[k]=1; }); return; }
+    /* Primer uso jamás (sin registro): memoriza en silencio, no floodea. */
+    if(seenRef.current==null){ var boot={}; keys.forEach(function(k){ boot[k]=1; }); seenRef.current=boot; _saveSeen(boot); return; }
     var nuevos=notisVis.filter(function(n){ return n.ts!=null && !seenRef.current[notiKey(n)]; });
-    keys.forEach(function(k){ seenRef.current[k]=1; });
+    /* Marca TODO lo visible como visto (con o sin push), así nunca reaparece. */
+    var changed=false, u=Object.assign({},seenRef.current);
+    keys.forEach(function(k){ if(!u[k]){ u[k]=1; changed=true; } });
+    if(changed){ seenRef.current=u; _saveSeen(u); }
     if(nuevos.length) setToasts(function(p){ return p.concat(nuevos.slice(-3)); });
   },[visSig]);
   /* El badge muestra lo de los últimos 7 días; si ya no hay nada reciente,
