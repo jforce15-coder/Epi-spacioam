@@ -7901,11 +7901,105 @@ function notiHaceTxt(ms){
   return d.toLocaleDateString("es-GT",{day:"numeric",month:"short"});
 }
 var NOTI_TIPOS=[["accion","Necesita tu acción","info"],["alerta","Alertas importantes","alert"]];
-function NotiCenter({open, onClose, notis, onDismiss}){
+/* Fila con una sola notificación centrada, dos cajones ocultos a los lados:
+   swipe-left → Eliminar, swipe-right → Posponer. Al montar dejamos el scroll en
+   la tarjeta (cajón de posponer oculto a la izquierda). */
+function NotiRow({n, onOpen, onDismiss, onSnooze}){
+  var W="rgba(255,255,255,";
+  var cuando=n.cuando!=null?n.cuando:notiHaceTxt(n.ts);
+  var setRef=React.useCallback(function(el){ if(el){ requestAnimationFrame(function(){ try{ el.scrollLeft=88; }catch(_){} }); } },[]);
+  return (
+    <div ref={setRef} data-noti-card className="noti-swipe" style={{display:"flex",overflowX:"auto",scrollSnapType:"x mandatory",scrollbarWidth:"none",msOverflowStyle:"none",borderRadius:22,gap:8,willChange:"transform,opacity"}}>
+      <button onClick={function(){ onSnooze&&onSnooze(n); }} style={{flex:"0 0 80px",scrollSnapAlign:"start",border:"none",cursor:"pointer",borderRadius:22,background:"rgba(72,72,74,.55)",color:"#fff",fontSize:11,fontWeight:700,letterSpacing:".06em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif"}}>Posponer</button>
+      <div onClick={onOpen} style={{flex:"0 0 100%",scrollSnapAlign:"center",boxSizing:"border-box",display:"flex",alignItems:"flex-start",gap:12,borderRadius:22,padding:"13px 17px",cursor:"pointer",background:"rgba(72,72,74,.42)",backdropFilter:"blur(40px) saturate(180%)",WebkitBackdropFilter:"blur(40px) saturate(180%)",border:"1px solid "+W+".14)",boxShadow:"inset 0 1px 0 "+W+".22)"}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:13.5,color:W+".98)",lineHeight:1.4,textWrap:"pretty"}}>{n.texto}</div>
+          {n.contexto&&<div style={{fontSize:11.5,color:W+".68)",marginTop:3,lineHeight:1.45}}>{n.contexto}</div>}
+        </div>
+        <div style={{flexShrink:0,minWidth:34,textAlign:"right",fontSize:10.5,color:W+".6)",fontVariantNumeric:"tabular-nums"}}>{cuando}</div>
+      </div>
+      <button onClick={function(){ onDismiss&&onDismiss(n); }} style={{flex:"0 0 80px",scrollSnapAlign:"end",border:"none",cursor:"pointer",borderRadius:22,background:"rgba(192,57,43,.9)",color:"#fff",fontSize:11,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif"}}>Eliminar</button>
+    </div>
+  );
+}
+function NotiCenter({open, onClose, notis, onDismiss, onSnooze}){
+  /* Hooks antes del early-return para no romper el orden de hooks. */
+  var [verMas,setVerMas] = useState(false);
+  var [dragY,setDragY] = useState(0);
+  var [closing,setClosing] = useState(false);
+  var startY = React.useRef(null);
+  var dragRef = React.useRef(0);
+  var scrollerRef = React.useRef(null);
+  var draggingRef = React.useRef(false);
+  /* Mientras el panel está abierto, se bloquea el scroll del fondo: así el
+     swipe-up no arrastra el contenido que está detrás. */
+  React.useEffect(function(){
+    if(!open) return;
+    var b=document.body, prevO=b.style.overflow, prevT=b.style.touchAction;
+    b.style.overflow="hidden"; b.style.touchAction="none";
+    return function(){ b.style.overflow=prevO; b.style.touchAction=prevT; };
+  },[open]);
+  /* Swipe-up cierra la hoja completa (fondo + notificaciones + asa suben juntos,
+     como en iOS). El gesto vive en TODO el borde inferior. */
+  function tStart(e){
+    startY.current = e.touches&&e.touches[0]?e.touches[0].clientY:null;
+    dragRef.current=0; draggingRef.current=true;
+  }
+  function tMove(e){
+    if(startY.current==null) return;
+    var y=e.touches&&e.touches[0]?e.touches[0].clientY:null; if(y==null) return;
+    var dy=Math.min(0,y-startY.current);
+    dragRef.current=dy; setDragY(dy);
+  }
+  function tEnd(){
+    if(startY.current==null) return; startY.current=null; draggingRef.current=false;
+    var wh=(typeof window!=="undefined"&&window.innerHeight)||1000;
+    /* Umbral ~35% de la pantalla. Un swipe parcial NO cierra: al soltar, el
+       borde vuelve a bajar solo (bounce-back, como si el borde tuviera gravedad). */
+    if(dragRef.current < -wh*0.35){ setClosing(true); setTimeout(function(){ setClosing(false); setDragY(0); dragRef.current=0; onClose&&onClose(); },340); }
+    else { dragRef.current=0; setDragY(0); }
+  }
+  /* Carrusel estilo iOS: al hacer scroll, las tarjetas de arriba se encogen y se
+     desvanecen (se "ocultan" pegadas al tope) y las de abajo asoman por detrás de
+     la última. No es un scroll plano: es un mazo que se apila. */
+  function onScroll(e){
+    var el=e.currentTarget;
+    var box=el.getBoundingClientRect();
+    var top=box.top, bot=box.bottom;
+    var cards=el.querySelectorAll("[data-noti-card]");
+    cards.forEach(function(c){
+      var r=c.getBoundingClientRect();
+      var relTop=r.top-top;
+      var relBot=bot-r.bottom;
+      var scale=1, op=1, ty=0;
+      if(relTop<40){                       /* saliendo por arriba: encoge, desvanece y frena (pin) */
+        var over=40-relTop;
+        scale=Math.max(0.80,1-over/520);
+        op=Math.max(0,1-over/86);
+        ty=Math.min(over*0.35,44);
+      } else if(relBot<28){                 /* entrando por abajo: asoma detrás de la última */
+        var under=28-relBot;
+        scale=Math.max(0.90,1-under/900);
+        op=Math.max(0.35,1-under/150);
+      }
+      c.style.transformOrigin=relTop<40?"top center":"bottom center";
+      c.style.transform="translateY("+ty+"px) scale("+scale+")";
+      c.style.opacity=op;
+    });
+  }
+  React.useEffect(function(){
+    if(!open) return;
+    var el=scrollerRef.current; if(!el) return;
+    var raf=requestAnimationFrame(function(){ onScroll({currentTarget:el}); });
+    return function(){ cancelAnimationFrame(raf); };
+  },[open,dragY]);
   if(!open) return null;
   var sp=notiSplit(notis);
   var modoAntiguo = sp.rec.length===0 && sp.old.length>0;
-  var mostrar = sp.rec.length ? sp.rec : sp.old;
+  /* Ventana de 7 días — SOLO en esta app. Por defecto se ven las recientes; el
+     botón "Ver más" de abajo revela el resto cuando el usuario quiera. Si no hay
+     nada reciente, ya se muestran directamente las anteriores. */
+  var mostrar = modoAntiguo ? sp.old : (verMas ? sp.rec.concat(sp.old) : sp.rec);
   var byTipo={};
   (mostrar||[]).forEach(function(n){ (byTipo[n.tipo]=byTipo[n.tipo]||[]).push(n); });
   var grupos=NOTI_TIPOS.filter(function(t){ return byTipo[t[0]]&&byTipo[t[0]].length; }).map(function(t){
@@ -7915,16 +8009,24 @@ function NotiCenter({open, onClose, notis, onDismiss}){
   });
   var vacio=grupos.length===0;
   var W="rgba(255,255,255,";
+  var d = dragY<0?dragY:0;
+  var revelado = !!(d||closing);
+  /* La hoja ENTERA (fondo + notificaciones + asa) sigue al dedo con translateY:
+     todo sube junto, igual que en iOS. Al soltar sin pasar el umbral, vuelve a 0
+     con transición → bounce-back. Al cerrar, sale del todo hacia arriba. */
   return (
-    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:200,background:"rgba(28,28,30,.52)",backdropFilter:"blur(24px) saturate(150%)",WebkitBackdropFilter:"blur(24px) saturate(150%)",display:"flex",justifyContent:"center",alignItems:"flex-start",padding:14}}>
-      <div onClick={function(e){e.stopPropagation();}} style={{width:"100%",maxWidth:420,marginTop:56,maxHeight:"84vh",overflowY:"auto",display:"flex",flexDirection:"column",gap:14}}>
-        <div style={{textAlign:"center",fontSize:10,fontWeight:600,letterSpacing:".16em",textTransform:"uppercase",color:W+".72)"}}>
-          {vacio?"Sin notificaciones. Todo al día."
-            :modoAntiguo?"Nada nuevo en 7 días · "+sp.old.length+" pendiente"+(sp.old.length===1?"":"s")+" de antes"
-            :"Desliza una notificación a la izquierda para eliminarla"}
-        </div>
-        {!modoAntiguo&&sp.old.length>0&&(
-          <div style={{textAlign:"center",fontSize:10.5,color:W+".5)",fontWeight:500}}>Además, {sp.old.length} de más de 7 días — aparecen cuando resuelvas estas.</div>
+    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:200,overflow:"hidden",background:"rgba(28,28,30,"+(closing?0:.34)+")",backdropFilter:"blur(24px) saturate(150%)",WebkitBackdropFilter:"blur(24px) saturate(150%)",transform:closing?"translateY(-100%)":(d?"translateY("+d+"px)":"none"),opacity:closing?0:1,borderBottomLeftRadius:revelado?26:0,borderBottomRightRadius:revelado?26:0,transition:draggingRef.current?"none":"transform .34s cubic-bezier(0.22,0.61,0.36,1),background .32s cubic-bezier(0.22,0.61,0.36,1),opacity .32s cubic-bezier(0.22,0.61,0.36,1),border-radius .32s cubic-bezier(0.22,0.61,0.36,1)"}}>
+      <div onClick={function(e){e.stopPropagation();}}
+        style={{position:"absolute",top:56,bottom:78,left:"50%",width:"100%",maxWidth:420,transform:"translateX(-50%)",display:"flex",flexDirection:"column"}}>
+        <div ref={scrollerRef} onScroll={onScroll} className="noti-swipe" style={{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",display:"flex",flexDirection:"column",gap:14,padding:"0 14px"}}>
+        {(vacio||modoAntiguo)&&(
+          <div style={{textAlign:"center",fontSize:10,fontWeight:600,letterSpacing:".16em",textTransform:"uppercase",color:W+".72)"}}>
+            {vacio?"Sin notificaciones. Todo al día."
+              :"Nada nuevo en 7 días · "+sp.old.length+" pendiente"+(sp.old.length===1?"":"s")+" de antes"}
+          </div>
+        )}
+        {!modoAntiguo&&sp.old.length>0&&!verMas&&(
+          <div style={{textAlign:"center",fontSize:10.5,color:W+".5)",fontWeight:500}}>Mostrando los últimos 7 días.</div>
         )}
         {grupos.map(function(g){
           return (
@@ -7946,18 +8048,10 @@ function NotiCenter({open, onClose, notis, onDismiss}){
                   <div key={sub.label} style={{display:"flex",flexDirection:"column",gap:8}}>
                     <div style={{padding:"0 6px",fontSize:9.5,fontWeight:600,letterSpacing:".16em",textTransform:"uppercase",color:W+".5)"}}>{sub.label}{sub.items.length>MAX?" · "+sub.items.length:""}</div>
                     {top.map(function(n){
-                      var cuando=n.cuando!=null?n.cuando:notiHaceTxt(n.ts);
                       return (
-                        <div key={n.id} className="noti-swipe" style={{display:"flex",overflowX:"auto",scrollSnapType:"x mandatory",scrollbarWidth:"none",msOverflowStyle:"none",borderRadius:22,gap:8}}>
-                          <div onClick={function(){ onClose&&onClose(); n.abrir&&n.abrir(); }} style={{flex:"0 0 100%",scrollSnapAlign:"start",boxSizing:"border-box",display:"flex",alignItems:"flex-start",gap:12,borderRadius:22,padding:"13px 17px",cursor:"pointer",background:"rgba(72,72,74,.42)",backdropFilter:"blur(40px) saturate(180%)",WebkitBackdropFilter:"blur(40px) saturate(180%)",border:"1px solid "+W+".14)",boxShadow:"inset 0 1px 0 "+W+".22)"}}>
-                            <div style={{flex:1,minWidth:0}}>
-                              <div style={{fontSize:13.5,color:W+".98)",lineHeight:1.4,textWrap:"pretty"}}>{n.texto}</div>
-                              {n.contexto&&<div style={{fontSize:11.5,color:W+".68)",marginTop:3,lineHeight:1.45}}>{n.contexto}</div>}
-                            </div>
-                            <div style={{flexShrink:0,minWidth:34,textAlign:"right",fontSize:10.5,color:W+".6)",fontVariantNumeric:"tabular-nums"}}>{cuando}</div>
-                          </div>
-                          <button onClick={function(){ onDismiss&&onDismiss(n); }} style={{flex:"0 0 80px",scrollSnapAlign:"end",border:"none",cursor:"pointer",borderRadius:22,background:"rgba(192,57,43,.9)",color:"#fff",fontSize:11,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif"}}>Eliminar</button>
-                        </div>
+                        <NotiRow key={n.id} n={n}
+                          onOpen={function(){ onClose&&onClose(); n.abrir&&n.abrir(); }}
+                          onDismiss={onDismiss} onSnooze={onSnooze}/>
                       );
                     })}
                     {resto.length>0&&(
@@ -7972,21 +8066,76 @@ function NotiCenter({open, onClose, notis, onDismiss}){
             </div>
           );
         })}
+        {!modoAntiguo&&sp.old.length>0&&(
+          <button onClick={function(){ setVerMas(!verMas); }} style={{alignSelf:"center",marginTop:2,marginBottom:8,border:"1px solid "+W+".2)",cursor:"pointer",borderRadius:"var(--sa-pill)",padding:"9px 20px",background:"rgba(72,72,74,.35)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",color:W+".92)",fontSize:11,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif"}}>{verMas?"Ver menos":"Ver más · "+sp.old.length+" anteriores"}</button>
+        )}
+        </div>
+      </div>
+      {/* Asa de cierre: ocupa TODO el borde inferior de la pantalla, así el
+         swipe-up funciona en cualquier punto de abajo, no solo sobre la línea.
+         Vive como hijo del overlay en bottom:0, de modo que su línea coincide
+         con el borde inferior de la hoja — y ese borde sigue al dedo. */}
+      <div onTouchStart={tStart} onTouchMove={tMove} onTouchEnd={tEnd} onClick={onClose}
+        style={{position:"absolute",left:0,right:0,bottom:0,height:78,touchAction:"none",cursor:"grab",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:9,paddingBottom:"env(safe-area-inset-bottom)",userSelect:"none",WebkitUserSelect:"none"}}>
+        <div style={{width:44,height:5,borderRadius:999,background:W+".55)"}}></div>
+        <span style={{fontSize:9,fontWeight:600,letterSpacing:".18em",textTransform:"uppercase",color:W+".5)"}}>Desliza para cerrar</span>
       </div>
     </div>
   );
 }
 
 /* ─── Responsive Header Component */
+/* Banner push estilo iOS: cuando llega una notificación NUEVA durante la sesión,
+   baja desde arriba, se queda ~5s y se va sola; al tocarlo abre el centro. */
+function NotiToast({item, onOpen, onClose}){
+  var [show,setShow]=useState(false);
+  var W="rgba(255,255,255,";
+  React.useEffect(function(){
+    var a=requestAnimationFrame(function(){ setShow(true); });
+    var t=setTimeout(function(){ setShow(false); setTimeout(onClose,340); },5000);
+    return function(){ cancelAnimationFrame(a); clearTimeout(t); };
+  },[]);
+  return (
+    <div onClick={function(){ onOpen&&onOpen(); setShow(false); setTimeout(onClose,200); }}
+      style={{position:"fixed",top:"max(12px,env(safe-area-inset-top))",left:"50%",width:"calc(100% - 24px)",maxWidth:400,zIndex:400,cursor:"pointer",transform:"translateX(-50%) translateY("+(show?"0":"-150%")+")",opacity:show?1:0,transition:"transform .4s cubic-bezier(0.22,0.61,0.36,1),opacity .3s cubic-bezier(0.22,0.61,0.36,1)"}}>
+      <div style={{display:"flex",alignItems:"flex-start",gap:12,borderRadius:22,padding:"13px 16px",background:"rgba(58,58,60,.7)",backdropFilter:"blur(40px) saturate(180%)",WebkitBackdropFilter:"blur(40px) saturate(180%)",border:"1px solid "+W+".14)",boxShadow:"0 18px 50px rgba(0,0,0,.35),inset 0 1px 0 "+W+".22)"}}>
+        <div style={{flexShrink:0,width:30,height:30,borderRadius:9,background:C.peach,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="alert" size={17} stroke="#fff"/></div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:9,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",color:W+".6)",marginBottom:2}}>Spacio AM · ahora</div>
+          <div style={{fontSize:13.5,color:W+".98)",lineHeight:1.35,textWrap:"pretty"}}>{item.texto}</div>
+          {item.contexto&&<div style={{fontSize:11.5,color:W+".68)",marginTop:2,lineHeight:1.4}}>{item.contexto}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
 function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, configActive, role, sheetsOk, adminLabel, feedbackVendor, onSaveFeedback, wifiProps, wifiVendor}) {
   var sc = useScreen();
   var isMobile = sc.mobile;
   const [notiOpen,setNotiOpen] = useState(false);
   const [notiDismiss,setNotiDismiss] = useState(function(){ try{ return JSON.parse(localStorage.getItem("epi:notiDismiss")||"{}")||{}; }catch(_){ return {}; } });
   function dismissNoti(n){ var k=notiKey(n); setNotiDismiss(function(p){ var u=Object.assign({},p); u[k]=true; try{ localStorage.setItem("epi:notiDismiss",JSON.stringify(u)); }catch(_){}; return u; }); }
+  /* Posponer: swipe-right oculta la notificación hasta el PRÓXIMO inicio de
+     sesión. Vive en memoria (no en localStorage), así que un login nuevo la
+     trae de vuelta sola — que es justo lo que se pidió. */
+  const [notiSnooze,setNotiSnooze] = useState({});
+  function snoozeNoti(n){ var k=notiKey(n); setNotiSnooze(function(p){ var u=Object.assign({},p); u[k]=true; return u; }); }
   /* Se filtra por firma de contenido: un item resuelto ya no viene en notis, y si
      vuelve cambiado, su firma es otra y reaparece — nunca queda pegado. */
-  var notisVis = (notis||[]).filter(function(n){ return !notiDismiss[notiKey(n)]; });
+  var notisVis = (notis||[]).filter(function(n){ var k=notiKey(n); return !notiDismiss[k] && !notiSnooze[k]; });
+  /* Push estilo iOS: al aparecer una notificación NUEVA (con fecha de evento)
+     durante la sesión, se muestra un banner. La primera pasada solo memoriza las
+     que ya existían, para no anunciarlas todas al abrir. */
+  const [toasts,setToasts] = useState([]);
+  var seenRef = React.useRef(null);
+  var visSig = notisVis.map(notiKey).join("|");
+  React.useEffect(function(){
+    var keys=notisVis.map(notiKey);
+    if(seenRef.current==null){ seenRef.current={}; keys.forEach(function(k){ seenRef.current[k]=1; }); return; }
+    var nuevos=notisVis.filter(function(n){ return n.ts!=null && !seenRef.current[notiKey(n)]; });
+    keys.forEach(function(k){ seenRef.current[k]=1; });
+    if(nuevos.length) setToasts(function(p){ return p.concat(nuevos.slice(-3)); });
+  },[visSig]);
   /* El badge muestra lo de los últimos 7 días; si ya no hay nada reciente,
      muestra el número de todas las anteriores. */
   var _nsp = notiSplit(notisVis);
@@ -8067,7 +8216,8 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
         return bar([].concat(rest.slice(0,half).map(tabBtn),[dashBtn],rest.slice(half).map(tabBtn)));
       })()}
 
-      <NotiCenter open={notiOpen} onClose={function(){setNotiOpen(false);}} notis={notisVis} onDismiss={dismissNoti}/>
+      <NotiCenter open={notiOpen} onClose={function(){setNotiOpen(false);}} notis={notisVis} onDismiss={dismissNoti} onSnooze={snoozeNoti}/>
+      {toasts[0] && <NotiToast key={notiKey(toasts[0])} item={toasts[0]} onOpen={function(){setNotiOpen(true);}} onClose={function(){ setToasts(function(p){ return p.slice(1); }); }}/>}
     </>
   );
 }
