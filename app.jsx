@@ -15968,10 +15968,10 @@ function AdvAdjustPanel({adv, st, onUpdate}) {
 
 function GS() {
   var css = "@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Montserrat:wght@300;400;500;600;700&display=swap');"
-    + "@font-face{font-family:'Valky';src:url('fonts/Valky-Light.otf') format('opentype');font-weight:300;font-style:normal;font-display:swap;}"
-    + "@font-face{font-family:'Valky';src:url('fonts/Valky-Regular.otf') format('opentype');font-weight:400;font-style:normal;font-display:swap;}"
-    + "@font-face{font-family:'Valky';src:url('fonts/Valky-Semibold.otf') format('opentype');font-weight:600;font-style:normal;font-display:swap;}"
-    + "@font-face{font-family:'Valky';src:url('fonts/Valky-Bold.otf') format('opentype');font-weight:700;font-style:normal;font-display:swap;}"
+    + "@font-face{font-family:'Valky';src:url('public/fonts/Valky-Light.otf') format('opentype');font-weight:300;font-style:normal;font-display:swap;}"
+    + "@font-face{font-family:'Valky';src:url('public/fonts/Valky-Regular.otf') format('opentype');font-weight:400;font-style:normal;font-display:swap;}"
+    + "@font-face{font-family:'Valky';src:url('public/fonts/Valky-Semibold.otf') format('opentype');font-weight:600;font-style:normal;font-display:swap;}"
+    + "@font-face{font-family:'Valky';src:url('public/fonts/Valky-Bold.otf') format('opentype');font-weight:700;font-style:normal;font-display:swap;}"
     + "*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}"
     + "body{background:#FAFAFA;font-family:'Montserrat',sans-serif;}"
     + "button,input,select,textarea{font-family:'Montserrat',sans-serif;letter-spacing:.03em;}"
