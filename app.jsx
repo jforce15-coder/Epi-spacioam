@@ -1860,21 +1860,23 @@ function App() {
 /* ═══ LOGIN */
 function LoginField({label,type,value,onChange,ph,err,onEnter,autoFocus}) {
   const [show,setShow]=useState(false);
+  const inputRef=useRef(null);
+  useEffect(function(){ if(autoFocus){ var t=setTimeout(function(){ if(inputRef.current) inputRef.current.focus(); },120); return function(){clearTimeout(t);}; } },[autoFocus]);
   var isPass=type==="password";
   return (
     <label style={{display:"flex",flexDirection:"column",gap:9}}>
-      <span style={{fontSize:10,fontWeight:600,letterSpacing:".26em",textTransform:"uppercase",color:C.earth}}>{label}</span>
+      <span style={{fontFamily:"Montserrat,sans-serif",fontSize:10,fontWeight:500,letterSpacing:".28em",textTransform:"uppercase",color:C.earth}}>{label}</span>
       <div style={{position:"relative",display:"flex",alignItems:"center"}}>
-        <input value={value} onChange={function(e){onChange(e.target.value);}} placeholder={ph} type={isPass&&!show?"password":(isPass?"text":type)} autoCapitalize="none" autoCorrect="off" autoFocus={autoFocus} onKeyDown={function(e){if(e.key==="Enter"&&onEnter)onEnter();}}
+        <input ref={inputRef} value={value} onChange={function(e){onChange(e.target.value);}} placeholder={ph} type={isPass&&!show?"password":(isPass?"text":type)} autoCapitalize="none" autoCorrect="off" autoFocus={autoFocus} onKeyDown={function(e){if(e.key==="Enter"&&onEnter)onEnter();}}
           style={{width:"100%",boxSizing:"border-box",fontFamily:"Montserrat,sans-serif",fontSize:15,letterSpacing:".04em",color:C.black,padding:"15px 16px",paddingRight:isPass?52:16,background:C.alabaster,border:"1px solid "+(err?C.peach:C.gray),borderRadius:14,outline:"none",transition:"border-color .18s"}}
-          onFocus={function(e){e.target.style.borderColor=C.black;e.target.style.boxShadow="var(--sa-focus-ring)";}} onBlur={function(e){e.target.style.borderColor=err?C.peach:C.gray;e.target.style.boxShadow="none";}}/>
+          onFocus={function(e){e.target.style.borderColor=C.peach;e.target.style.boxShadow="var(--sa-focus-ring)";}} onBlur={function(e){e.target.style.borderColor=err?C.peach:C.gray;e.target.style.boxShadow="none";}}/>
         {isPass&&<button type="button" onClick={function(){setShow(function(s){return !s;});}} aria-label={show?"Ocultar contraseña":"Ver contraseña"} style={{position:"absolute",right:12,border:"none",background:"transparent",cursor:"pointer",color:C.earth,padding:4,display:"flex"}}><svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={show?"M3 3l18 18M10.6 10.7a3 3 0 004.2 4.2M9.4 5.7A9.5 9.5 0 0112 5.5c6 0 9.5 6.5 9.5 6.5a16 16 0 01-2.6 3.3M6.2 6.3A16 16 0 002.5 12S6 18.5 12 18.5a9 9 0 003.6-.7":"M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12zM12 15a3 3 0 100-6 3 3 0 000 6z"}></path></svg></button>}
       </div>
     </label>
   );
 }
 function LoginBtn({onClick,dis,children}) {
-  return <button onClick={onClick} disabled={dis} style={{marginTop:6,width:"100%",border:"none",cursor:dis?"default":"pointer",background:dis?C.gray:C.black,color:C.alabaster,borderRadius:14,padding:"16px",fontFamily:"Montserrat,sans-serif",fontSize:11.5,fontWeight:600,letterSpacing:".24em",textTransform:"uppercase",opacity:dis?.6:1,transition:"opacity .18s",display:"flex",alignItems:"center",justifyContent:"center",gap:10}}><svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 11V8a5 5 0 0110 0v3M5.5 11h13a1 1 0 011 1v8a1 1 0 01-1 1h-13a1 1 0 01-1-1v-8a1 1 0 011-1z"></path></svg>{children}</button>;
+  return <button onClick={onClick} disabled={dis} style={{marginTop:6,width:"100%",border:"none",cursor:dis?"default":"pointer",background:C.black,color:C.alabaster,borderRadius:14,padding:"16px",fontFamily:"Montserrat,sans-serif",fontSize:11.5,fontWeight:500,letterSpacing:".24em",textTransform:"uppercase",opacity:1,transition:"opacity .18s",display:"flex",alignItems:"center",justifyContent:"center",gap:10}}><svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 11V8a5 5 0 0110 0v3M5.5 11h13a1 1 0 011 1v8a1 1 0 01-1 1h-13a1 1 0 01-1-1v-8a1 1 0 011-1z"></path></svg>{children}</button>;
 }
 /* ═══ ONBOARDING — primer ingreso EPI Limpieza interno: define correo de notificaciones + nueva contraseña */
 function OnboardModal({vendor, allVendors, onSvV, onClose}) {
@@ -1984,6 +1986,8 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
   const [adminPin2,setAdminPin2]= useState("");
   const [adminErr, setAdminErr] = useState("");
   const [showAdmin,setShowAdmin]= useState(false);
+  const [lang,     setLang]     = useState("es");
+  const L = function(es,en){ return lang==="es"?es:en; };
 
   function loginUser() {
     var input = email.toLowerCase().trim();
@@ -1993,7 +1997,7 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
       return (em===input||user===input) && x.password===pass && x.active;
     });
     if (v) onLogin({role:v.isAdmin?"admin":"vendor",vendor:v});
-    else setErr("Correo o contraseña incorrectos.");
+    else setErr(L("Correo o contraseña incorrectos.","Wrong email or password."));
   }
   function loginAdmin() {
     if(adminPin2===adminPin) onLogin({role:"admin"});
@@ -2005,40 +2009,44 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
       <GS/>
       <style>{"@media(min-width:880px){.epi-login{grid-template-columns:1.05fr 1fr!important}.epi-login-aside{display:flex!important}}"}</style>
 
-      {/* Sheets badge + hidden admin gear — top right, fixed */}
-      <div style={{position:"fixed",top:14,right:14,display:"flex",alignItems:"center",gap:8,zIndex:200}}>
-        {sheetsOk===false&&<div style={{fontSize:10,fontWeight:700,background:"#F7E7E4",color:"#C0392B",padding:"4px 10px",borderRadius:6,border:"1px solid #E9C9C2",letterSpacing:".06em"}}>⚠ Sin Sheets</div>}
-        {sheetsOk===true&&<div style={{fontSize:10,fontWeight:700,background:"#E8F2ED",color:"#3d6b52",padding:"4px 10px",borderRadius:6,letterSpacing:".06em"}}>● Sheets OK</div>}
-        <button onClick={function(){setShowAdmin(function(p){return !p;});setAdminErr("");setAdminPin2("");setErr("");}} title="Acceso administrador" style={{background:"none",border:"none",cursor:"pointer",padding:"4px",color:C.gray,fontSize:15,lineHeight:1,opacity:.45}}>⚙</button>
+      {/* Estado de Sheets (punto tipo farol) + toggle de idioma — top right, fixed */}
+      <div style={{position:"fixed",top:14,right:14,display:"flex",alignItems:"center",gap:12,zIndex:200}}>
+        {sheetsOk!=null&&<span title={sheetsOk?L("Conectado a Sheets","Connected to Sheets"):L("Sin conexión a Sheets","No connection to Sheets")} style={{width:11,height:11,borderRadius:"50%",flexShrink:0,display:"inline-block",background:sheetsOk?"#3d6b52":"#C0392B",boxShadow:"0 0 0 3px "+(sheetsOk?"#3d6b52":"#C0392B")+"22"}}/>}
+        <div style={{display:"inline-flex",padding:3,background:C.surfaceWarm,borderRadius:999,gap:2}}>
+          {[["es","ES"],["en","EN"]].map(function(o){var active=lang===o[0];return (
+            <button key={o[0]} onClick={function(){setLang(o[0]);}} style={{border:"none",cursor:"pointer",padding:"7px 12px",borderRadius:999,fontFamily:"Montserrat,sans-serif",fontSize:10.5,fontWeight:600,letterSpacing:".12em",textTransform:"uppercase",background:active?C.alabaster:"transparent",color:active?C.black:C.earth,boxShadow:active?"0 1px 2px rgba(62,63,63,.05)":"none",transition:"all .18s"}}>{o[1]}</button>
+          );})}
+        </div>
       </div>
 
       {/* Brand aside — editorial */}
       <aside className="epi-login-aside" style={{display:"none",position:"relative",overflow:"hidden",background:C.surfaceWarm,flexDirection:"column",justifyContent:"space-between",padding:"56px 56px 48px"}}>
         <img src={BRUSHSTROKE} alt="" aria-hidden="true" style={{position:"absolute",top:"18%",left:"-20%",width:"150%",opacity:.55,pointerEvents:"none",transform:"rotate(-4deg)"}}/>
-        <div style={{position:"relative",zIndex:2}}><img src={LOGO_BADGE} alt="Spacio AM" style={{height:62,width:"auto",display:"block"}}/></div>
+        <div style={{position:"relative",zIndex:2}}><img src={LOGO_BADGE} alt="Spacio AM" style={{height:64,width:"auto",display:"block"}}/></div>
         <div style={{position:"relative",zIndex:2,maxWidth:460}}>
           <svg viewBox="0 0 100 100" width={22} height={22} fill={C.peach} aria-hidden="true" style={{display:"block"}}><path d="M50 4 C 52 32, 58 42, 96 50 C 58 58, 52 68, 50 96 C 48 68, 42 58, 4 50 C 42 42, 48 32, 50 4 Z"></path></svg>
-          <p style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontWeight:400,fontStyle:"italic",fontSize:"clamp(26px,3vw,40px)",lineHeight:1.18,color:C.black,margin:"20px 0 0",textWrap:"balance"}}>“Hay espacios en donde sueñas con volver a despertar.”</p>
+          <p style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontWeight:400,fontStyle:"italic",fontSize:"clamp(28px,3.4vw,42px)",lineHeight:1.18,letterSpacing:"-.01em",color:C.black,margin:"20px 0 0",textWrap:"balance"}}>“{L("Hay espacios donde despertar se siente como un sueño.","Some places make being awake feel like a dream.")}”</p>
           <div style={{width:38,height:1,background:C.black,margin:"26px 0 14px"}}/>
-          <div style={{fontSize:10.5,letterSpacing:".24em",textTransform:"uppercase",color:C.earth,fontWeight:600}}>Spacio AM · Equipo de primera impresión</div>
+          <div style={{fontFamily:"Montserrat,sans-serif",fontSize:11,fontWeight:500,letterSpacing:".32em",textTransform:"uppercase",color:C.earth}}>Spacio AM · {L("Equipo de primera impresión","First impression team")}</div>
         </div>
-        <div style={{position:"relative",zIndex:2,fontSize:10.5,letterSpacing:".18em",textTransform:"uppercase",color:C.earth}}>Guatemala · ¿Necesitas ayuda? hola@spacioam.com</div>
+        <div style={{position:"relative",zIndex:2,fontFamily:"Montserrat,sans-serif",fontSize:10.5,letterSpacing:".18em",textTransform:"uppercase",color:C.earth}}>Guatemala · {L("¿Necesitas ayuda? hola@spacioam.com","Need help? hola@spacioam.com")}</div>
       </aside>
 
       {/* Form side */}
       <main style={{display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",padding:"48px 24px"}}>
         <div style={{width:"100%",maxWidth:380}}>
-          <div style={{marginBottom:28}}><LogoWordmark width={172}/></div>
+          <div style={{display:"flex",justifyContent:"flex-start",marginBottom:30}}><img src={LOGO_WORDMARK} alt="Spacio AM" style={{height:72,width:"auto",display:"block"}}/></div>
           {!showAdmin?(
             <>
-              <div style={{fontSize:10,fontWeight:600,letterSpacing:".28em",textTransform:"uppercase",color:C.earth,marginBottom:14}}>Equipo de primera impresión — EPI</div>
-              <h1 style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontWeight:400,fontSize:36,letterSpacing:"-.01em",lineHeight:1.1,color:C.black,margin:0}}>Bienvenido(a) de Vuelta</h1>
-              <p style={{fontSize:13,letterSpacing:".03em",lineHeight:1.7,color:C.earth,margin:"12px 0 28px"}}>Ingresa con tu correo para registrar y dar seguimiento a tus trabajos.</p>
+              <div style={{fontFamily:"Montserrat,sans-serif",fontSize:11,fontWeight:500,letterSpacing:".32em",textTransform:"uppercase",color:C.earth,marginBottom:14}}>{L("Portal EPI","EPI portal")}</div>
+              <h1 style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontWeight:400,fontSize:38,letterSpacing:"-.01em",lineHeight:1.08,color:C.black,margin:0}}>{L("Bienvenido de vuelta.","Welcome back.")}</h1>
+              <p style={{fontFamily:"Montserrat,sans-serif",fontSize:13.5,letterSpacing:".04em",lineHeight:1.7,color:C.earth,margin:"12px 0 30px"}}>{L("Accede para ver tus trabajos.","Sign in to see your jobs.")}</p>
               <div style={{display:"flex",flexDirection:"column",gap:18}}>
-                <LoginField label="Correo electrónico" type="email" value={email} onChange={function(v){setEmail(v);setErr("");}} ph="tu@correo.com" err={!!err} onEnter={loginUser} autoFocus/>
-                <LoginField label="Contraseña" type="password" value={pass} onChange={function(v){setPass(v);setErr("");}} ph="••••••••" err={!!err} onEnter={loginUser}/>
+                <LoginField label={L("Correo electrónico","Email")} type="email" value={email} onChange={function(v){setEmail(v);setErr("");}} ph={L("tu@correo.com","you@email.com")} err={!!err} onEnter={loginUser} autoFocus/>
+                <LoginField label={L("Contraseña","Password")} type="password" value={pass} onChange={function(v){setPass(v);setErr("");}} ph={L("tu contraseña","your password")} err={!!err} onEnter={loginUser}/>
                 {err&&<div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.red,marginTop:-4}}>⚠ {err}</div>}
-                <LoginBtn onClick={loginUser} dis={!email||!pass}>Ingresar</LoginBtn>
+                <div style={{fontFamily:"Montserrat,sans-serif",fontSize:11.5,letterSpacing:".04em",color:C.earth,marginTop:2}}>{L("¿Olvidaste tu contraseña?","Forgot your password?")}</div>
+                <LoginBtn onClick={loginUser} dis={!email||!pass}>{L("Entrar","Enter")}</LoginBtn>
               </div>
             </>
           ):(
@@ -13874,7 +13882,7 @@ function printComprobante(pago, company, focusEmail){
     + sections
     + grand
     + soporte
-    + "<div class='ft'>Spacio AM · Comprobante generado el "+new Date().toLocaleString("es-GT")+" · Hay espacios en donde sueñas con volver a despertar.</div>"
+    + "<div class='ft'>Spacio AM · Comprobante generado el "+new Date().toLocaleString("es-GT")+" · Hay espacios donde despertar se siente como un sueño.</div>"
     + "</body></html>";
   var w=window.open("","_blank","width=860,height=920"); if(!w) return; w.document.write(html); w.document.close();
   setTimeout(function(){ try{ w.focus(); }catch(_){} }, 200);
@@ -15960,6 +15968,7 @@ function AdvAdjustPanel({adv, st, onUpdate}) {
 
 function GS() {
   var css = "@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Montserrat:wght@300;400;500;600;700&display=swap');"
+    + "@font-face{font-family:'Valky';src:url('fonts/Valky-Light.otf') format('opentype');font-weight:300;font-style:normal;font-display:swap;}"
     + "@font-face{font-family:'Valky';src:url('fonts/Valky-Regular.otf') format('opentype');font-weight:400;font-style:normal;font-display:swap;}"
     + "@font-face{font-family:'Valky';src:url('fonts/Valky-Semibold.otf') format('opentype');font-weight:600;font-style:normal;font-display:swap;}"
     + "@font-face{font-family:'Valky';src:url('fonts/Valky-Bold.otf') format('opentype');font-weight:700;font-style:normal;font-display:swap;}"
@@ -16059,11 +16068,6 @@ function Loader() {
         <div style={{fontSize:12,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>
           {secs<4?"Conectando con tu información…":secs<8?"Esto puede tardar unos segundos…":"Verificando conexión…"}
         </div>
-        {secs>=7&&(
-          <div style={{marginTop:14,fontSize:12,color:C.taupe,maxWidth:280,marginLeft:"auto",marginRight:"auto",lineHeight:1.7,textWrap:"pretty"}}>
-            La primera carga puede tardar unos 10 segundos. El app se abre solo en cuanto termine.
-          </div>
-        )}
       </div>
     </div>
   );
