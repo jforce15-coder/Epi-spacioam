@@ -56,13 +56,15 @@
     Z19: [14.6520, -90.5560], Z21: [14.5700, -90.5300], Z24: [14.5620, -90.5560],
     MIXCO: [14.6300, -90.6060], SANLUCAS: [14.6120, -90.6570], ANTIGUA: [14.5586, -90.7295],
     CES: [14.5450, -90.4400], FRAIJANES: [14.4700, -90.4400], PINULA: [14.5720, -90.4760],
-    VILLANUEVA: [14.5260, -90.5870]
+    VILLANUEVA: [14.5260, -90.5870],
+    MONTERRICO: [13.8930, -90.4670], LIKIN: [13.9210, -90.7860]
   };
   /* Nombre legible de cada zona para la interfaz — las claves son para el motor. */
   var ZONA_LABEL = {
     MIXCO: "Mixco", SANLUCAS: "San Lucas", ANTIGUA: "Antigua",
     CES: "Carretera a El Salvador", FRAIJANES: "Fraijanes",
-    PINULA: "Santa Catarina Pinula", VILLANUEVA: "Villa Nueva"
+    PINULA: "Santa Catarina Pinula", VILLANUEVA: "Villa Nueva",
+    MONTERRICO: "Monterrico", LIKIN: "Likín"
   };
   function zonaLabel(z) { var k = zonaKey(z); return ZONA_LABEL[k] || k; }
   /* Las zonas en uso son las del portafolio — nunca un catálogo inventado. */
@@ -88,7 +90,8 @@
     "ZONA1":"Z1","ZONA4":"Z4","ZONA9":"Z9","ZONA10":"Z10","ZONA11":"Z11","ZONA13":"Z13",
     "ZONA14":"Z14","ZONA15":"Z15","ZONA16":"Z16","Z013":"Z13","Z010":"Z10",
     "CARRETERAAELSALVADOR":"CES","CARRETERAELSALVADOR":"CES","KM15":"CES","SANTACATARINAPINULA":"PINULA",
-    "LAANTIGUA":"ANTIGUA","ANTIGUAGUATEMALA":"ANTIGUA","SANLUCASSACATEPEQUEZ":"SANLUCAS"
+    "LAANTIGUA":"ANTIGUA","ANTIGUAGUATEMALA":"ANTIGUA","SANLUCASSACATEPEQUEZ":"SANLUCAS",
+    "LIKN":"LIKIN","LIQUIN":"LIKIN","CASAMONTERRICO":"MONTERRICO","MONTERICO":"MONTERRICO"
   };
   function zonaKey(z) {
     var s = String(z || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -345,11 +348,15 @@
     for (var i = 0; i < z.length; i++) { var k = zonaKey(z[i]); if (k) out.push(k); }
     return out;
   }
+  /* Una ausencia documentada saca al técnico del reparto de ese día, sin importar
+     su estado — las ausencias ya no se autorizan, solo se documentan. Antes solo
+     bloqueaba `aprobada`, y una ausencia auto-aplicada (estado "aplicada") dejaba
+     de bloquear: la siguiente corrida le volvía a asignar ruta a alguien ausente. */
   function ausente(v, f, ausencias) {
     var em = String(v.email || "").toLowerCase();
     for (var i = 0; i < (ausencias || []).length; i++) {
       var a = ausencias[i];
-      if (!a || a.estado !== "aprobada") continue;
+      if (!a || a.estado === "rechazada") continue;
       if (String(a.vendorEmail || "").toLowerCase() !== em) continue;
       if (String(a.fecha || "").slice(0, 10) === f) return true;
     }

@@ -145,6 +145,9 @@ function tarifaTrabajo(vendor, propiedad, props){
 
 function vendorDisplay(v) {
   if (!v) return "—";
+  /* Proveedor externo con empresa: se muestra el nombre comercial, no el de la
+     persona. Solo si llenaron el campo empresa. */
+  if (v.tipo === "externo" && v.empresa && String(v.empresa).trim()) return String(v.empresa).trim();
   if (v.primerNombre) return [v.primerNombre, v.primerApellido].filter(Boolean).join(" ");
   return v.name||v.email||"—";
 }
@@ -5657,6 +5660,8 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, re
   /* Doce fichas abiertas a la vez son un muro. Cada persona entra cerrada y se
      abre la que se va a editar. */
   const [abiertoV, setAbiertoV] = useState({});
+  /* Grupos de clasificación plegados por defecto, para navegar mejor. */
+  const [grpAbierto, setGrpAbierto] = useState({});
   const [qV,       setQV]       = useState("");
   const [newExtCat,setNewExtCat]= useState("");
   var qn=qV.trim().toLowerCase();
@@ -5708,7 +5713,8 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, re
 
       {/* Existing vendors */}
       {vendorsVis.length===0&&<div style={{background:"#fff",borderRadius:10,padding:"22px 16px",border:"1px solid "+C.line,fontSize:12.5,color:C.taupe,textAlign:"center"}}>Nadie coincide con esa búsqueda.</div>}
-      {vendorsVis.map(function(v){
+      {(function(){
+        function VendorCard(v){
         var abV=!!abiertoV[v.id];
         function EditRow(field,label,cur,type){
           var isMe=editId===v.id&&editFld===field;
@@ -5876,7 +5882,44 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, re
             )}
           </div>
         );
-      })}
+        }
+        /* Clasificación por rol; cada grupo se abre aparte. Con búsqueda activa,
+           todos los grupos con resultados aparecen abiertos. */
+        var GRUPOS=[
+          {key:"admin",label:"Administrativos",test:function(v){return v.tipo==="interno"&&v.categoria==="Administrativo";}},
+          {key:"limpieza",label:"Interno · limpieza",test:function(v){return v.tipo==="interno"&&(v.categoria==="EPI Limpieza"||v.categoria==="Limpieza");}},
+          {key:"mant",label:"Interno · mantenimiento",test:function(v){return v.tipo==="interno"&&(v.categoria==="EPI Mantenimiento"||v.categoria==="Mantenimiento");}}
+        ];
+        var usados={};
+        var bloques=GRUPOS.map(function(g){
+          var lista=vendorsVis.filter(function(v){ if(usados[v.id])return false; if(g.test(v)){usados[v.id]=1;return true;} return false; });
+          return {key:g.key,label:g.label,lista:lista};
+        });
+        var internoOtro=vendorsVis.filter(function(v){ return !usados[v.id]&&v.tipo==="interno"&&(usados[v.id]=1); });
+        if(internoOtro.length) bloques.push({key:"interno-otro",label:"Interno · otros",lista:internoOtro});
+        var extPorCat={}, extOrden=[];
+        vendorsVis.forEach(function(v){ if(usados[v.id])return; if(v.tipo!=="externo")return; usados[v.id]=1; var c=(v.categoria||"").trim()||"Sin categoría"; if(!extPorCat[c]){extPorCat[c]=[];extOrden.push(c);} extPorCat[c].push(v); });
+        extOrden.sort(function(a,b){ return a.localeCompare(b,"es"); }).forEach(function(c){ bloques.push({key:"ext-"+c,label:"Externo · "+c,lista:extPorCat[c]}); });
+        var resto=vendorsVis.filter(function(v){ return !usados[v.id]; });
+        if(resto.length) bloques.push({key:"resto",label:"Sin clasificar",lista:resto});
+        bloques=bloques.filter(function(b){ return b.lista.length; });
+        return bloques.map(function(b){
+          var open=qn?true:!!grpAbierto[b.key];
+          return (
+            <div key={b.key} style={{background:"#fff",borderRadius:12,border:"1px solid "+C.line,overflow:"hidden"}}>
+              <button onClick={function(){ setGrpAbierto(function(p){ var u=Object.assign({},p); u[b.key]=!u[b.key]; return u; }); }}
+                style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"13px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"Montserrat,sans-serif"}}>
+                <span style={{fontSize:11,fontWeight:700,color:C.black,letterSpacing:".1em",textTransform:"uppercase"}}>{b.label}</span>
+                <span style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+                  <span style={{fontSize:12,fontWeight:600,color:C.taupe,fontVariantNumeric:"tabular-nums"}}>{b.lista.length}</span>
+                  <span style={{fontSize:11,color:C.taupe}}>{open?"▾":"▸"}</span>
+                </span>
+              </button>
+              {open&&<div style={{borderTop:"1px solid "+C.line,padding:"12px",display:"flex",flexDirection:"column",gap:10}}>{b.lista.map(VendorCard)}</div>}
+            </div>
+          );
+        });
+      })()}
 
       {/* Custom external categories */}
       <div style={{background:"#fff",borderRadius:10,padding:"14px",border:"1px solid "+C.line}}>
@@ -7736,7 +7779,22 @@ function Icon({name, size, stroke, width, style}) {
   );
 }
 
-/* ─── Combined date-range picker — pick start & end in one calendar popover */
+/* NIcon — mismo glifo en todos los proyectos: usa el Icon del Design System
+   (window.SpacioAMDesignSystem_2c08fe.Icon) y, si el bundle no cargó, cae al
+   Icon local. Normaliza props: el Icon local usa stroke/width; el del DS usa
+   color/strokeWidth. */
+function NIcon(props){
+  var ns = (typeof window!=="undefined") && window.SpacioAMDesignSystem_2c08fe;
+  var DI = ns && ns.Icon;
+  if(DI){
+    /* Pasamos las props tal cual, igual que el wrapper del proyecto de
+       referencia (Grow-spacioam). El Icon del DS lee `color`/`strokeWidth` e
+       ignora `stroke`/`width`; al no forzar `color`, el glifo hereda
+       currentColor y se ve idéntico a la referencia. */
+    return React.createElement(DI,props);
+  }
+  return React.createElement(Icon,props);
+}
 function fmtRangeShort(ds){ if(!ds) return ""; var p=ds.split("-"); return p[2]+"/"+p[1]; }
 function DateRangePicker({from,to,onChange,activeStyle,baseStyle}){
   const [open,setOpen]=useState(false);
@@ -8200,7 +8258,7 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
           {notiTotal>0&&(
             <button onClick={function(e){e.stopPropagation();setNotiOpen(true);}} title={notiTotal+" pendiente"+(notiTotal===1?"":"s")} aria-label={"Notificaciones ("+notiTotal+")"}
               style={{position:"relative",display:"inline-flex",alignItems:"center",justifyContent:"center",width:40,height:40,borderRadius:"var(--sa-pill)",border:"none",background:"transparent",cursor:"pointer",flexShrink:0,padding:0}}>
-              <Icon name="alert" size={23} width={1.75} stroke="var(--color-info,#3B6691)" color="var(--color-info,#3B6691)" style={{stroke:"var(--color-info,#3B6691)"}}/>
+              <NIcon name="alert" size={23} width={1.75} stroke="var(--color-info,#3B6691)"/>
               <span style={{position:"absolute",top:-1,right:-1,minWidth:18,height:18,boxSizing:"border-box",padding:"0 5px",borderRadius:"var(--sa-pill)",background:C.peach,color:"#fff",fontSize:10.5,fontWeight:700,fontVariantNumeric:"tabular-nums",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 1px 3px rgba(0,0,0,.28)"}}>{notiTotal>99?"99+":notiTotal}</span>
             </button>
           )}
@@ -10013,7 +10071,7 @@ function DiagProgramacion({props, reservas, schedules, vendors, ausencias, reps,
     var conZona=tecs.filter(function(v){ return z&&(v.zonas||[]).map(SCHED.zonaKey).indexOf(z)>=0; });
     var libresZona=conZona.filter(function(v){
       var em=String(v.email||"").toLowerCase();
-      var aus=(ausencias||[]).some(function(a){ return a.estado==="aprobada"&&String(a.vendorEmail||"").toLowerCase()===em&&a.fecha===fecha; });
+      var aus=(ausencias||[]).some(function(a){ return a.estado!=="rechazada"&&String(a.vendorEmail||"").toLowerCase()===em&&a.fecha===fecha; });
       var desc=((v.descansos)||[]).indexOf(new Date(fecha+"T12:00:00").getDay())>=0;
       return !aus&&!desc;
     });
@@ -10227,14 +10285,38 @@ function DiaDoblePanel({schedules, reps, vendors, onUpsert, hoy, onAviso, onLog}
     return (schedules||[]).filter(function(s){ return String(s.fecha||"").slice(0,10)===fd && String(s.estado||"")!=="cancelada"; });
   },[schedules,fd]);
 
+  /* Feriado listo para revisión: la propuesta se genera sola una vez pasado el
+     feriado (a partir de 2 días después, cuando ya entraron los formularios) y
+     se surte al administrador para que apruebe con checkbox los que aplican.
+     Deja de aparecer cuando todas sus limpiezas ya quedaron en doble. */
+  var feriadoAuto = React.useMemo(function(){
+    var cands=[];
+    Object.keys(FERIADOS_GT).forEach(function(y){ (FERIADOS_GT[y]||[]).forEach(function(h){ cands.push(h[0]); }); });
+    cands=cands.filter(function(d){ var dd=SCHED.dias(d,hoy); return dd>=2 && dd<=14; })
+               .sort(function(a,b){ return b.localeCompare(a); });
+    for(var i=0;i<cands.length;i++){
+      var d=cands[i];
+      var rr=(reps||[]).filter(function(r){ return DOBLE_CATS.indexOf(String(r.categoria||""))>=0 && String(r.fecha||"").slice(0,10)===d; });
+      if(!rr.length) continue;
+      if(rr.every(function(r){ return r.diaDoble; })) continue;
+      return d;
+    }
+    return "";
+  },[reps,hoy]);
+
   var progKey={}; schedDia.forEach(function(s){ progKey[normalize(s.propiedad||"")]=1; });
   var repKey={};  repsDia.forEach(function(r){ repKey[normalize(r.propiedad||"")]=1; });
   var rutasSinForm = schedDia.filter(function(s){ return !repKey[normalize(s.propiedad||"")]; })
     .sort(function(a,b){ return String(a.propiedad||"").localeCompare(String(b.propiedad||""),"es",{numeric:true}); });
 
-  /* Al cambiar de fecha, se preselecciona lo que ya está en doble. */
+  /* Al cambiar de fecha, se preselecciona lo que ya está en doble. Si es un
+     feriado sin nada aplicado aún, se pre-marcan las limpiezas elegibles para
+     que el administrador solo revise y desmarque las que no aplican. */
   React.useEffect(function(){
     var init={}; repsDia.forEach(function(r){ if(r.diaDoble) init[r.id]=1; });
+    if(feriadoNombre(fd) && !repsDia.some(function(r){ return r.diaDoble; })){
+      repsDia.forEach(function(r){ if(esLimpiezaCat(r.categoria)) init[r.id]=1; });
+    }
     setSel(init);
   /* eslint-disable-next-line */
   },[fd]);
@@ -10275,18 +10357,28 @@ function DiaDoblePanel({schedules, reps, vendors, onUpsert, hoy, onAviso, onLog}
 
   return (
     <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:16,boxShadow:"var(--sa-shadow-sm)",overflow:"hidden"}}>
-      <button onClick={function(){setAbierto(!abierto);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"15px 18px",background:"none",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"Montserrat,sans-serif"}}>
+      <button onClick={function(){ var nx=!abierto; setAbierto(nx); if(nx&&!fd&&feriadoAuto) setFd(feriadoAuto); }} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"15px 18px",background:"none",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"Montserrat,sans-serif"}}>
         <span style={{minWidth:0}}>
           <span style={{display:"block",fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Feriados</span>
           <span style={{display:"block",fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:19,color:C.black,marginTop:4}}>Día doble</span>
         </span>
         <span style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+          {feriadoAuto&&!abierto&&<span style={{fontSize:9,fontWeight:700,color:"#fff",background:C.peach,letterSpacing:".08em",textTransform:"uppercase",padding:"3px 9px",borderRadius:"var(--sa-pill)",whiteSpace:"nowrap"}}>Revisar feriado</span>}
           {fd&&marcados.length>0&&<span style={{fontSize:9.5,fontWeight:700,color:C.attentionText,letterSpacing:".06em",whiteSpace:"nowrap"}}>{marcados.length} en doble</span>}
           <span style={{fontSize:11,color:C.taupe}}>{abierto?"▴":"▾"}</span>
         </span>
       </button>
       {abierto&&(
         <div style={{borderTop:"1px solid "+C.line,padding:"14px 18px 18px",display:"flex",flexDirection:"column",gap:13}}>
+          {feriadoAuto&&(
+            <div style={{background:C.attentionTint,border:"1px solid var(--sa-attention)",borderRadius:10,padding:"11px 13px"}}>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.attentionText,letterSpacing:".14em",textTransform:"uppercase"}}>Listo para revisión</div>
+              <div style={{fontSize:11.5,color:C.earth,marginTop:5,lineHeight:1.6,textWrap:"pretty"}}>
+                {feriadoNombre(feriadoAuto)} ({fmtDate(feriadoAuto)}) ya pasó y sus limpiezas están registradas. Se pre-marcaron las elegibles: revisa, desmarca las que no apliquen y aprueba el pago doble.
+              </div>
+              {fd!==feriadoAuto&&<button onClick={function(){setFd(feriadoAuto);}} style={{marginTop:9,padding:"8px 14px",minHeight:38,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Revisar {feriadoNombre(feriadoAuto)} →</button>}
+            </div>
+          )}
           <div style={{fontSize:11.5,color:C.earth,lineHeight:1.7,textWrap:"pretty"}}>
             Elige un día —los feriados nacionales vienen cargados— y marca las limpiezas que se pagan doble. Al aplicar, la tarifa del formulario de cada limpieza marcada se pone al doble. Puedes desmarcar y volver a aplicar para dejarla como estaba.
           </div>
@@ -10379,7 +10471,7 @@ function DiaDoblePanel({schedules, reps, vendors, onUpsert, hoy, onAviso, onLog}
                     {marcados.length} marcada{marcados.length===1?"":"s"}
                     {marcados.length>0&&<span style={{color:C.black,fontWeight:700}}> · Q {totalDoble.toLocaleString()} a pagar</span>}
                   </div>
-                  <button onClick={aplicar} disabled={!repsDia.length} style={{padding:"12px 20px",minHeight:44,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",letterSpacing:".03em"}}>Aplicar pago doble</button>
+                  <button onClick={aplicar} disabled={!repsDia.length} style={{padding:"12px 20px",minHeight:44,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",letterSpacing:".03em"}}>Aprobar pago doble</button>
                 </div>
               )}
             </>
@@ -10802,6 +10894,10 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   delDia.forEach(function(s){ var k=emailVigente(s); if(!porTec[k])porTec[k]=[]; porTec[k].push(s); });
   var firme = dia<=1;
   var notificado = delDia.length>0 && delDia.every(function(s){ return s.notificadoEn; });
+  /* El motor de las 6:00 pm corre en el SERVIDOR y manda la ruta de mañana sin
+     pasar por el app; después de esa hora el equipo ya la recibió, aunque el app
+     no haya marcado notificadoEn todavía. No es borrador. */
+  var yaSalioAuto = fecha===SCHED.shift(hoy,1) && horaGT()>=18 && delDia.length>0;
 
   /* ─── Cumplimiento: cada limpieza contra el formulario de ese día. */
   var cierres={}; delDia.forEach(function(s){ cierres[s.id]=cierreDe(s, ixCierre, hoy); });
@@ -10850,7 +10946,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   var demanda=delDia.reduce(function(s,x){ return s+SCHED.minutosLimpieza(x.habitaciones,x.tipo); },0);
   var libres=tecs.filter(function(v){
     var em=String(v.email||"").toLowerCase();
-    var aus=(ausencias||[]).some(function(a){ return a.estado==="aprobada" && String(a.vendorEmail||"").toLowerCase()===em && a.fecha===fecha; });
+    var aus=(ausencias||[]).some(function(a){ return a.estado!=="rechazada" && String(a.vendorEmail||"").toLowerCase()===em && a.fecha===fecha; });
     var desc=((v.descansos)||[]).indexOf(new Date(fecha+"T12:00:00").getDay())>=0;
     return !aus && !desc;
   });
@@ -10880,7 +10976,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
       v:v, em:em, mias:mias,
       hechas:mias.filter(function(s){ return (cierres[s.id]||{}).estado==="hecha"; }).length,
       mins:mias.reduce(function(s,x){ return s+SCHED.minutosLimpieza(x.habitaciones,x.tipo)+(x.viaje||0); },0),
-      aus:(ausencias||[]).some(function(a){ return a.estado==="aprobada" && String(a.vendorEmail||"").toLowerCase()===em && a.fecha===fecha; }),
+      aus:(ausencias||[]).some(function(a){ return a.estado!=="rechazada" && String(a.vendorEmail||"").toLowerCase()===em && a.fecha===fecha; }),
       desc:((v.descansos)||[]).indexOf(new Date(fecha+"T12:00:00").getDay())>=0
     };
   });
@@ -11062,6 +11158,42 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
         </div>
       )}
 
+      {/* Ausencias documentadas — ya no se autorizan, solo quedan registradas.
+          El técnico con ausencia ese día no recibe ruta (el motor lo excluye). */}
+      {(function(){
+        var docs=(ausencias||[]).filter(function(a){ return a && a.estado!=="rechazada" && String(a.fecha||"")>=SCHED.shift(hoy,-45); })
+          .sort(function(a,b){ return String(b.fecha).localeCompare(String(a.fecha)); });
+        if(!docs.length) return null;
+        var EST={por_asignar:["Por reasignar hoy",C.attentionText],aplicada:["Reasignada",C.green],aprobada:["Reasignada",C.green]};
+        return (
+          <div style={CARD}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Ausencias documentadas</div>
+                <div style={{fontSize:11,color:C.taupe,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>Ya no se autorizan: quedan registradas y el equipo se reajusta solo. Quien tiene una ausencia ese día no recibe ruta.</div>
+              </div>
+              <span style={{fontSize:15,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums",flexShrink:0}}>{docs.length}</span>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:7,marginTop:11}}>
+              {docs.slice(0,12).map(function(a){
+                var e=EST[a.estado]||["Registrada",C.earth];
+                var esFut=String(a.fecha).slice(0,10)>=hoy;
+                return (
+                  <div key={a.id} style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",flexWrap:"wrap",background:C.surfaceWarm,borderRadius:9,padding:"9px 12px"}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{a.vendorNombre||a.vendorEmail}</div>
+                      <div style={{fontSize:11,color:C.earth,marginTop:2,lineHeight:1.5,textWrap:"pretty"}}>{schedDiaNombre(a.fecha)} {fmtDate(a.fecha)}{a.motivo?" · "+a.motivo:""}</div>
+                    </div>
+                    <span style={{fontSize:9,fontWeight:700,color:e[1],letterSpacing:".08em",textTransform:"uppercase",whiteSpace:"nowrap",marginTop:2}}>{esFut&&(a.estado==="pendiente")?"Registrada":e[0]}</span>
+                  </div>
+                );
+              })}
+              {docs.length>12&&<div style={{fontSize:10.5,color:C.taupe,textAlign:"center"}}>y {docs.length-12} más</div>}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Cancelación de una limpieza */}
       {cancelar&&(function(){
         var paga=cancelPagable(cancelar), tarifa=cancelTarifa(cancelar), monto=paga?Math.round(tarifa/2):0;
@@ -11159,24 +11291,24 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
         </div>
       )}
 
-      {/* Selector de día */}
+      {/* Selector de día — ayer · hoy · mañana, y luego “Ir a” (por defecto pasado mañana) */}
       <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-        <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:2,flex:1,minWidth:0}}>
-          {[-1,0,1,2,3,4,5,6].map(function(n){
+        <div style={{display:"flex",gap:6,flex:1,minWidth:0}}>
+          {[-1,0,1].map(function(n){
             var fx=SCHED.shift(hoy,n), sel=dia===n;
             var cnt=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===fx; }).length;
             return (
               <button key={n} onClick={function(){setDia(n);}} style={{flexShrink:0,padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>
-                {n===-1?"Ayer":n===0?"Hoy":n===1?"Mañana":schedDiaNombre(fx).slice(0,3)+" "+String(fx).slice(8,10)}
+                {n===-1?"Ayer":n===0?"Hoy":"Mañana"}
                 {cnt>0&&<span style={{marginLeft:6,opacity:.65,fontVariantNumeric:"tabular-nums"}}>{cnt}</span>}
               </button>
             );
           })}
         </div>
-        {/* Ir a un día específico */}
+        {/* Ir a un día específico — por defecto pasado mañana */}
         <label style={{display:"flex",alignItems:"center",gap:7,flexShrink:0}}>
-          <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase"}}>Ir a</span>
-          <input type="date" value={fecha} onChange={function(e){ if(e.target.value) setDia(SCHED.dias(hoy,e.target.value)); }} style={{fontSize:12,padding:"9px 11px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,fontFamily:"Montserrat,sans-serif",color:C.black,background:"#fff"}}/>
+          <span style={{fontSize:9.5,fontWeight:700,color:dia>1?C.black:C.earth,letterSpacing:".1em",textTransform:"uppercase"}}>Ir a</span>
+          <input type="date" value={dia>1?fecha:SCHED.shift(hoy,2)} onChange={function(e){ if(e.target.value) setDia(SCHED.dias(hoy,e.target.value)); }} style={{fontSize:12,padding:"9px 11px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(dia>1?C.black:C.gray),fontFamily:"Montserrat,sans-serif",color:C.black,background:"#fff"}}/>
         </label>
       </div>
 
@@ -11199,7 +11331,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           )}
         </div>
         {/* Borrador: hasta que salga el correo, el administrador manda. */}
-        {fecha>hoy&&!notificado&&delDia.length>0&&(
+        {fecha>hoy&&!notificado&&!yaSalioAuto&&delDia.length>0&&(
           <div style={{marginTop:11,background:C.surfaceWarm,border:"1px solid "+C.gray,borderRadius:9,padding:"11px 13px"}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"baseline"}}>
               <div style={{fontSize:11.5,color:C.black,fontWeight:700,lineHeight:1.6}}>Borrador · el equipo todavía no lo ve</div>
@@ -11213,6 +11345,11 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                 : "Sale por correo la tarde anterior a las 6:00 pm. Puedes ajustarlo libremente hasta entonces."}
               {resumenTec.sin>0?" Hay "+resumenTec.sin+" técnico"+(resumenTec.sin===1?"":"s")+" sin trabajo: revisa si es por falta de checkouts en sus zonas.":""}
             </div>
+          </div>
+        )}
+        {fecha>hoy&&!notificado&&yaSalioAuto&&(
+          <div style={{marginTop:11,background:"#E8F2ED",borderRadius:9,padding:"10px 12px",fontSize:11.5,color:C.green,lineHeight:1.6,fontWeight:600,textWrap:"pretty"}}>
+            La ruta de mañana salió automáticamente por correo a las 6:00 pm. El equipo ya la tiene — si la cambias, usá el reenvío para avisar.
           </div>
         )}
         {tocados[fecha]&&(
