@@ -305,9 +305,12 @@
       if (prev && dias(prev, base.fecha) < PROFUNDA_CADA_DIAS - 4) continue;
       candidatas.push({ pk: pk, base: base, prev: prev || "" });
     }
-    /* La que lleva más tiempo sin profunda va primero. */
+    /* La que lleva MÁS DÍAS ACUMULADOS sin limpieza profunda va primero. Se mide
+       en días reales (no comparando fechas sueltas); la que nunca tuvo, de primera. */
     candidatas.sort(function (a, b) {
-      if (a.prev !== b.prev) return a.prev < b.prev ? -1 : 1;
+      var da = a.prev ? dias(a.prev, a.base.fecha) : 1e9;
+      var db = b.prev ? dias(b.prev, b.base.fecha) : 1e9;
+      if (da !== db) return db - da;
       return a.base.fecha < b.base.fecha ? -1 : 1;
     });
     var porDia = {};

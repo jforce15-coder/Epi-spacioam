@@ -744,6 +744,111 @@ const TRAD_SINGLE_PHOTOS = [
   ["fotosCloset","Detalles — blancos en clóset"],
 ];
 
+/* ─── Auditoría de fotos de limpieza: qué fotos esperadas subió cada formulario.
+   Base del análisis de Pareto (Dashboard Ejecutivo) y del refuerzo en el formulario. */
+var PROF_PHOTO_KEYS = [
+  ["fotosRegadera","Regadera"],
+  ["fotosDucha","Ducha y mampara"],
+  ["fotosVentanas","Ventanas"],
+  ["fotosEstufa","Cocina — estufa"],
+  ["fotosFregadero","Cocina — fregadero"],
+  ["fotosMicroondas2","Cocina — microondas por dentro"],
+  ["fotosPlatos","Cocina — platos y cubiertos"],
+  ["fotosGavetas","Gavetas y utensilios"],
+  ["fotosDetrasElect","Detrás de electrodomésticos"],
+];
+function photoFilled(v){
+  function one(x){ return !!(x&&typeof x==="string"&&(x.indexOf("http")===0||x.indexOf("data:")===0)); }
+  if(Array.isArray(v)) return v.some(one);
+  return one(v);
+}
+/* Lista de fotos ESPERADAS de un formulario de limpieza, cada una con si se subió.
+   Solo aplica a limpieza tradicional y profunda. */
+function cleaningPhotoAudit(rep, propObj){
+  if(!rep) return null;
+  var items=[];
+  if(rep.categoria==="Limpieza tradicional"){
+    var nH=Math.max((rep.fotosHabitaciones||[]).length, propObj?(parseInt(propObj.cuartos,10)||0):0);
+    for(var i=0;i<nH;i++) items.push({key:"hab_general",label:"Habitación — foto general",filled:photoFilled((rep.fotosHabitaciones||[])[i])});
+    var nB=(rep.fotosBanos||[]).length;
+    for(var j=0;j<nB;j++){ var b=rep.fotosBanos[j]||{}; items.push({key:"bano_ducha",label:"Baño — ducha",filled:photoFilled(b.ducha)}); items.push({key:"bano_inodoro",label:"Baño — inodoro",filled:photoFilled(b.inodoro)}); }
+    TRAD_SINGLE_PHOTOS.forEach(function(p){ items.push({key:p[0],label:p[1],filled:photoFilled(rep[p[0]])}); });
+  } else if(rep.categoria==="Limpieza profunda"){
+    PROF_PHOTO_KEYS.forEach(function(p){ items.push({key:p[0],label:p[1],filled:photoFilled(rep[p[0]])}); });
+  } else return null;
+  return items;
+}
+/* Agrega la auditoría sobre un conjunto de reportes: qué fotos faltan más y la
+   tasa global de subida. vendorMatch(r) limita a un técnico; propsByName da cuartos. */
+function fotosPareto(reps, vendorMatch, propsByName){
+  var counts={}, forms=0, exp=0, fill=0, sinFoto=0;
+  (reps||[]).forEach(function(r){
+    if(!r||!isCleaning(r.categoria)) return;
+    if(vendorMatch && !vendorMatch(r)) return;
+    var po=propsByName?propsByName[normalize(r.propiedad||"")]:null;
+    var items=cleaningPhotoAudit(r, po); if(!items||!items.length) return;
+    forms++;
+    var alguna=false;
+    items.forEach(function(it){
+      var c=counts[it.key]||(counts[it.key]={label:it.label,missing:0,total:0});
+      c.total++; exp++;
+      if(it.filled){ fill++; alguna=true; } else c.missing++;
+    });
+    if(!alguna) sinFoto++;
+  });
+  var rows=Object.keys(counts).map(function(k){ return Object.assign({key:k},counts[k]); })
+    .filter(function(x){ return x.missing>0; })
+    .sort(function(a,b){ return b.missing-a.missing; });
+  return {rows:rows, forms:forms, exp:exp, fill:fill, sinFoto:sinFoto, pct: exp?Math.round(fill/exp*100):0};
+}
+/* Tasa de omisión de UNA foto por técnico, y la media del equipo (base de #5). */
+function perTechMissRate(allReps, propsByName, key){
+  var by={};
+  (allReps||[]).forEach(function(r){
+    if(!r||!isCleaning(r.categoria)) return;
+    var items=cleaningPhotoAudit(r, propsByName?propsByName[normalize(r.propiedad||"")]:null); if(!items) return;
+    var em=String(r.reportadoPor||"").toLowerCase(); if(!em) return;
+    items.forEach(function(it){ if(it.key!==key) return; var b=by[em]||(by[em]={miss:0,total:0}); b.total++; if(!it.filled) b.miss++; });
+  });
+  var rates={}, sum=0, n=0;
+  Object.keys(by).forEach(function(e){ var b=by[e]; if(b.total<1) return; var rate=b.miss/b.total; rates[e]=rate; sum+=rate; n++; });
+  return {byEmail:rates, mean: n?sum/n:0};
+}
+function verificarFoto(dataUrl){
+  return new Promise(function(res){
+    try{ var img=new Image(); img.onload=function(){ res({ok:img.naturalWidth>0&&img.naturalHeight>0, w:img.naturalWidth, h:img.naturalHeight}); }; img.onerror=function(){ res({ok:false}); }; img.src=dataUrl; }
+    catch(_){ res({ok:false}); }
+  });
+}
+/* Diagnóstico de fotos para el técnico que abre un formulario de limpieza.
+   Decide si hay que (verify) pedirle una foto de verificación —muchos formularios
+   sin fotos— o (force) forzar la foto #1 del Pareto —la omite más que la media. */
+function techPhotoDiag(allReps, vendorEmail, props, category){
+  var out={active:false};
+  if(category!=="Limpieza tradicional" && category!=="Limpieza profunda") return out;
+  var em=String(vendorEmail||"").toLowerCase(); if(!em) return out;
+  var propsByName={}; (props||[]).forEach(function(p){ propsByName[normalize(p.name||"")]=p; });
+  var mine=fotosPareto(allReps, function(r){ return mismoTecnico(r, em); }, propsByName);
+  if(mine.forms===0) return out;
+  /* #7 — subida muy baja / formularios sin foto (una vez cada 30 días tras verificar). */
+  var verificadoReciente=false;
+  try{ var vd=localStorage.getItem("epi_photoverify_"+em); if(vd) verificadoReciente=(Date.now()-parseInt(vd,10))<30*86400000; }catch(_){}
+  if(!verificadoReciente && mine.forms>=2 && mine.sinFoto>=2 && mine.pct<50){
+    return {active:true, mode:"verify", pct:mine.pct, sinFoto:mine.sinFoto};
+  }
+  /* #5 — la foto #1 del Pareto del equipo, si este técnico la omite más que la media. */
+  var doneToday=false; try{ doneToday=localStorage.getItem("epi_force5_"+em)===todayStr(); }catch(_){}
+  if(doneToday) return out;
+  var catKeys={}; (category==="Limpieza profunda"?PROF_PHOTO_KEYS:TRAD_SINGLE_PHOTOS).forEach(function(p){ catKeys[p[0]]=p[1]; });
+  var team=fotosPareto(allReps, null, propsByName);
+  var topRow=(team.rows||[]).filter(function(x){ return catKeys[x.key]; })[0];
+  if(!topRow) return out;
+  var st=perTechMissRate(allReps, propsByName, topRow.key);
+  var myRate=st.byEmail[em];
+  if(myRate==null || !(myRate>st.mean)) return out;
+  return {active:true, mode:"force", topKey:topRow.key, topLabel:catKeys[topRow.key]||topRow.label};
+}
+
 
 /* ═══ UTILS */
 function fmtDate(d) {
@@ -1102,13 +1207,14 @@ function ls_loadAll(){
     regSol: ls_get("c:regsol")||null,
     reservas: ls_get("c:resv")||null,
     ausencias: ls_get("c:aus")||null,
+    swaps: ls_get("c:swaps")||null,
     codigos: ls_get("c:cod")||null,
   };
   return {reports:reps.sort(function(a,b){return (b.createdAt||b.id)-(a.createdAt||a.id);}), ...cfg};
 }
 function ls_saveReport(rep){ls_set("m:"+rep.id,rep);}
 function ls_deleteReport(id){ls_del("m:"+id);}
-function ls_saveConfig(key,value){var km={vendors:"c:v",props:"c:p",adminpin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus"};ls_set(km[key]||key,value);}
+function ls_saveConfig(key,value){var km={vendors:"c:v",props:"c:p",adminpin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus",swaps:"c:swaps"};ls_set(km[key]||key,value);}
 
 /* Rescate de arreglos JSON dañados. Si una celda de Config quedó con JSON válido
    seguido de basura (p.ej. una restauración que dejó '...]" por "[...]'), extrae el
@@ -1210,6 +1316,7 @@ async function loadAllData() {
       regSol: d.regSol || [],
       reservas: d.reservas || [],
       ausencias: d.ausencias || [],
+      swaps: d.swaps || [],
     };
   }
   /* Carga SECUENCIAL (no Promise.all): el Apps Script ocasionalmente mezcla las
@@ -1257,6 +1364,7 @@ async function loadAllData() {
     regSol: Array.isArray(cfg.regSol) ? cfg.regSol : [],
     reservas: Array.isArray(cfg.reservas) ? cfg.reservas : [],
     ausencias: Array.isArray(cfg.ausencias) ? cfg.ausencias : [],
+    swaps: Array.isArray(cfg.swaps) ? cfg.swaps : [],
   };
 }
 
@@ -1433,7 +1541,7 @@ async function deleteReportById(id) {
 
 async function saveConfigItem(key, value) {
   if(IS_CLAUDE_SANDBOX){
-    var ls_km={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus"};
+    var ls_km={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus",swaps:"c:swaps"};
     ls_set(ls_km[key]||key,value);
     return;
   }
@@ -1458,7 +1566,7 @@ async function saveConfigItem(key, value) {
   } catch(e) {
     console.error("saveConfig failed for key "+key+":", e.message);
     /* Fallback to localStorage so data isn't lost */
-    var ls_km2={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus"};
+    var ls_km2={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus",swaps:"c:swaps"};
     ls_set(ls_km2[key]||key,value);
   }
 }
@@ -1576,8 +1684,10 @@ function App() {
      que generan cada limpieza) y ausencias reportadas por los técnicos. */
   const [reservas, setReservas] = useState([]);
   const [ausencias, setAusencias] = useState([]);
+  const [swaps, setSwaps] = useState([]);
   async function svReservas(v){ setReservas(v); saveConfigItem("reservas", v); }
   async function svAusencias(v){ setAusencias(v); saveConfigItem("ausencias", v); }
+  async function svSwaps(v){ setSwaps(v); saveConfigItem("swaps", v); }
   const [notifPrefs, setNotifPrefs] = useState({});
   /* Reviews de huéspedes (calificación de limpieza importada de las plataformas) */
   const [reviews, setReviews] = useState([]);
@@ -1672,6 +1782,7 @@ function App() {
       setRegSol(Array.isArray(d.regSol)?d.regSol:[]);
       setReservas(Array.isArray(d.reservas)?d.reservas:[]);
       setAusencias(Array.isArray(d.ausencias)?d.ausencias:[]);
+      setSwaps(Array.isArray(d.swaps)?d.swaps:[]);
       setNotifPrefs(d.notifprefs||{}); NOTIF_PREFS=d.notifprefs||{};
       setSheetsOk(!IS_CLAUDE_SANDBOX);
       setReady(true); setSyncing(false);
@@ -1834,6 +1945,7 @@ function App() {
       if(d.notifprefs){ setNotifPrefs(d.notifprefs); NOTIF_PREFS=d.notifprefs; }
       if(d.extcats)   setExtCats(d.extcats);
       if(d.schedules) setSchedules(d.schedules);
+      if(Array.isArray(d.swaps)) setSwaps(d.swaps);
       if(d.codigos)   setCodigos(d.codigos);
       if(d.hospurlday)  setHospUrlDay(d.hospurlday||"");
       if(d.hospurlweek) setHospUrlWeek(d.hospurlweek||"");
@@ -1877,8 +1989,8 @@ function App() {
       <style>{".vercomo-wrap header{top:40px !important}"}</style>
       <div className="vercomo-wrap" style={{paddingTop:40}}>
         {vcV.isAdmin
-          ? <AdminApp pagosReady={pagosReady} reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={vcV} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={function(){setVerComo(null);}} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>
-          : <VendorApp vendor={vcV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,vcV);})} props={props} company={company} schedules={vcSched} codigos={codigos} ausencias={ausencias} onSvAusencias={svAusencias} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={function(){setVerComo(null);}} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>}
+          ? <AdminApp pagosReady={pagosReady} reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={vcV} swaps={swaps} onSvSwaps={svSwaps} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={function(){setVerComo(null);}} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>
+          : <VendorApp vendor={vcV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,vcV);})} props={props} company={company} schedules={vcSched} codigos={codigos} ausencias={ausencias} onSvAusencias={svAusencias} swaps={swaps} onSvSwaps={svSwaps} allSchedules={schedules} onSvSchedules={svSchedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={function(){setVerComo(null);}} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>}
       </div>
     </>);
   } else if (sess.role==="vendor"&&sess.vendor) {
@@ -1895,9 +2007,9 @@ function App() {
     });
     var needsOnb = isEpiLimpieza(freshV) && !freshV.notifSetupDone && !onbDone;
     try{ if(localStorage.getItem("epi_onboard_done_"+freshV.id)) needsOnb=false; }catch(_){}
-    inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={misSchedules} codigos={codigos} ausencias={ausencias} onSvAusencias={svAusencias} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
+    inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={misSchedules} codigos={codigos} ausencias={ausencias} onSvAusencias={svAusencias} swaps={swaps} onSvSwaps={svSwaps} allSchedules={schedules} onSvSchedules={svSchedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
   } else {
-    inner = <AdminApp pagosReady={pagosReady} reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
+    inner = <AdminApp pagosReady={pagosReady} reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} swaps={swaps} onSvSwaps={svSwaps} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
   }
   return <ErrorBoundary>{inner}</ErrorBoundary>;
 }
@@ -2173,7 +2285,7 @@ function NotifCfg({prefs, vendors, onSave, readOnly}){
 }
 
 /* ═══ ADMIN */
-function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegSol,nomAjustes,onSvNomAjustes,reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,vendors,props,adminPin,company,extCats,schedules,codigos,onSvCodigos,schedErr,onVerComo,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
+function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,swaps,onSvSwaps,regSol,onSvRegSol,nomAjustes,onSvNomAjustes,reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,vendors,props,adminPin,company,extCats,schedules,codigos,onSvCodigos,schedErr,onVerComo,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
   const [tab,    setTab]    = useState("dash");
   useEPIPrefs();   /* repinta al cambiar idioma/moneda desde el menú de usuario */
   const [detail, setDetail] = useState(null);
@@ -2209,6 +2321,9 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
      Cada ausencia se transiciona de estado en la misma pasada, así que el efecto
      no la vuelve a procesar. */
   const [ausPopup, setAusPopup] = useState(null);
+  /* Recordatorio de códigos: forzado pero cerrable, una vez al día por dispositivo. */
+  const [codPopupOff, setCodPopupOff] = useState(function(){ try{ return localStorage.getItem("epi_codpopup_"+SCHED.hoyGT())==="1"; }catch(_){ return false; } });
+  function cerrarCodPopup(){ setCodPopupOff(true); try{ localStorage.setItem("epi_codpopup_"+SCHED.hoyGT(),"1"); }catch(_){} }
   useEffect(function(){
     if(sheetsOk===null || !vendors || !vendors.length) return;
     var pend=(ausencias||[]).filter(function(a){ return a && (a.estado||"pendiente")==="pendiente"; });
@@ -2239,7 +2354,8 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
         var m=porId[sc.id]; if(!m) return sc;
         var v=tecsAll.find(function(x){ return String(x.email||"").toLowerCase()===m.aEmail; });
         return Object.assign({},sc,{vendorEmail:m.aEmail, vendorId:m.aVendorId||(v&&v.id)||"",
-          orden:m.orden||sc.orden, motivo:"reajuste automático por ausencia · "+(m.motivo||""), estado:"confirmada", reajustada:true});
+          orden:m.orden||sc.orden, motivo:"reajuste automático por ausencia · "+(m.motivo||""), estado:"confirmada", reajustada:true,
+          deAusencia:a.id, origEmail:String(sc.vendorEmail||"").toLowerCase()});
       });
       (r.movimientos||[]).forEach(function(m){ toNotify.push({email:m.aEmail, fecha:f}); });
       toNotify.push({email:String(a.vendorEmail||"").toLowerCase(), fecha:f});
@@ -2276,7 +2392,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
     var n=(schedules||[]).filter(function(sc){ return String(sc.fecha).slice(0,10)===f && String(sc.vendorEmail||"").toLowerCase()===aEmail && sc.estado!=="cancelada"; }).length;
     var upd=(schedules||[]).map(function(sc){
       if(!ids[sc.id]) return sc; n++;
-      return Object.assign({},sc,{vendorEmail:aEmail, vendorId:(v&&v.id)||"", orden:n, motivo:"cubre ausencia de "+(aus.vendorNombre||""), estado:"confirmada", reajustada:true});
+      return Object.assign({},sc,{vendorEmail:aEmail, vendorId:(v&&v.id)||"", orden:n, motivo:"cubre ausencia de "+(aus.vendorNombre||""), estado:"confirmada", reajustada:true, deAusencia:aus.id, origEmail:sc.origEmail||String(sc.vendorEmail||"").toLowerCase()});
     });
     onSvSchedules&&onSvSchedules(upd);
     onSvAusencias&&onSvAusencias((ausencias||[]).map(function(x){ return x.id===aus.id?Object.assign({},x,{estado:"aplicada",resueltaEn:hoy,cubrePor:aEmail}):x; }));
@@ -2448,13 +2564,15 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
         wifiVendor={adminVendor?adminVendor.email:""}
       />
       {ausPopup&&<AusenciaHoyModal aus={ausPopup} schedules={schedules||[]} vendors={vendors} onClose={function(){setAusPopup(null);}} onApply={aplicarAusenciaHoy}/>}
+      {canNotif&&!codPopupOff&&tab!=="sched"&&<CodigosPopupDash schedules={schedules||[]} codigos={codigos||{}} onGo={function(){ cerrarCodPopup(); setTab("sched"); }} onClose={cerrarCodPopup}/>}
+      <TutorialSystem enabled={true} role="admin"/>
 
       <div style={{display:tab==="dash"?"block":"none"}}><DashView props={props} reservas={reservas||[]} nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} meEmails={adminVendor?vendorEmailSet(adminVendor):[]} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh} schedules={schedules||[]} onSvSchedules={onSvSchedules} onUpsert={onUpsert} onDelete={onDelete}/></div>
-      <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} myReps={reps} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
+      <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} myReps={reps} allReps={reps} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
       <div style={{display:tab==="sched"?"block":"none"}}>
         <ProgramacionAdmin schedules={schedules||[]} onSvSchedules={onSvSchedules} vendors={vendors||[]} props={props||[]}
           reservas={reservas||[]} onSvReservas={onSvReservas} ausencias={ausencias||[]} onSvAusencias={onSvAusencias}
-          reps={reps} reviews={reviews} rvCasos={rvCasos} onSvP={onSvP} onSvV={onSvV} canNom={canNotif} codigos={codigos||{}} schedErr={schedErr} onUpsert={onUpsert} onReasignar={setAusPopup}/>
+          reps={reps} reviews={reviews} rvCasos={rvCasos} onSvP={onSvP} onSvV={onSvV} canNom={canNotif} codigos={codigos||{}} onSvCodigos={onSvCodigos} schedErr={schedErr} onUpsert={onUpsert} onReasignar={setAusPopup} swaps={swaps||[]} onSvSwaps={onSvSwaps}/>
       </div>
       <div style={{display:tab==="qa"?"block":"none"}}>
         <AdminQAPanel reps={reps} vendors={vendors} reviews={reviews} onSvReviews={onSvReviews} rvCasos={rvCasos} onSvRvCasos={onSvRvCasos} rvIA={rvIA} onSvRvIA={onSvRvIA} onQA={qaUpdate} onSelect={setDetail} onUpdate={onUpsert} isAdmin={true} me={adminVendor} props={props} reservas={reservas||[]} schedules={schedules||[]} onSvSchedules={onSvSchedules}/>
@@ -3325,6 +3443,58 @@ function CalView({reps,onSelect,onMarkPaid,vendors}) {
   );
 }
 
+/* ─── Análisis de fotos de limpieza (Dashboard Ejecutivo) ─────────────────
+   Qué porcentaje de fotos suben los técnicos de limpieza y cuáles faltan con
+   más frecuencia (Pareto). Se filtra por técnico o se ve todo el equipo. */
+function FotosLimpiezaAnalisis({reps, vendors, props}){
+  const [fTec,setFTec] = useState("__all");
+  var tecs=schedTecnicos(vendors||[]);
+  var propsByName={}; (props||[]).forEach(function(p){ propsByName[normalize(p.name||"")]=p; });
+  var selV = fTec==="__all"?null:tecs.find(function(v){return String(v.email||"").toLowerCase()===fTec;});
+  var match = selV ? function(r){ return repMatchesVendor(r, selV); } : null;
+  var res = React.useMemo(function(){ return fotosPareto(reps, match, propsByName); },[reps, fTec, vendors, props]);
+  var rows = res.rows.map(function(x){ return {name:x.label, v:x.missing}; });
+  var top = res.rows[0];
+  var pctColor = res.pct>=90?C.green : res.pct>=70?"#9a5020" : C.attentionText;
+  return (
+    <div style={{background:"#fff",borderRadius:18,border:"1px solid "+C.gray,padding:"20px 22px",boxShadow:"var(--sa-shadow-sm)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:14,flexWrap:"wrap"}}>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:7}}><span style={{width:6,height:6,borderRadius:"50%",background:C.peach}}/>Fotos de limpieza</div>
+          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:22,color:C.black,marginTop:5,lineHeight:1.2}}>¿Están subiendo las fotos?</div>
+        </div>
+        <select value={fTec} onChange={function(e){setFTec(e.target.value);}} style={{border:"1.5px solid "+C.gray,borderRadius:"var(--sa-pill)",padding:"9px 14px",fontSize:12,fontFamily:"Montserrat,sans-serif",background:"#fff",outline:"none",maxWidth:"100%",fontWeight:600,color:C.black}}>
+          <option value="__all">Todo el equipo</option>
+          {tecs.map(function(v){ return <option key={v.email} value={String(v.email||"").toLowerCase()}>{vendorDisplay(v)}</option>; })}
+        </select>
+      </div>
+
+      {res.forms===0
+        ? <div style={{marginTop:18,padding:"28px 16px",textAlign:"center",color:C.earth,fontSize:13,background:C.surfaceWarm,borderRadius:12,lineHeight:1.6}}>Sin formularios de limpieza {selV?"de "+vendorDisplay(selV):"registrados"} todavía.</div>
+        : <>
+            <div style={{display:"flex",gap:20,flexWrap:"wrap",alignItems:"flex-end",marginTop:16}}>
+              <div>
+                <div style={{fontSize:38,fontWeight:600,color:pctColor,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{res.pct}<span style={{fontSize:20}}>%</span></div>
+                <div style={{fontSize:11,color:C.earth,marginTop:4}}>de las fotos esperadas se subieron</div>
+              </div>
+              <div style={{fontSize:11.5,color:C.taupe,lineHeight:1.7}}>
+                {res.forms} formulario{res.forms===1?"":"s"} · {res.fill} de {res.exp} fotos
+                {res.sinFoto>0&&<div style={{color:C.attentionText,fontWeight:600,marginTop:2}}>{res.sinFoto} sin ninguna foto</div>}
+              </div>
+            </div>
+
+            {rows.length>0
+              ? <div style={{marginTop:18}}>
+                  <div style={{fontSize:10.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:6}}>Las que más faltan</div>
+                  <ParetoChart rows={rows} unidad="veces sin subir" colorTop={C.accentNeon||"#F2755A"}/>
+                  {top&&<div style={{marginTop:10,background:"#FCEDE8",border:"1px solid "+C.peach,borderRadius:10,padding:"11px 13px",fontSize:12,color:"#B4553C",fontWeight:600,lineHeight:1.6,textWrap:"pretty"}}>La que más falta: <b>{top.label}</b> — sin subir en {top.missing} de {top.total} formularios.</div>}
+                </div>
+              : <div style={{marginTop:16,background:"#E8F2ED",borderRadius:10,padding:"12px 14px",fontSize:12.5,color:C.green,fontWeight:600}}>Todas las fotos esperadas se subieron. Sin faltantes recurrentes.</div>}
+          </>}
+    </div>
+  );
+}
+
 /* ─── Executive Dashboard */
 function ExecDash({reps,vendors,reviews,rvCasos,props,reservas,schedules,onSvSchedules,onUpsert}) {
   const [fProp,  setFProp]   = useState("Todas");
@@ -3448,6 +3618,9 @@ function ExecDash({reps,vendors,reviews,rvCasos,props,reservas,schedules,onSvSch
       {/* ── Comparativo de técnicos */}
       <TechCompare8w reps={reps} vendors={vendors} reviews={reviews} rvCasos={rvCasos}/>
 
+      {/* ── Análisis de fotos de limpieza (Pareto por técnico o equipo) ── */}
+      <FotosLimpiezaAnalisis reps={reps} vendors={vendors} props={props}/>
+
       {/* ── Análisis de limpiezas profundas y de daños ── */}
       <ProfundasAnalisis reps={reps} props={props} vendors={vendors} schedules={schedules} onSvSchedules={onSvSchedules}/>
       <DanosAnalisis reps={reps} props={props} vendors={vendors} reservas={reservas} schedules={schedules} onSvSchedules={onSvSchedules} onUpsert={onUpsert}/>
@@ -3565,7 +3738,7 @@ function PagosLimpieza({reps,vendors}) {
 
 
 /* ─── Report Form — dispatcher (all hooks before any return) */
-function RepForm({vendors,props,company,onSubmit,defaultVendor,onSaveFeedback,myReps}) {
+function RepForm({vendors,props,company,onSubmit,defaultVendor,onSaveFeedback,myReps,allReps}) {
   /* Determine allowed cats by vendor type */
   var vend = vendors&&vendors.find(function(v){return v.email===defaultVendor;});
   var isEPILimpieza = vend&&vend.tipo==="interno"&&vend.categoria==="EPI Limpieza";
@@ -3584,8 +3757,7 @@ function RepForm({vendors,props,company,onSubmit,defaultVendor,onSaveFeedback,my
   const [cat,setCat] = useState(null);
   function goBack(){setCat(null);}
   var shared = {vendors:vendors,props:props,company:company,onSubmit:onSubmit,defaultVendor:defaultVendor,onBack:goBack,onSaveFeedback:onSaveFeedback,myReps:myReps||[]};
-  if (cat==="Limpieza tradicional") return <LimpiezaTradForm {...shared}/>;
-  if (cat==="Limpieza profunda")    return <LimpiezaProfForm  {...shared}/>;
+  if (cat==="Limpieza tradicional"||cat==="Limpieza profunda") return <CleaningFormGated shared={shared} allReps={allReps||myReps||[]} defaultVendor={defaultVendor} props={props} onSaveFeedback={onSaveFeedback} category={cat}/>;
   if (cat==="Ajuste")               return <AjusteForm           {...shared}/>;
   if (cat==="Reporte de Daños")     return <DanosFormSolo         {...shared}/>;
   if (cat==="Nuevo Producto")       return <NuevoProductoForm      {...shared}/>;
@@ -4142,8 +4314,81 @@ function RefGallery({propObj, acked, onAck}){
   );
 }
 
+/* ═══ REFUERZO DE FOTOS (#5 / #7) ══════════════════════════════════════════
+   Antes de abrir el formulario de limpieza, si el técnico tiene un patrón de
+   formularios sin fotos (verify) o omite mucho la foto #1 del Pareto (force),
+   se le pide resolverlo. Máximo una intervención por formulario. */
+function CleaningPhotoGate({diag, vendorEmail, onSaveFeedback, onCleared}){
+  const [photo,setPhoto] = useState(null);
+  const [noPuedo,setNoPuedo] = useState(false);
+  const [expl,setExpl] = useState("");
+  const [busy,setBusy] = useState(false);
+  const [msg,setMsg] = useState("");
+  var em=String(vendorEmail||"").toLowerCase();
+  function fb(tipo,mensaje){ try{ onSaveFeedback&&onSaveFeedback({id:Date.now(),fecha:todayStr(),hora:new Date().toLocaleTimeString("es-GT",{hour:"2-digit",minute:"2-digit"}),usuario:em||"anon",tipo:tipo,mensaje:mensaje,visto:false}); }catch(_){} }
+  async function verificar(){
+    if(!photo||busy) return; setBusy(true);
+    var r=await verificarFoto(photo);
+    var resumen = r.ok
+      ? "Verificación de fotos OK — la imagen se cargó correctamente ("+r.w+"×"+r.h+" px); el sistema de subida y el vínculo con el usuario funcionan. Se activó porque el técnico tenía "+diag.pct+"% de fotos subidas y "+diag.sinFoto+" formularios sin ninguna foto."
+      : "Verificación de fotos CON PROBLEMA — la imagen no se pudo procesar. Hay que revisar el dispositivo del técnico o el vínculo de fotos con su usuario.";
+    fb("foto-verificacion","[Verificación automática] "+resumen);
+    try{ localStorage.setItem("epi_photoverify_"+em, String(Date.now())); }catch(_){}
+    setBusy(false); setMsg("¡Gracias! Verificamos la foto y quedó registrado el reporte.");
+    setTimeout(function(){ onCleared(null); }, 1500);
+  }
+  function forzarListo(){
+    if(photo){ try{ localStorage.setItem("epi_force5_"+em, todayStr()); }catch(_){} onCleared({key:diag.topKey,data:photo}); return; }
+    var t=expl.trim(); if(!t) return;
+    fb("foto-omitida","No pudo subir la foto «"+diag.topLabel+"»: "+t);
+    try{ localStorage.setItem("epi_force5_"+em, todayStr()); }catch(_){}
+    onCleared(null);
+  }
+  var verify=diag.mode==="verify";
+  return (
+    <div style={{maxWidth:560,margin:"0 auto",padding:"24px 16px 80px",fontFamily:"Montserrat,sans-serif"}}>
+      <div style={{background:"#fff",borderRadius:18,border:"1px solid "+C.gray,padding:"24px 22px",boxShadow:"var(--sa-shadow-sm)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{width:8,height:8,borderRadius:"50%",background:C.peach,flexShrink:0}}/>
+          <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>{verify?"Revisión de fotos":"Foto importante"}</span>
+        </div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,color:C.black,marginTop:8,lineHeight:1.25}}>
+          {verify?"Queremos asegurarnos de que todo funcione":"Antes de empezar, una foto clave"}
+        </div>
+        {msg
+          ? <div style={{marginTop:16,background:"#E8F2ED",borderRadius:10,padding:"14px 16px",fontSize:13,color:C.green,fontWeight:600,lineHeight:1.6}}>{msg}</div>
+          : verify
+            ? <>
+                <div style={{fontSize:13,color:C.earth,marginTop:10,lineHeight:1.7,textWrap:"pretty"}}>Hemos notado que has subido varios formularios sin fotografías. Queremos asegurarnos de que todo esté funcionando en orden — por favor sube una foto.</div>
+                <div style={{marginTop:16,maxWidth:220}}><SinglePhotoUp foto={photo} accent={C.peach} onAdd={function(f){compress(f).then(setPhoto);}} onDel={function(){setPhoto(null);}}/></div>
+                <button onClick={verificar} disabled={!photo||busy} style={{width:"100%",marginTop:18,padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:(!photo||busy)?C.gray:C.black,color:(!photo||busy)?C.taupe:"#fff",fontSize:12.5,fontWeight:700,cursor:(!photo||busy)?"not-allowed":"pointer",fontFamily:"Montserrat,sans-serif"}}>{busy?"Verificando…":"Verificar y continuar"}</button>
+              </>
+            : <>
+                <div style={{fontSize:13,color:C.earth,marginTop:10,lineHeight:1.7,textWrap:"pretty"}}>Para este formulario necesitamos específicamente la foto de <b style={{color:C.black}}>{diag.topLabel}</b>. Es la que más se ha estado omitiendo — con una foto tuya la ponemos al día.</div>
+                <div style={{marginTop:16,maxWidth:220}}><SinglePhotoUp foto={photo} accent={C.peach} onAdd={function(f){compress(f).then(setPhoto);}} onDel={function(){setPhoto(null);}}/></div>
+                {!noPuedo
+                  ? <button onClick={function(){setNoPuedo(true);}} style={{marginTop:12,background:"none",border:"none",padding:0,color:C.earth,fontSize:12,fontWeight:600,textDecoration:"underline",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>¿No puedes subir esta foto? Explícanos por qué</button>
+                  : <div style={{marginTop:14}}>
+                      <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:6}}>¿Por qué no puedes subirla?</div>
+                      <textarea rows={3} value={expl} onChange={function(e){setExpl(e.target.value);}} placeholder="Cuéntanos qué pasó — no hay ecofiltro, no había acceso, etc." style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:12,padding:"11px 13px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",resize:"vertical"}}/>
+                    </div>}
+                <button onClick={forzarListo} disabled={!photo && !(noPuedo&&expl.trim())} style={{width:"100%",marginTop:16,padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:(!photo && !(noPuedo&&expl.trim()))?C.gray:C.black,color:(!photo && !(noPuedo&&expl.trim()))?C.taupe:"#fff",fontSize:12.5,fontWeight:700,cursor:(!photo && !(noPuedo&&expl.trim()))?"not-allowed":"pointer",fontFamily:"Montserrat,sans-serif"}}>{photo?"Continuar con el formulario":"Enviar explicación y continuar"}</button>
+              </>}
+      </div>
+    </div>
+  );
+}
+function CleaningFormGated(props){
+  var diag = React.useMemo(function(){ return techPhotoDiag(props.allReps, props.defaultVendor, props.props, props.category); }, []);
+  const [cleared,setCleared] = useState(!diag.active);
+  const [seed,setSeed] = useState(null);
+  if(!cleared) return <CleaningPhotoGate diag={diag} vendorEmail={props.defaultVendor} onSaveFeedback={props.onSaveFeedback} onCleared={function(s){ setSeed(s||null); setCleared(true); }}/>;
+  if(props.category==="Limpieza profunda") return <LimpiezaProfForm {...props.shared} seedPhoto={seed}/>;
+  return <LimpiezaTradForm {...props.shared} seedPhoto={seed}/>;
+}
+
 /* ═══════════════ LIMPIEZA TRADICIONAL WIZARD ══════════════════════════ */
-function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFeedback,myReps}) {
+function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFeedback,myReps,seedPhoto}) {
   const STEPS = ["Bienvenida","País","Ciudad","Responsable","Propiedad","Habitaciones","Baños","Cocina","Sala y Comedor","Detalles finales","Inventario","Daños","Foto uniforme","Confirmación"];
   var TOTAL_STEPS_F = STEPS.length - 1;
   const [step,setStep]   = useState(0);
@@ -4196,6 +4441,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
   function doFresh(){ draftDel(draftKey); setResumeData(null); }
 
   function sf(k,v){setForm(function(p){var u=Object.assign({},p);u[k]=v;return u;});}
+  useEffect(function(){ if(seedPhoto&&seedPhoto.key&&seedPhoto.data) sf(seedPhoto.key, seedPhoto.data); },[]);
 
   var propObj = props.find(function(p){return p.name===form.propiedad;})||{};
   var cuartos  = cuartosOv!=null ? cuartosOv : (propObj.cuartos||1);
@@ -4729,7 +4975,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
 }
 
 /* ═══════════════ LIMPIEZA PROFUNDA WIZARD ═════════════════════════════ */
-function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) {
+function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFeedback,myReps,seedPhoto}) {
   const STEPS_P = ["Bienvenida","Propiedad","Regadera y Ducha","Ventanas","Cocina profunda","Gavetas y Detrás","Detalle extra","Inventario","Foto uniforme","Confirmación"];
   const [step,setStep]   = useState(0);
   const [errMsg,setErrMsg] = useState("");
@@ -4768,6 +5014,7 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,myReps}) 
   function doFreshP(){ draftDel(draftKeyP); setResumeDataP(null); }
 
   function sf(k,v){setForm(function(p){var u=Object.assign({},p);u[k]=v;return u;});}
+  useEffect(function(){ if(seedPhoto&&seedPhoto.key&&seedPhoto.data) sf(seedPhoto.key, seedPhoto.data); },[]);
   function next(){if(step<STEPS_P.length-1)setStep(function(s){return s+1;});}
   function prev(){if(step>0)setStep(function(s){return s-1;});}
   var propObj=props.find(function(p){return p.name===form.propiedad;})||{};
@@ -7240,7 +7487,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
 }
 
 /* ═══ VENDOR APP */
-function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codigos,ausencias,onSvAusencias,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout,reviews,rvCasos,onSvRvCasos,rvIA}) {
+function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codigos,ausencias,onSvAusencias,swaps,onSvSwaps,allSchedules,onSvSchedules,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout,reviews,rvCasos,onSvRvCasos,rvIA}) {
   const [view,setView] = useState("jobs");
   useEPIPrefs();   /* repinta al cambiar idioma/moneda desde el menú de usuario */
   const [pagTab,setPagTab] = useState("hist");
@@ -7283,9 +7530,11 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codig
         wifiProps={props}
         wifiVendor={vendor.email}
       />
+      <SwapLightbox vendor={vendor} allVendors={allVendors} swaps={swaps||[]} onSvSwaps={onSvSwaps} allSchedules={allSchedules||[]} onSvSchedules={onSvSchedules}/>
+      <TutorialSystem enabled={true} role="vendor"/>
       <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} adelantos={adelantos} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}} onGoAccount={function(){setView("account");}} vendor={vendor} allVendors={allVendors} reviews={reviews} allReps={allReps} rvCasos={rvCasos} rvIA={rvIA} onGoCalidad={vendor.tipo==="interno"?function(){setView("hist");}:null}/></div>
-      <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={allVendors||[]} props={props} company={company} defaultVendor={vendor.email} myReps={reps} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
-      <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} codigos={codigos||{}} ausencias={ausencias||[]} onSvAusencias={onSvAusencias} reps={reps}/></div>
+      <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={allVendors||[]} props={props} company={company} defaultVendor={vendor.email} myReps={reps} allReps={allReps||[]} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
+      <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} codigos={codigos||{}} ausencias={ausencias||[]} onSvAusencias={onSvAusencias} reps={reps} allVendors={allVendors||[]} swaps={swaps||[]} onSvSwaps={onSvSwaps} allSchedules={allSchedules||[]} onSvSchedules={onSvSchedules}/></div>
       <div style={{display:view==="hist"   ?"block":"none"}}><VendorHistory reps={cleaningReps} onRespond={vendorRespond} vendor={vendor} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}} reviews={reviews} allReps={allReps} allVendors={allVendors} rvCasos={rvCasos} onSvRvCasos={onSvRvCasos} rvIA={rvIA}/></div>
       {vendor.isSupervisor&&<div style={{display:view==="sup"?"block":"none"}}><SupervisionPanel me={vendor} reps={allReps||[]} vendors={allVendors||[]} props={props} onUpdate={onUpdate}/></div>}
       <div style={{display:view==="account"?"block":"none"}}><VendorAccount vendor={vendor} allVendors={allVendors} allReps={allReps} onSvV={onSvV}/></div>
@@ -8060,7 +8309,10 @@ function AusenciaHoyModal({aus, schedules, vendors, onClose, onApply}){
   /* La fecha de la ausencia (para hoy o para un día documentado próximo). */
   var dia=String(aus.fecha||"").slice(0,10)||hoy;
   var esHoy=dia===hoy;
-  var afectadas=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===dia && String(s.vendorEmail||"").toLowerCase()===String(aus.vendorEmail||"").toLowerCase() && s.estado!=="cancelada"; })
+  /* Incluye las limpiezas todavía en el técnico ausente Y las que ya se le
+     movieron a otro por esta ausencia (deAusencia), para que el admin pueda
+     reasignar a mano aunque el motor ya las haya repartido. */
+  var afectadas=(schedules||[]).filter(function(s){ if(String(s.fecha).slice(0,10)!==dia || s.estado==="cancelada") return false; return String(s.vendorEmail||"").toLowerCase()===String(aus.vendorEmail||"").toLowerCase() || s.deAusencia===aus.id; })
     .sort(function(a,b){ return (a.orden||0)-(b.orden||0); });
   var opciones=schedTecnicos(vendors).filter(function(v){ return String(v.email||"").toLowerCase()!==String(aus.vendorEmail||"").toLowerCase() && v.active!==false; });
   /* Carga de ese día por técnico: cuántas limpiezas tiene y en qué propiedades,
@@ -8114,9 +8366,396 @@ function AusenciaHoyModal({aus, schedules, vendors, onClose, onApply}){
   );
 }
 
+/* ═══ TUTORIALES ESTILO "TIPS" DE iOS ═══════════════════════════════════════
+   Popup forzado 1 sola vez con las funciones nuevas, y un hub "?" siempre a mano.
+   Cada tarjeta usa una captura real del web app (móvil o escritorio según el
+   dispositivo) en public/tips/<id>-<mobile|desktop>.png; si aún no existe, se
+   muestra un marcador de posición con el nombre de la pantalla. */
+var TIPS_VERSION = "v2";
+/* roles: quién lo ve. cat: "nuevo" (forzado la 1ª vez) o "mas" (solo en el hub "?"). */
+var TUTORIALES = [
+  // ── Técnicos ──
+  {id:"ausencia", type:"Programación", roles:["vendor"], cat:"nuevo", title:"Avisar una ausencia", lines:["En la pestaña Programa, baja al bloque «Avisar que no podrás trabajar».","Elige el día y el motivo, y envía. Tu ruta se reasigna sola y avisamos al equipo."]},
+  {id:"intercambio", type:"Programación", roles:["vendor"], cat:"nuevo", title:"Intercambiar una ruta", lines:["En Programa, toca «Intercambiar tareas con otro técnico».","Elige el día, las limpiezas que cedes y un técnico de tu misma zona. Él acepta o rechaza; te avisamos con el resultado."]},
+  {id:"revision", type:"Calidad", roles:["vendor"], cat:"nuevo", title:"Pedir revisión de una reseña", lines:["En la pestaña Calidad, abre la calificación con la que no estás de acuerdo.","Toca «Pedir revisión», cuéntanos por qué y envía. El administrador la revisa."]},
+  {id:"dano", type:"Reportes", roles:["vendor"], cat:"nuevo", title:"Reportar un daño", lines:["Toca «Nuevo reporte» y elige la categoría Daño.","Describe qué pasó, agrega fotos y envía. Un daño urgente llega de inmediato al administrador."]},
+  {id:"wifi", type:"Conectividad", roles:["vendor"], cat:"nuevo", title:"Conectarte al Wi-Fi", lines:["En la barra superior, a la derecha, toca el ícono de Wi-Fi.","Elige la propiedad y copia la red y la contraseña."]},
+  {id:"notiscenter", type:"Notificaciones", roles:["vendor","admin"], cat:"nuevo", title:"El nuevo centro de notificaciones", lines:["El triángulo con número, arriba a la izquierda junto al logo, abre tus avisos.","Ahí se agrupan tareas, calificaciones y recordatorios, aunque ya no sean push."]},
+  {id:"formulario", type:"Reportes", roles:["vendor"], cat:"mas", title:"Llenar un formulario", lines:["Toca «Nuevo reporte» y elige el tipo de trabajo.","Avanza paso a paso; se guarda solo mientras llenas. Sube las fotos que te pida y confirma al final."]},
+  {id:"pagos", type:"Pagos", roles:["vendor"], cat:"mas", title:"Revisar tu historial de pagos", lines:["Entra a Pagos y quédate en «Historial de pagos».","Ahí ves cada comprobante con su fecha y monto; toca uno para el detalle."]},
+  // ── Compartido ──
+  {id:"notiquitar", type:"Notificaciones", roles:["vendor","admin"], cat:"mas", title:"Eliminar o posponer un aviso", lines:["Abre el centro de notificaciones desde el triángulo de arriba.","Desliza el aviso a la izquierda (←) para eliminarlo.","Deslízalo a la derecha (→) o toca «Después» para posponerlo."]},
+  // ── Administradores ──
+  {id:"codigos", type:"Programación", roles:["admin"], cat:"nuevo", title:"Asignar códigos de acceso", lines:["En Programación, en «Rutas del día», escribe el código en la última columna de cada propiedad.","Los códigos valen 2 semanas; la fecha de validez se muestra bajo los filtros.","Marca «Permanente» si el código no cambia, o «No usa código» para no pedirlo de nuevo. Se guarda solo."]},
+  {id:"reasignar", type:"Programación", roles:["admin"], cat:"nuevo", title:"Reasignar una ausencia", lines:["En Programación, abre el bloque de ausencias documentadas.","Toca cualquier ausencia —aunque ya diga «Reasignada»— para elegir o cambiar quién la cubre."]},
+  {id:"intercambios", type:"Programación", roles:["admin"], cat:"mas", title:"Ver intercambios de ruta", lines:["En Programación, abre la bitácora «Intercambios entre técnicos».","Ahí ves quién le cedió qué a quién y en qué quedó cada solicitud."]},
+  {id:"fotos", type:"Dashboard", roles:["admin"], cat:"mas", title:"Análisis de fotos del equipo", lines:["En el Dashboard Ejecutivo, abre «¿Están subiendo las fotos?».","Filtra por técnico o ve al equipo completo; el Pareto muestra las fotos que más se omiten."]},
+];
+function tutsForRole(role, cat){ return TUTORIALES.filter(function(t){ return t.roles.indexOf(role)>=0 && (!cat||t.cat===cat); }); }
+function tipsSeen(){ try{ return localStorage.getItem("epi_tips_seen_"+TIPS_VERSION)==="1"; }catch(_){ return false; } }
+function markTipsSeen(){ try{ localStorage.setItem("epi_tips_seen_"+TIPS_VERSION,"1"); }catch(_){} }
+
+/* Visual recreado por tutorial — no una captura estática, sino una maqueta fiel
+   con los tokens de la marca. Responsiva: se ve como el app real en móvil y en
+   escritorio, y nunca se desactualiza ni hay que subir imágenes. */
+function TipChrome({mobile, active, tab, navSet, children}){
+  /* Barra superior REAL del app: logo wordmark + triángulo de avisos (azul
+     pizarra con badge peach) a la izquierda; a la derecha el farol de Sheets,
+     el Wi-Fi y el avatar; en escritorio, la píldora de navegación al centro.
+     `active` resalta "wifi" | "bell". navSet: "vendor" | "admin". */
+  var nav = navSet==="admin"
+    ? [["dash","Dashboard","home"],["sched","Programación","calendar"],["reps","Reportes","file"],["pay","Pagos","coins"]]
+    : [["dash","Inicio","home"],["sched","Programa","calendar"],["quality","Calidad","star"],["pay","Pagos","coins"]];
+  return (
+    <div style={{width:"100%",background:C.beige,borderRadius:18,overflow:"hidden",border:"1px solid "+C.line}}>
+      <div style={{display:"flex",alignItems:"center",gap:mobile?7:9,padding:mobile?"8px 12px":"9px 14px",background:"rgba(250,250,250,.88)",backdropFilter:"blur(20px) saturate(120%)",WebkitBackdropFilter:"blur(20px) saturate(120%)",borderBottom:"1px solid "+C.line}}>
+        <img src={LOGO_WORDMARK} alt="Spacio AM" style={{height:mobile?22:24,width:"auto",objectFit:"contain",display:"block",flexShrink:0}}/>
+        <TipDot on={active==="bell"} label="avisos"><span style={{position:"relative",display:"inline-flex"}}><Icon name="alert" size={20} stroke={active==="bell"?"#B4553C":"var(--color-info,#3B6691)"}/><span style={{position:"absolute",top:-2,right:-3,minWidth:15,height:15,padding:"0 3px",borderRadius:"var(--sa-pill)",background:C.peach,color:"#fff",fontSize:8.5,fontWeight:700,fontVariantNumeric:"tabular-nums",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,boxShadow:"0 1px 3px rgba(0,0,0,.28)"}}>3</span></span></TipDot>
+        <span style={{flex:1}}/>
+        <span style={{display:"inline-flex",alignItems:"center",gap:6,padding:"5px 11px",borderRadius:"var(--sa-pill)",border:"1px solid "+C.line,background:C.surface}}><Icon name="edit" size={13} stroke={C.earth}/>{!mobile&&<span style={{fontSize:10.5,fontWeight:600,color:C.earth}}>Comentario</span>}</span>
+        {!mobile&&(
+          <nav style={{display:"flex",alignItems:"center",height:34,background:C.surfaceWarm,borderRadius:"var(--sa-pill)",padding:"0 3px",gap:2,border:"1px solid "+C.line}}>
+            {nav.map(function(it){ var on=it[0]===tab; return <span key={it[0]} style={{display:"flex",alignItems:"center",gap:6,padding:"0 11px",height:28,borderRadius:"var(--sa-pill)",fontSize:10.5,fontWeight:600,letterSpacing:".04em",background:on?C.black:"transparent",color:on?"#fff":C.taupe}}><Icon name={it[2]} size={14} stroke={on?"#fff":C.taupe}/>{it[1]}</span>; })}
+          </nav>
+        )}
+        <span style={{width:7,height:7,borderRadius:"50%",background:C.green,flexShrink:0}}/>
+        <TipDot on={active==="wifi"} label="wifi"><Icon name="wifi" size={17} stroke={active==="wifi"?"#B4553C":C.earth}/></TipDot>
+        <span style={{width:26,height:26,borderRadius:"50%",background:C.surfaceWarm,border:"1px solid "+C.line,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Icon name="user" size={14} stroke={C.earth}/></span>
+      </div>
+      <div style={{padding:mobile?"13px 12px":"16px 16px"}}>{children}</div>
+    </div>
+  );
+}
+function TipDot({on, children, label}){
+  return <span aria-label={label} style={{position:"relative",width:30,height:30,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",background:on?"#FCEDE8":"transparent",boxShadow:on?"0 0 0 2px "+C.peach:"none"}}>{children}</span>;
+}
+function TipRing({children, note, pill, radius}){
+  /* Envuelve el control objetivo con un anillo peach de la MISMA forma que lo
+     remarcado: píldora si el control es píldora, o el radio que se le indique. */
+  return (
+    <div style={{position:"relative",boxShadow:"0 0 0 2px "+C.peach,borderRadius:pill?"var(--sa-pill)":(radius||14),padding:2}}>
+      {children}
+      {note&&<span style={{position:"absolute",top:-9,right:10,background:C.peach,color:"#fff",fontSize:9,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",padding:"2px 7px",borderRadius:"var(--sa-pill)"}}>{note}</span>}
+    </div>
+  );
+}
+function TipTabs({items, active}){
+  return (
+    <div style={{display:"flex",gap:14,borderBottom:"1px solid "+C.line,marginBottom:12,paddingBottom:2}}>
+      {items.map(function(l){
+        var on=l===active;
+        return <span key={l} style={{fontSize:10,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:on?C.black:C.taupe,borderBottom:"2px solid "+(on?C.peach:"transparent"),paddingBottom:8}}>{l}</span>;
+      })}
+    </div>
+  );
+}
+function TipBtn({children, solid, ring}){
+  var el=<span style={{display:"block",textAlign:"center",padding:"11px 12px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(solid?C.black:C.gray),background:solid?C.black:C.surface,color:solid?"#fff":C.black,fontSize:12,fontWeight:600}}>{children}</span>;
+  return ring?<TipRing note="aquí" pill>{el}</TipRing>:el;
+}
+function TipRow({title, sub, right}){
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:10,background:C.surface,border:"1px solid "+C.line,borderRadius:12,padding:"10px 12px"}}>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:12,fontWeight:600,color:C.black,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
+        {sub&&<div style={{fontSize:10.5,color:C.taupe,marginTop:2}}>{sub}</div>}
+      </div>
+      {right}
+    </div>
+  );
+}
+function TipVisual({id, mobile}){
+  var gap={display:"flex",flexDirection:"column",gap:9};
+  if(id==="ausencia") return (
+    <TipChrome mobile={mobile} tab="sched">
+      <div style={gap}>
+        <TipRow title="Hoy · 3 limpiezas" sub="Tu ruta del día"/>
+        <TipRing note="aquí" radius={12}><div style={{background:C.surface,border:"1px solid "+C.line,borderRadius:12,padding:"11px 12px"}}><div style={{fontSize:11.5,fontWeight:700,color:C.black}}>Avisar que no podrás trabajar</div><div style={{fontSize:10.5,color:C.taupe,marginTop:3}}>Elige el día y el motivo</div></div></TipRing>
+      </div>
+    </TipChrome>
+  );
+  if(id==="intercambio") return (
+    <TipChrome mobile={mobile} tab="sched">
+      <div style={gap}>
+        <TipBtn ring>Intercambiar tareas con otro técnico</TipBtn>
+        <TipRow title="Torre 1 · 502" sub="2 hab · tradicional"/>
+        <TipRow title="Zona 10 · Loft" sub="1 hab · tradicional"/>
+      </div>
+    </TipChrome>
+  );
+  if(id==="revision") return (
+    <TipChrome mobile={mobile} tab="quality">
+      <div style={gap}>
+        <TipRow title="Mi calificación" sub="4.6 · promedio del mes" right={<span style={{fontSize:15,fontWeight:600,color:C.green}}>4.6</span>}/>
+        <div style={{background:C.surface,border:"1px solid "+C.line,borderRadius:12,padding:"11px 12px"}}>
+          <div style={{fontSize:11.5,color:C.black,fontWeight:600}}>Reseña · Torre 1 · 502</div>
+          <div style={{fontSize:10.5,color:C.taupe,margin:"3px 0 8px"}}>“Faltó detalle en la cocina.”</div>
+          <TipRing note="aquí" pill><span style={{display:"inline-block",fontSize:11,fontWeight:600,color:"#B4553C",padding:"6px 12px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.peach,background:"#FCEDE8"}}>Pedir revisión</span></TipRing>
+        </div>
+      </div>
+    </TipChrome>
+  );
+  if(id==="dano") return (
+    <TipChrome mobile={mobile} tab="dash">
+      <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>Nuevo reporte · categoría</div>
+      <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+        {["Limpieza","Mantenimiento","Ajuste"].map(function(c){ return <span key={c} style={{fontSize:11,fontWeight:600,color:C.earth,padding:"7px 13px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:C.surface}}>{c}</span>; })}
+        <TipRing note="aquí" pill><span style={{display:"inline-block",fontSize:11,fontWeight:700,color:"#B4553C",padding:"7px 13px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.peach,background:"#FCEDE8"}}>Reporte de Daños</span></TipRing>
+      </div>
+      <div style={{marginTop:11,display:"flex",gap:8}}>
+        {[0,1].map(function(k){ return <div key={k} style={{width:52,height:52,borderRadius:10,border:"1.5px dashed "+C.gray,background:C.surface,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="camera" size={18} stroke={C.taupe}/></div>; })}
+      </div>
+    </TipChrome>
+  );
+  if(id==="wifi") return (
+    <TipChrome mobile={mobile} active="wifi">
+      <div style={{marginTop:2,background:C.surface,border:"1px solid "+C.line,borderRadius:14,padding:"12px 13px",boxShadow:"var(--sa-shadow-sm)"}}>
+        <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Wi-Fi · Torre 1 · 502</div>
+        <div style={{marginTop:9,...gap}}>
+          <TipRow title="Red" sub="SpacioAM_502" right={<Icon name="clip" size={15} stroke={C.taupe}/>}/>
+          <TipRow title="Contraseña" sub="••••••••" right={<Icon name="clip" size={15} stroke={C.taupe}/>}/>
+        </div>
+      </div>
+      <div style={{fontSize:10.5,color:C.taupe,marginTop:9,textAlign:"center"}}>Toca el ícono de Wi-Fi arriba</div>
+    </TipChrome>
+  );
+  if(id==="notiscenter") return (
+    <TipChrome mobile={mobile} active="bell">
+      <div style={gap}>
+        <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Centro de notificaciones</div>
+        <TipRow title="Lista para supervisión" sub="Torre 1 · 502 · hace 10 min"/>
+        <TipRow title="Revisión de calificación" sub="El admin respondió"/>
+        <TipRow title="Códigos de acceso" sub="Faltan 2 para mañana"/>
+      </div>
+    </TipChrome>
+  );
+  if(id==="formulario") return (
+    <TipChrome mobile={mobile} tab="dash">
+      <div style={{display:"flex",gap:5,marginBottom:11}}>{[0,1,2,3,4].map(function(k){ return <span key={k} style={{flex:1,height:5,borderRadius:"var(--sa-pill)",background:k<2?C.peach:C.gray}}/>; })}</div>
+      <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:16,color:C.black,marginBottom:9}}>Cocina</div>
+      <div style={{display:"flex",gap:8}}>
+        {[0,1,2].map(function(k){ return <div key={k} style={{flex:1,paddingTop:"64%",position:"relative",borderRadius:10,border:"1.5px dashed "+C.gray,background:C.surface}}><span style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="camera" size={17} stroke={C.taupe}/></span></div>; })}
+      </div>
+      <div style={{marginTop:11}}><TipBtn solid>Siguiente</TipBtn></div>
+    </TipChrome>
+  );
+  if(id==="notiquitar") return (
+    <TipChrome mobile={mobile} active="bell">
+      <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>Centro de notificaciones</div>
+      {/* Swipe-left → Eliminar */}
+      <div style={{display:"flex",alignItems:"stretch",gap:8,marginBottom:9}}>
+        <div style={{flex:1,minWidth:0,background:C.surface,border:"1px solid "+C.line,borderRadius:12,padding:"11px 12px",display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:15,color:C.peach,fontWeight:700}}>←</span>
+          <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:600,color:C.black}}>Recordatorio de ruta</div><div style={{fontSize:10,color:C.taupe,marginTop:2}}>Desliza a la izquierda</div></div>
+        </div>
+        <div style={{flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 16px",borderRadius:12,background:"rgba(192,57,43,.92)",color:"#fff",fontSize:10,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase"}}>Eliminar</div>
+      </div>
+      {/* Swipe-right → Posponer */}
+      <div style={{display:"flex",alignItems:"stretch",gap:8}}>
+        <div style={{flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 16px",borderRadius:12,background:"rgba(72,72,74,.6)",color:"#fff",fontSize:10,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase"}}>Posponer</div>
+        <div style={{flex:1,minWidth:0,background:C.surface,border:"1px solid "+C.line,borderRadius:12,padding:"11px 12px",display:"flex",alignItems:"center",gap:8}}>
+          <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:600,color:C.black}}>Códigos de acceso</div><div style={{fontSize:10,color:C.taupe,marginTop:2}}>Desliza a la derecha</div></div>
+          <span style={{fontSize:15,color:C.peach,fontWeight:700}}>→</span>
+        </div>
+      </div>
+      <div style={{fontSize:10.5,color:C.taupe,marginTop:10,textAlign:"center",lineHeight:1.5}}>← desliza para <b style={{color:"#C0392B"}}>eliminar</b> · → desliza para <b style={{color:C.black}}>posponer</b></div>
+    </TipChrome>
+  );
+  if(id==="codigos") return (
+    <TipChrome mobile={mobile} navSet="admin" tab="sched">
+      <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:4}}>Programación · Rutas del día</div>
+      <div style={{display:"flex",alignItems:"center",gap:7,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:9,padding:"7px 10px",marginBottom:10}}>
+        <span style={{width:6,height:6,borderRadius:"50%",background:C.peach,flexShrink:0}}/>
+        <span style={{fontSize:10,color:C.earth,lineHeight:1.4}}>Válidos del <b style={{color:C.black}}>4 al 17 ago</b></span>
+      </div>
+      <div style={gap}>
+        <div style={{display:"flex",alignItems:"center",gap:9}}>
+          <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:600,color:C.black}}>Torre 1 · 502</div><div style={{fontSize:10,color:C.taupe,marginTop:1}}>María L.</div></div>
+          <TipRing note="aquí" radius={9}><span style={{display:"block",width:64,textAlign:"center",padding:"7px 0",borderRadius:9,border:"1.5px solid "+C.black,background:C.surfaceWarm,fontSize:14,fontWeight:700,letterSpacing:".08em",color:C.black}}>4821</span></TipRing>
+        </div>
+        <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+          <span style={{fontSize:10.5,fontWeight:600,color:"#B4553C",padding:"6px 11px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.peach,background:"#FCEDE8"}}>Permanente</span>
+          <span style={{fontSize:10.5,fontWeight:600,color:C.earth,padding:"6px 11px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:C.surface}}>No usa código</span>
+        </div>
+      </div>
+    </TipChrome>
+  );
+  if(id==="reasignar") return (
+    <TipChrome mobile={mobile} navSet="admin" tab="sched">
+      <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>Programación · Ausencias</div>
+      <TipRing note="aquí" radius={12}><div style={{background:C.surface,border:"1px solid "+C.line,borderRadius:12,padding:"11px 12px",display:"flex",alignItems:"center",gap:10}}>
+        <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:600,color:C.black}}>Ana R. · hoy</div><div style={{fontSize:10,color:C.taupe,marginTop:2}}>enfermedad · 3 limpiezas (toca para cambiar)</div></div>
+        <span style={{fontSize:9,fontWeight:700,color:C.green,letterSpacing:".08em",textTransform:"uppercase"}}>Reasignada</span>
+        <span style={{fontSize:13,color:C.taupe}}>→</span>
+      </div></TipRing>
+    </TipChrome>
+  );
+  if(id==="intercambios") return (
+    <TipChrome mobile={mobile} navSet="admin" tab="sched">
+      <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>Programación · Intercambios entre técnicos</div>
+      <div style={gap}>
+        <div style={{background:C.surfaceWarm,borderRadius:10,padding:"11px 12px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"baseline"}}><span style={{fontSize:12,fontWeight:600,color:C.black}}>María L. → Ana R.</span><span style={{fontSize:9,fontWeight:700,color:C.green,letterSpacing:".08em",textTransform:"uppercase"}}>Aceptado</span></div>
+          <div style={{fontSize:10.5,color:C.earth,marginTop:3}}>cede Torre 1 · 502</div>
+        </div>
+        <div style={{background:C.surfaceWarm,borderRadius:10,padding:"11px 12px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"baseline"}}><span style={{fontSize:12,fontWeight:600,color:C.black}}>Luis P. → María L.</span><span style={{fontSize:9,fontWeight:700,color:"#9a5020",letterSpacing:".08em",textTransform:"uppercase"}}>Esperando</span></div>
+          <div style={{fontSize:10.5,color:C.earth,marginTop:3}}>cede Zona 10 · Loft</div>
+        </div>
+      </div>
+    </TipChrome>
+  );
+  if(id==="fotos") return (
+    <TipChrome mobile={mobile} navSet="admin" tab="dash">
+      <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:4}}>Dashboard Ejecutivo</div>
+      <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:16,color:C.black,marginBottom:10}}>¿Están subiendo las fotos?</div>
+      <div style={{display:"flex",alignItems:"flex-end",gap:14,marginBottom:11}}>
+        <div><div style={{fontSize:26,fontWeight:600,color:C.green,lineHeight:1}}>82<span style={{fontSize:14}}>%</span></div><div style={{fontSize:9.5,color:C.taupe,marginTop:2}}>fotos subidas</div></div>
+        <div style={{flex:1,display:"flex",alignItems:"flex-end",gap:4,height:44}}>
+          {[40,30,22,15,9].map(function(h,k){ return <div key={k} style={{flex:1,height:h+"px",borderRadius:"3px 3px 0 0",background:k===0?C.peach:C.sand}}/>; })}
+        </div>
+      </div>
+      <div style={{fontSize:10.5,color:"#B4553C",fontWeight:600,background:"#FCEDE8",borderRadius:8,padding:"7px 10px"}}>La que más falta: detrás de electrodomésticos</div>
+    </TipChrome>
+  );
+  if(id==="pagos") return (
+    <TipChrome mobile={mobile} tab="pay">
+      <TipTabs items={["Historial de pagos","Adelanto"]} active="Historial de pagos"/>
+      <div style={gap}>
+        <TipRow title="Pago · 14 ago 2026" sub="Comprobante adjunto" right={<span style={{fontSize:13,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>Q 1,240</span>}/>
+        <TipRow title="Pago · 31 jul 2026" sub="Comprobante adjunto" right={<span style={{fontSize:13,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>Q 980</span>}/>
+      </div>
+    </TipChrome>
+  );
+  return <TipChrome mobile={mobile}><div style={{fontSize:12,color:C.taupe,textAlign:"center",padding:"18px 0"}}>Spacio AM</div></TipChrome>;
+}
+
+/* Reproductor tipo "Tips": una secuencia de tarjetas que se pasan de una en una. */
+function TipsPlayer({items, mobile, forced, onClose}){
+  const [i,setI] = useState(0);
+  var t=items[i]; if(!t) return null;
+  var last=i===items.length-1;
+  function next(){ if(last){ if(forced) markTipsSeen(); onClose(); } else setI(i+1); }
+  function prev(){ if(i>0) setI(i-1); }
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:9800,background:"rgba(62,63,63,.55)",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",display:"flex",alignItems:mobile?"flex-end":"center",justifyContent:"center",padding:mobile?0:16,fontFamily:"Montserrat,sans-serif"}}>
+      <div style={{width:"100%",maxWidth:mobile?"none":440,background:C.surface,borderRadius:mobile?"28px 28px 0 0":28,padding:"22px 22px 20px",boxShadow:"var(--sa-shadow-lg)",maxHeight:"94vh",overflowY:"auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:7}}><span style={{width:7,height:7,borderRadius:"50%",background:C.peach}}/>{forced?"Novedades":"Cómo se hace"}</span>
+          <button onClick={function(){ if(forced) markTipsSeen(); onClose(); }} style={{width:32,height:32,borderRadius:"50%",border:"none",background:C.beige,color:C.earth,fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>✕</button>
+        </div>
+        <div style={{marginTop:14}}><TipVisual id={t.id} mobile={mobile}/></div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:24,color:C.black,marginTop:16,lineHeight:1.2}}>{t.title}</div>
+        <ol style={{margin:"12px 0 0",padding:0,listStyle:"none",display:"flex",flexDirection:"column",gap:9}}>
+          {t.lines.map(function(ln,k){
+            return (
+              <li key={k} style={{display:"flex",gap:11,alignItems:"flex-start"}}>
+                <span style={{flexShrink:0,width:21,height:21,borderRadius:"50%",background:C.accentTint||"#FCEDE8",color:"#B4553C",fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",marginTop:1,fontVariantNumeric:"tabular-nums"}}>{k+1}</span>
+                <span style={{fontSize:13.5,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>{ln}</span>
+              </li>
+            );
+          })}
+        </ol>
+        {forced&&last&&(
+          <div style={{marginTop:14,background:C.beige,border:"1px solid "+C.line,borderRadius:12,padding:"12px 14px",display:"flex",gap:10,alignItems:"flex-start"}}>
+            <span style={{flexShrink:0,width:26,height:26,borderRadius:"50%",background:C.surface,border:"1.5px solid "+C.peach,color:"#B4553C",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>?</span>
+            <span style={{fontSize:12.5,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>¿Quieres verlos otra vez? Toca el botón <b style={{color:C.black}}>?</b> abajo a la derecha — ahí viven estos y más tutoriales.</span>
+          </div>
+        )}
+        <div style={{display:"flex",alignItems:"center",gap:12,marginTop:18}}>
+          <div style={{display:"flex",gap:6,flex:1}}>
+            {items.map(function(_,k){ return <span key={k} style={{width:k===i?18:7,height:7,borderRadius:"var(--sa-pill)",background:k===i?C.peach:C.gray,transition:"width .18s"}}/>; })}
+          </div>
+          {i>0&&<button onClick={prev} style={{padding:"11px 16px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:C.surface,color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Atrás</button>}
+          <button onClick={next} style={{padding:"11px 20px",minHeight:44,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{last?(forced?"Empezar":"Listo"):"Siguiente"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Hub de ayuda: portada editorial, acceso a "lo más nuevo" y todos los
+   tutoriales del rol clasificados por tipo. */
+function TipsHub({mobile, role, onPick, onPlayNew, onClose}){
+  var all=tutsForRole(role);
+  var nuevos=tutsForRole(role,"nuevo");
+  /* Agrupar por tipo, preservando el orden de aparición. */
+  var order=[], byType={};
+  all.forEach(function(t){ if(!byType[t.type]){ byType[t.type]=[]; order.push(t.type); } byType[t.type].push(t); });
+  function fila(t){
+    return (
+      <button key={t.id} onClick={function(){onPick(t.id);}} style={{display:"flex",alignItems:"center",gap:12,textAlign:"left",background:C.beige,border:"1px solid "+C.line,borderRadius:12,padding:"12px 13px",cursor:"pointer",fontFamily:"Montserrat,sans-serif",minHeight:52,width:"100%"}}>
+        <span style={{flexShrink:0,width:34,height:34,borderRadius:10,background:C.surface,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{width:9,height:9,borderRadius:t.cat==="nuevo"?"50%":2,background:C.peach}}/></span>
+        <span style={{fontSize:13.5,fontWeight:600,color:C.black,minWidth:0}}>{t.title}</span>
+        {t.cat==="nuevo"&&<span style={{flexShrink:0,fontSize:8.5,fontWeight:700,color:"#B4553C",letterSpacing:".1em",textTransform:"uppercase",background:"#FCEDE8",border:"1px solid "+C.peach,borderRadius:"var(--sa-pill)",padding:"2px 7px"}}>Nuevo</span>}
+        <span style={{marginLeft:t.cat==="nuevo"?8:"auto",flexShrink:0,color:C.taupe}}><Icon name="chevronRight" size={16} stroke={C.taupe}/></span>
+      </button>
+    );
+  }
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:9750,background:"rgba(62,63,63,.55)",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",display:"flex",alignItems:mobile?"flex-end":"center",justifyContent:"center",padding:mobile?0:16,fontFamily:"Montserrat,sans-serif"}}>
+      <div onClick={function(e){e.stopPropagation();}} style={{width:"100%",maxWidth:mobile?"none":460,background:C.surface,borderRadius:mobile?"28px 28px 0 0":28,boxShadow:"var(--sa-shadow-lg)",maxHeight:"92vh",overflowY:"auto",overflowX:"hidden"}}>
+        {/* Portada */}
+        <div style={{position:"relative"}}>
+          <img src="public/tips-hero.png" alt="" style={{width:"100%",height:mobile?116:132,objectFit:"cover",display:"block"}}/>
+          <button onClick={onClose} style={{position:"absolute",top:12,right:12,width:32,height:32,borderRadius:"50%",border:"none",background:"rgba(255,255,255,.85)",backdropFilter:"blur(6px)",color:C.earth,fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>✕</button>
+        </div>
+        <div style={{padding:"18px 22px 24px"}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Centro de ayuda</div>
+          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:24,color:C.black,marginTop:5,lineHeight:1.15}}>¿Cómo se hace?</div>
+
+          {/* Lo más nuevo — reproduce el recorrido de los cambios recientes */}
+          {nuevos.length>0&&(
+            <button onClick={onPlayNew} style={{marginTop:16,width:"100%",display:"flex",alignItems:"center",gap:12,textAlign:"left",background:"#FCEDE8",border:"1.5px solid "+C.peach,borderRadius:14,padding:"14px 15px",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+              <span style={{flexShrink:0,width:38,height:38,borderRadius:"50%",background:C.peach,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{width:0,height:0,borderTop:"6px solid transparent",borderBottom:"6px solid transparent",borderLeft:"10px solid #fff",marginLeft:2}}/></span>
+              <span style={{minWidth:0,flex:1}}>
+                <span style={{display:"block",fontSize:13.5,fontWeight:700,color:C.black}}>Lo más nuevo</span>
+                <span style={{display:"block",fontSize:11.5,color:"#B4553C",marginTop:2,lineHeight:1.4}}>Vuelve a ver el recorrido de los {nuevos.length} cambios recientes</span>
+              </span>
+              <Icon name="chevronRight" size={16} stroke="#B4553C"/>
+            </button>
+          )}
+
+          {/* Todos, clasificados por tipo */}
+          {order.map(function(tp){
+            return (
+              <div key={tp} style={{marginTop:18}}>
+                <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase",marginBottom:8}}>{tp}</div>
+                <div style={{display:"flex",flexDirection:"column",gap:7}}>{byType[tp].map(fila)}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Orquestador: popup forzado (1 vez) + botón "?" flotante + hub + reproductor. */
+function TutorialSystem({enabled, role}){
+  role=role||"vendor";
+  var sc=useScreen(); var mobile=sc.mobile;
+  const [forced,setForced] = useState(function(){ return enabled && !tipsSeen(); });
+  const [hub,setHub]       = useState(false);
+  const [single,setSingle] = useState(null);   /* id de tutorial abierto desde el hub */
+  const [replay,setReplay] = useState(false);  /* "lo más nuevo": vuelve a ver los cambios */
+  if(!enabled) return null;
+  var forcedItems=tutsForRole(role,"nuevo");
+  var singleItems=single?TUTORIALES.filter(function(t){return t.id===single;}):null;
+  return (
+    <>
+      {/* Botón "?" flotante — sobre la barra inferior en móvil */}
+      <button onClick={function(){setHub(true);}} title="Ayuda y tutoriales" aria-label="Ayuda y tutoriales"
+        style={{position:"fixed",right:16,bottom:mobile?84:20,zIndex:9200,width:52,height:52,borderRadius:"50%",border:"none",background:C.peach,color:"#fff",boxShadow:"0 6px 18px rgba(233,130,106,.4)",cursor:"pointer",fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:26,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>?</button>
+      {forced&&<TipsPlayer items={forcedItems} mobile={mobile} forced={true} onClose={function(){ markTipsSeen(); setForced(false); }}/>}
+      {hub&&<TipsHub mobile={mobile} role={role} onClose={function(){setHub(false);}} onPick={function(id){ setHub(false); setSingle(id); }} onPlayNew={function(){ setHub(false); setReplay(true); }}/>}
+      {replay&&<TipsPlayer items={forcedItems} mobile={mobile} forced={false} onClose={function(){setReplay(false);}}/>}
+      {singleItems&&<TipsPlayer items={singleItems} mobile={mobile} forced={false} onClose={function(){setSingle(null);}}/>}
+    </>
+  );
+}
+
 /* ═══ Centro de notificaciones — estilo Centro de Notificaciones de iOS ═══
-   Un solo fondo: el overlay oscuro difuminado. Cada notificación es su propia
-   píldora de vidrio; los encabezados de grupo/subcategoría son texto flotando.
    Genérico: cada fuente arma sus items {id,tipo,subcat,texto,contexto,ts|cuando,
    abrir}. Aquí solo se agrupa, se pinta el vidrio y se elimina de a una.
    El logo NO cambia; esto reemplaza las tres píldoras de alerta que había. */
@@ -8481,7 +9120,7 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
       <header style={{background:"rgba(250,250,250,0.82)",backdropFilter:"blur(20px) saturate(120%)",WebkitBackdropFilter:"blur(20px) saturate(120%)",height:isMobile?54:62,display:"flex",alignItems:"center",justifyContent:"space-between",gap:isMobile?8:12,padding:isMobile?"0 16px":"0 24px",position:"sticky",top:0,zIndex:50,borderBottom:"1px solid "+C.line}}>
         {/* Logo */}
         <div style={{display:"flex",alignItems:"center",minWidth:0,gap:isMobile?8:12}}>
-          <img src="logo-wordmark.png?v=1" alt="Spacio AM" style={{height:isMobile?26:32,width:"auto",objectFit:"contain",display:"block",flexShrink:0}}/>
+          <img src={LOGO_WORDMARK} alt="Spacio AM" style={{height:isMobile?26:32,width:"auto",objectFit:"contain",display:"block",flexShrink:0}}/>
           {IS_CLAUDE_SANDBOX&&<span style={{fontSize:9,fontWeight:700,background:"#F0EDE8",color:"#938B8A",padding:"2px 6px",borderRadius:4,letterSpacing:".08em",display:isMobile?"none":"block"}}>LOCAL</span>}
           {/* Antes iban tres píldoras de alerta sueltas; ahora un solo triángulo
               con el total abre el centro de notificaciones. Solo aparece si hay
@@ -9544,6 +10183,155 @@ function codigoSemana(codigos, propiedad, fecha, fallback){
   var sem=(codigos||{})[semanaKey(fecha)];
   var c=sem?String(sem[normalize(propiedad)]||"").trim():"";
   return c||String(fallback||"").trim();
+}
+/* ═══ CÓDIGOS DE ACCESO — validez de 2 semanas ═══════════════════════════
+   Los códigos ya no son semanales: valen una quincena (bloque fijo de 14 días).
+   Config por propiedad en codigos.__cfg: mode "permanent" (se copia siempre) o
+   "none" (no usa código). Los temporales viven en codigos[<lunes de la quincena>]. */
+function quincenaInfo(fecha){
+  var lun; try{ lun=SCHED.lunesDe(String(fecha).slice(0,10)); }catch(e){ lun=String(fecha||"").slice(0,10); }
+  var d1=new Date("2024-01-01T12:00:00"), d2=new Date(lun+"T12:00:00");
+  var weeks=Math.floor((d2-d1)/(7*86400000));
+  var block=Math.floor(weeks/2);
+  var start=new Date(d1.getTime()+block*14*86400000);
+  var s=start.toISOString().slice(0,10);
+  var e=new Date(start.getTime()+13*86400000).toISOString().slice(0,10);
+  return {key:s, desde:s, hasta:e};
+}
+function quincenaRango(fecha){ var q=quincenaInfo(fecha); return fmtDate(q.desde)+" al "+fmtDate(q.hasta); }
+function codeCfgOf(codigos, prop){ var c=((codigos||{}).__cfg||{})[normalize(prop)]; return c?Object.assign({mode:"temp",permCode:""},c):{mode:"temp",permCode:""}; }
+/* Código vigente para una propiedad en una fecha: none → sin código; permanente →
+   el fijo; si no, el de la quincena; luego el semanal viejo; luego el de la ficha. */
+function codigoVigente(codigos, prop, fecha, fallback){
+  codigos=codigos||{};
+  var k=normalize(prop);
+  var cfg=(codigos.__cfg||{})[k];
+  if(cfg){ if(cfg.mode==="none") return ""; if(cfg.mode==="permanent"){ var pc=String(cfg.permCode||"").trim(); if(pc) return pc; } }
+  var win=codigos[quincenaInfo(fecha).key];
+  var c=win?String(win[k]||"").trim():"";
+  if(c) return c;
+  var legacy=codigoSemana(codigos, prop, fecha, "");
+  if(legacy) return legacy;
+  return String(fallback||"").trim();
+}
+function withCodigoQuincena(codigos, prop, fecha, val){
+  var next=Object.assign({}, codigos||{}); var q=quincenaInfo(fecha).key; var k=normalize(prop);
+  var w=Object.assign({}, next[q]||{});
+  if(String(val||"").trim()) w[k]=String(val).trim(); else delete w[k];
+  if(Object.keys(w).length) next[q]=w; else delete next[q];
+  return next;
+}
+function withCodeMode(codigos, prop, mode, permCode){
+  var next=Object.assign({}, codigos||{}); var cfg=Object.assign({}, next.__cfg||{}); var k=normalize(prop);
+  if(mode==="temp") delete cfg[k]; else cfg[k]={mode:mode, permCode:mode==="permanent"?String(permCode||"").trim():""};
+  if(Object.keys(cfg).length) next.__cfg=cfg; else delete next.__cfg;
+  return next;
+}
+/* Propiedades programadas un día que aún no tienen código vigente (ni "no usa"). */
+function codigosPendientes(schedules, codigos, fecha){
+  var day=String(fecha||"").slice(0,10), seen={}, pend=[];
+  (schedules||[]).forEach(function(s){
+    if(!s||String(s.fecha).slice(0,10)!==day||s.estado==="cancelada") return;
+    var k=normalize(s.propiedad); if(seen[k]) return; seen[k]=1;
+    if(codeCfgOf(codigos,s.propiedad).mode==="none") return;
+    if(!codigoVigente(codigos,s.propiedad,day,"")) pend.push(s.propiedad);
+  });
+  return pend;
+}
+
+/* Bloque de códigos dentro de la Programación: se llenan aquí, no en Configuración.
+   Guarda al instante (a prueba de recargas) porque crear cada código obliga a salir
+   del navegador. Muestra la validez de 2 semanas como referencia visual. */
+function CodigosProgramacionBlock({fecha, schedules, props, codigos, onSvCodigos, defaultOpen}){
+  const [abierto,setAbierto] = useState(!!defaultOpen);
+  const [q,setQ] = useState("");
+  const [refDate,setRefDate] = useState(String(fecha||SCHED.hoyGT()).slice(0,10));
+  var qi=quincenaInfo(refDate);
+  var lista=(props||[]).map(function(p){ return p.name; }).filter(Boolean).sort(function(a,b){ return a<b?-1:1; });
+  var filt=lista.filter(function(n){ return !q || n.toLowerCase().indexOf(q.toLowerCase())>=0; });
+  var conCodigo=lista.filter(function(n){ var m=codeCfgOf(codigos,n).mode; return m==="none"||m==="permanent"||((codigos[qi.key]||{})[normalize(n)]||"").trim(); }).length;
+  function setCode(n,val){ onSvCodigos&&onSvCodigos(withCodigoQuincena(codigos,n,qi.desde,val)); }
+  function setMode(n,mode){ var cur=(codigos[qi.key]||{})[normalize(n)]||""; onSvCodigos&&onSvCodigos(withCodeMode(codigos,n,mode,cur)); }
+  if(!lista.length) return null;
+  return (
+    <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"}}>
+      <button onClick={function(){setAbierto(function(o){return !o;});}} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,flexWrap:"wrap",width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Códigos de acceso · todas las propiedades</div>
+          <div style={{fontSize:11,color:C.taupe,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>Revisa y edita por período de validez. El código del día se llena en la ruta de arriba.</div>
+        </div>
+        <span style={{display:"flex",alignItems:"center",gap:9,flexShrink:0}}>
+          <span style={{fontSize:11,color:C.taupe,fontVariantNumeric:"tabular-nums"}}>{conCodigo}/{lista.length}</span>
+          <span style={{fontSize:11,color:C.taupe}}>{abierto?"▴":"▾"}</span>
+        </span>
+      </button>
+      {abierto&&(
+        <div style={{marginTop:12}}>
+          {/* Selector de período de validez (2 semanas) */}
+          <div style={{display:"flex",alignItems:"center",gap:9,background:C.surfaceWarm,borderRadius:12,padding:"9px 11px",marginBottom:11}}>
+            <button onClick={function(){ setRefDate(SCHED.shift(qi.desde,-1)); }} style={{width:34,height:34,borderRadius:"50%",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:14,cursor:"pointer",flexShrink:0}}>←</button>
+            <div style={{flex:1,textAlign:"center",minWidth:0}}>
+              <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Período de validez</div>
+              <div style={{fontSize:13,fontWeight:600,color:C.black,marginTop:2}}>{quincenaRango(refDate)}</div>
+            </div>
+            <button onClick={function(){ setRefDate(SCHED.shift(qi.hasta,1)); }} style={{width:34,height:34,borderRadius:"50%",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:14,cursor:"pointer",flexShrink:0}}>→</button>
+          </div>
+          {lista.length>6&&<input value={q} onChange={function(e){setQ(e.target.value);}} placeholder="Buscar propiedad…" style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:"var(--sa-pill)",padding:"10px 15px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",minHeight:44,marginBottom:10}}/>}
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {filt.map(function(n){
+              var cfg=codeCfgOf(codigos,n);
+              var none=cfg.mode==="none", perm=cfg.mode==="permanent";
+              var val = perm ? String(cfg.permCode||"") : ((codigos[qi.key]||{})[normalize(n)]||"");
+              return (
+                <div key={n} style={{background:none?C.surfaceWarm:"#fff",border:"1px solid "+(none?"transparent":C.line),borderRadius:11,padding:"11px 12px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:11,flexWrap:"wrap"}}>
+                    <div style={{flex:1,minWidth:120}}>
+                      <div style={{fontSize:12.5,fontWeight:600,color:C.black,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{n}</div>
+                      <div style={{fontSize:10,color:C.taupe,marginTop:2}}>{none?"No usa código":perm?"Código permanente":"Válido "+quincenaRango(refDate)}</div>
+                    </div>
+                    {!none&&<input value={val} onChange={function(e){ if(perm) onSvCodigos&&onSvCodigos(withCodeMode(codigos,n,"permanent",e.target.value)); else setCode(n,e.target.value); }} placeholder="—" inputMode="numeric"
+                      style={{width:110,boxSizing:"border-box",border:"1.5px solid "+(val?C.black:C.gray),borderRadius:9,padding:"9px 11px",fontSize:15,fontWeight:700,letterSpacing:".1em",textAlign:"center",fontFamily:"Montserrat,sans-serif",outline:"none",background:val?C.surfaceWarm:"#fff",color:C.black,minHeight:44,fontVariantNumeric:"tabular-nums"}}/>}
+                  </div>
+                  <div style={{display:"flex",gap:8,marginTop:9,flexWrap:"wrap"}}>
+                    <button onClick={function(){ setMode(n, perm?"temp":"permanent"); }} style={{padding:"6px 11px",minHeight:38,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(perm?C.peach:C.gray),background:perm?"#FCEDE8":"#fff",color:perm?"#B4553C":C.earth,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{perm?"✓ Permanente":"Marcar permanente"}</button>
+                    <button onClick={function(){ setMode(n, none?"temp":"none"); }} style={{padding:"6px 11px",minHeight:38,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(none?C.black:C.gray),background:none?C.black:"#fff",color:none?"#fff":C.earth,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{none?"✓ No usa código":"No usa código"}</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+/* Pop-up forzado (pero cerrable) del dashboard: recuerda programar los códigos de
+   las propiedades de MAÑANA. Lleva directo a la Programación. */
+function CodigosPopupDash({schedules, codigos, onGo, onClose}){
+  var manana=SCHED.shift(SCHED.hoyGT(),1);
+  var pend=codigosPendientes(schedules, codigos, manana);
+  var qr=quincenaRango(manana);
+  if(!pend.length) return null;
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:9500,background:"rgba(62,63,63,.55)",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"Montserrat,sans-serif"}}>
+      <div style={{width:"100%",maxWidth:440,background:"#fff",borderRadius:28,padding:"24px 24px",boxShadow:"var(--sa-shadow-lg)",maxHeight:"88vh",overflowY:"auto"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{width:8,height:8,borderRadius:"50%",background:C.peach,flexShrink:0}}/>
+          <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>Códigos de acceso</span>
+        </div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,color:C.black,marginTop:8,lineHeight:1.25}}>Faltan códigos para mañana</div>
+        <div style={{fontSize:13,color:C.earth,marginTop:10,lineHeight:1.7,textWrap:"pretty"}}>{pend.length} propiedad{pend.length===1?"":"es"} programada{pend.length===1?"":"s"} para el <b style={{color:C.black}}>{fmtDate(manana)}</b> aún no tienen código. Los que ingreses valen del <b style={{color:C.black}}>{qr}</b>.</div>
+        <div style={{margin:"14px 0",display:"flex",flexDirection:"column",gap:6,maxHeight:180,overflowY:"auto"}}>
+          {pend.slice(0,8).map(function(n,i){ return <div key={i} style={{background:C.surfaceWarm,borderRadius:9,padding:"9px 12px",fontSize:12.5,fontWeight:600,color:C.black}}>{n}</div>; })}
+          {pend.length>8&&<div style={{fontSize:11.5,color:C.taupe,padding:"2px 4px"}}>y {pend.length-8} más…</div>}
+        </div>
+        <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+          <button onClick={onGo} style={{flex:1,minWidth:160,padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Ir a programar códigos</button>
+          <button onClick={onClose} style={{padding:"13px 18px",minHeight:48,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Después</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function CodigosCfg({props, codigos, onSave}){
@@ -10718,7 +11506,7 @@ function DiaDoblePanel({schedules, reps, vendors, onUpsert, hoy, onAviso, onLog}
   );
 }
 
-function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, schedErr, onUpsert, onReasignar}) {
+function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, swaps, onSvSwaps, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, onSvCodigos, schedErr, onUpsert, onReasignar}) {
   /* Abre en HOY: la ruta que el equipo está corriendo ahora mismo es la que el
      administrador necesita ver al entrar, no la de mañana. */
   const [dia,      setDia]      = useState(0);      /* 0 = hoy, 1 = mañana, … */
@@ -10940,10 +11728,10 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           total: String(lista.length),
           paradas: lista.map(function(s){
             return {propiedad:s.propiedad, habitaciones:s.habitaciones||1, tipo:s.tipo,
-                    entrada:!!s.entradaHoy, codigo:codigoSemana(codigos,s.propiedad,s.fecha,s.codigoAcceso)};
+                    entrada:!!s.entradaHoy, codigo:codigoVigente(codigos,s.propiedad,s.fecha,s.codigoAcceso)};
           }),
           limpiezas: lista.map(function(s,i){
-            var cod=codigoSemana(codigos, s.propiedad, s.fecha, s.codigoAcceso);
+            var cod=codigoVigente(codigos, s.propiedad, s.fecha, s.codigoAcceso);
             return (i+1)+". "+s.propiedad+" — "+(s.habitaciones||1)+" hab · "+s.tipo+
                    (s.entradaHoy?" · TIENE ENTRADA HOY":"")+(cod?" · código "+cod:"");
           }).join("\n")
@@ -11372,6 +12160,12 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
       {/* Día doble — pago al doble por feriado */}
       <DiaDoblePanel schedules={schedules} reps={reps} vendors={vendors} onUpsert={onUpsert} hoy={hoy} onAviso={aviso} onLog={bitacora}/>
 
+      {/* Códigos de acceso — se llenan aquí (validez de 2 semanas), no en Configuración */}
+      <CodigosProgramacionBlock fecha={fecha} schedules={schedules} props={props} codigos={codigos||{}} onSvCodigos={onSvCodigos} defaultOpen={false}/>
+
+      {/* Intercambios entre técnicos — bitácora minimizada */}
+      <SwapsBitacora swaps={swaps||[]}/>
+
       {/* Ausencias por aprobar */}
       {pendAus.length>0&&(
         <div style={{background:"#FBF6EC",border:"1px solid #E8DCC4",borderRadius:14,padding:"15px 16px"}}>
@@ -11404,13 +12198,13 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           .sort(function(a,b){ return String(a.fecha).localeCompare(String(b.fecha)); });
         if(!docs.length) return null;
         var EST={por_asignar:["Por reasignar",C.attentionText],aplicada:["Reasignada",C.green],aprobada:["Reasignada",C.green]};
-        function afectDe(a){ return (schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===String(a.fecha).slice(0,10) && String(s.vendorEmail||"").toLowerCase()===String(a.vendorEmail||"").toLowerCase() && s.estado!=="cancelada"; }).length; }
+        function afectDe(a){ return (schedules||[]).filter(function(s){ if(String(s.fecha).slice(0,10)!==String(a.fecha).slice(0,10) || s.estado==="cancelada") return false; return String(s.vendorEmail||"").toLowerCase()===String(a.vendorEmail||"").toLowerCase() || s.deAusencia===a.id; }).length; }
         return (
           <div style={CARD}>
             <button onClick={function(){setDocAbierto(function(o){return !o;});}} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,flexWrap:"wrap",width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
               <div style={{minWidth:0}}>
                 <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Ausencias documentadas</div>
-                <div style={{fontSize:11,color:C.taupe,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>Ayer, hoy y en adelante. Toca una que no esté reasignada para elegir quién la cubre.</div>
+                <div style={{fontSize:11,color:C.taupe,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>Ayer, hoy y en adelante. Toca cualquiera para elegir o cambiar quién la cubre.</div>
               </div>
               <span style={{display:"flex",alignItems:"center",gap:9,flexShrink:0}}>
                 <span style={{fontSize:15,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>{docs.length}</span>
@@ -11423,12 +12217,12 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                   var e=EST[a.estado]||["Registrada",C.earth];
                   var yaReasignada=a.estado==="aplicada"||a.estado==="aprobada";
                   var afect=afectDe(a);
-                  var puede=!yaReasignada && afect>0 && !!onReasignar;
+                  var puede=afect>0 && !!onReasignar;
                   return (
                     <div key={a.id} onClick={puede?function(){onReasignar(a);}:undefined} role={puede?"button":undefined} style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",flexWrap:"wrap",background:C.surfaceWarm,borderRadius:9,padding:"9px 12px",cursor:puede?"pointer":"default",border:puede?"1px solid "+C.line:"1px solid transparent"}}>
                       <div style={{minWidth:0}}>
                         <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{a.vendorNombre||a.vendorEmail}</div>
-                        <div style={{fontSize:11,color:C.earth,marginTop:2,lineHeight:1.5,textWrap:"pretty"}}>{schedDiaNombre(a.fecha)} {fmtDate(a.fecha)}{a.motivo?" · "+a.motivo:""}{!yaReasignada&&afect>0?" · "+afect+" limpieza"+(afect===1?"":"s")+" a reasignar":""}</div>
+                        <div style={{fontSize:11,color:C.earth,marginTop:2,lineHeight:1.5,textWrap:"pretty"}}>{schedDiaNombre(a.fecha)} {fmtDate(a.fecha)}{a.motivo?" · "+a.motivo:""}{afect>0?" · "+afect+" limpieza"+(afect===1?"":"s")+(yaReasignada?" (toca para cambiar)":" a reasignar"):""}</div>
                       </div>
                       <span style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,marginTop:2}}>
                         <span style={{fontSize:9,fontWeight:700,color:e[1],letterSpacing:".08em",textTransform:"uppercase",whiteSpace:"nowrap"}}>{yaReasignada?e[0]:"Por reasignar"}</span>
@@ -11801,7 +12595,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                         <div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6}}>Sin limpiezas asignadas este día.</div>
                       )}
                       {mias.map(function(s,i){
-                        var cod=codigoSemana(codigos,s.propiedad,s.fecha,s.codigoAcceso);
+                        var cod=codigoVigente(codigos,s.propiedad,s.fecha,s.codigoAcceso);
                         var abrirAcc=accion===s.id;
                         return (
                           <div key={s.id}
@@ -11854,7 +12648,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                         );
                       })}
                       {mias.length>0&&String((v.phone||v.telefono)||"").replace(/[^0-9]/g,"").length>=8&&(
-                        <a href={schedWaLink(v, mias.map(function(s){ return Object.assign({},s,{codigoAcceso:codigoSemana(codigos,s.propiedad,s.fecha,s.codigoAcceso)}); }), fecha)} target="_blank" rel="noopener noreferrer" style={{alignSelf:"flex-start",fontSize:11,fontWeight:600,color:C.earth,textDecoration:"none",padding:"8px 13px",minHeight:36,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff"}}>Enviar por WhatsApp →</a>
+                        <a href={schedWaLink(v, mias.map(function(s){ return Object.assign({},s,{codigoAcceso:codigoVigente(codigos,s.propiedad,s.fecha,s.codigoAcceso)}); }), fecha)} target="_blank" rel="noopener noreferrer" style={{alignSelf:"flex-start",fontSize:11,fontWeight:600,color:C.earth,textDecoration:"none",padding:"8px 13px",minHeight:36,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff"}}>Enviar por WhatsApp →</a>
                       )}
                     </div>
                   )}
@@ -11863,6 +12657,12 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
             })}
           </div>
           </>)}
+
+          {/* Mensaje de validez de códigos — debajo de los filtros de la ruta */}
+          <div style={{marginTop:11,display:"flex",alignItems:"center",gap:8,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:10,padding:"9px 12px"}}>
+            <span style={{width:7,height:7,borderRadius:"50%",background:C.peach,flexShrink:0}}/>
+            <span style={{fontSize:11.5,color:C.earth,lineHeight:1.5,textWrap:"pretty"}}>Los códigos que asignes a esta ruta valen del <b style={{color:C.black}}>{quincenaRango(fecha)}</b>.</span>
+          </div>
 
           {/* ─── El mismo día por APARTAMENTO: dos columnas y nada más.
                El nombre completo del apartamento y quién lo tiene. Se ordena por
@@ -11896,16 +12696,17 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                 {filas.length===0&&<div style={{padding:"22px 0",textAlign:"center",fontSize:12,color:C.taupe}}>No hay limpiezas programadas este día.</div>}
                 {filas.length>0&&(
                   <div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr auto 40%",gap:10,alignItems:"center",padding:"9px 2px",borderBottom:"1px solid "+C.gray}}>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr auto 24% 88px",gap:10,alignItems:"center",padding:"9px 2px",borderBottom:"1px solid "+C.gray}}>
                       <TH col="apto" label="Apartamento"/>
                       <span/>
                       <TH col="tec" label="Técnico"/>
+                      <span style={{fontSize:9.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.taupe,textAlign:"right"}}>Código</span>
                     </div>
                     {filas.map(function(f){
                       var cancelada=f.cz.estado==="cancelada";
                       return (
                         <div key={f.s.id} style={{borderBottom:"1px solid "+C.line,background:accion===f.s.id?C.surfaceWarm:"transparent"}}>
-                        <div onClick={function(){ setAccion(accion===f.s.id?null:f.s.id); }} style={{display:"grid",gridTemplateColumns:"1fr auto 40%",gap:10,alignItems:"center",padding:"11px 2px",cursor:"pointer"}}>
+                        <div onClick={function(){ setAccion(accion===f.s.id?null:f.s.id); }} style={{display:"grid",gridTemplateColumns:"1fr auto 24% 88px",gap:10,alignItems:"center",padding:"11px 2px",cursor:"pointer"}}>
                           <div style={{minWidth:0}}>
                             <div style={{fontSize:12.5,fontWeight:600,color:cancelada?C.taupe:C.black,textDecoration:cancelada?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.apto}</div>
                             <div style={{display:"flex",gap:6,marginTop:3,flexWrap:"wrap",alignItems:"center"}}>
@@ -11922,6 +12723,13 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                             <span style={{fontSize:12,color:f.tec?C.black:C.orange,fontWeight:f.tec?500:700,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.tec||"sin técnico"}</span>
                             <span style={{marginLeft:"auto",flexShrink:0,display:"flex"}}><Icon name={accion===f.s.id?"chevronUp":"dots"} size={15} stroke={C.taupe}/></span>
                           </div>
+                          {(function(){
+                            var cfg=codeCfgOf(codigos, f.apto);
+                            if(cfg.mode==="none") return <span style={{fontSize:10.5,color:C.taupe,textAlign:"right"}}>sin código</span>;
+                            var perm=cfg.mode==="permanent";
+                            var cval = perm ? String(cfg.permCode||"") : ((codigos[quincenaInfo(fecha).key]||{})[normalize(f.apto)]||"");
+                            return <input value={cval} onClick={function(e){e.stopPropagation();}} onChange={function(e){ e.stopPropagation(); var v=e.target.value; if(perm) onSvCodigos&&onSvCodigos(withCodeMode(codigos,f.apto,"permanent",v)); else onSvCodigos&&onSvCodigos(withCodigoQuincena(codigos,f.apto,fecha,v)); }} placeholder="—" inputMode="numeric" title={perm?"Código permanente":"Válido "+quincenaRango(fecha)} style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+(cval?C.black:C.gray),borderRadius:8,padding:"6px 6px",fontSize:13,fontWeight:700,letterSpacing:".06em",textAlign:"center",fontFamily:"Montserrat,sans-serif",outline:"none",background:cval?C.surfaceWarm:"#fff",color:C.black,fontVariantNumeric:"tabular-nums",minWidth:0}}/>;
+                          })()}
                         </div>
                         {/* Las mismas acciones que en la vista por técnico: mover, cancelar, quitar. */}
                         {accion===f.s.id&&(
@@ -11935,6 +12743,17 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                             </select>
                             {!cancelada&&String(f.s.estado||"")!=="cancelada"&&<button onClick={function(){setCancelar(f.s);}} style={{fontSize:11,padding:"8px 12px",minHeight:38,borderRadius:8,border:"1px solid #E9C9C2",background:"#F7E7E4",color:C.red,cursor:"pointer",fontWeight:700,fontFamily:"Montserrat,sans-serif"}}>Cancelar limpieza</button>}
                             <button onClick={function(){quitar(f.s);setAccion(null);}} style={{fontSize:11,padding:"8px 12px",minHeight:38,borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",fontWeight:600,fontFamily:"Montserrat,sans-serif"}}>Quitar del día</button>
+                            <div style={{flexBasis:"100%",display:"flex",gap:7,flexWrap:"wrap",alignItems:"center",marginTop:2}}>
+                              {(function(){
+                                var ccfg=codeCfgOf(codigos,f.apto); var cnone=ccfg.mode==="none", cperm=ccfg.mode==="permanent";
+                                var ccur=(codigos[quincenaInfo(fecha).key]||{})[normalize(f.apto)]||(cperm?String(ccfg.permCode||""):"");
+                                return (<>
+                                  <span style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".12em",textTransform:"uppercase"}}>Código</span>
+                                  <button onClick={function(){ onSvCodigos&&onSvCodigos(withCodeMode(codigos,f.apto,cperm?"temp":"permanent",ccur)); }} style={{fontSize:11,padding:"8px 12px",minHeight:38,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(cperm?C.peach:C.gray),background:cperm?"#FCEDE8":"#fff",color:cperm?"#B4553C":C.earth,cursor:"pointer",fontWeight:600,fontFamily:"Montserrat,sans-serif"}}>{cperm?"✓ Permanente":"Marcar permanente"}</button>
+                                  <button onClick={function(){ onSvCodigos&&onSvCodigos(withCodeMode(codigos,f.apto,cnone?"temp":"none","")); }} style={{fontSize:11,padding:"8px 12px",minHeight:38,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(cnone?C.black:C.gray),background:cnone?C.black:"#fff",color:cnone?"#fff":C.earth,cursor:"pointer",fontWeight:600,fontFamily:"Montserrat,sans-serif"}}>{cnone?"✓ No usa código":"No usa código"}</button>
+                                </>);
+                              })()}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -12127,7 +12946,322 @@ function horaOk(v, fallback){
   return /^\d{1,2}:\d{2}$/.test(s) ? s : fallback;
 }
 
-function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, reps}) {
+/* ═══ INTERCAMBIO DE TAREAS ENTRE TÉCNICOS ═══════════════════════════════
+   Un técnico cede una o varias limpiezas programadas a otro de SU MISMA ZONA.
+   Flujo: solicita → el otro acepta/rechaza (y decide si devuelve alguna de las
+   suyas) → el solicitante acepta/rechaza el trato final. La notificación es un
+   lightbox intrusivo al centro (no push). El admin lo ve en una bitácora.
+   estado: pendiente_recibe · pendiente_origen · aceptada · rechazada           */
+function swapId(){ return "sw_"+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+function swapVZonas(v){ return ((v&&v.zonas)||[]).map(SCHED.zonaKey).filter(Boolean); }
+function swapMismaZona(a,b){ var za=swapVZonas(a); if(!za.length) return false; var zb=swapVZonas(b); return za.some(function(z){ return zb.indexOf(z)>=0; }); }
+function swapTasksFor(all, v, fecha){
+  if(!v) return [];
+  var em=vendorEmailSet(v);
+  return (all||[]).filter(function(s){ return s && String(s.fecha).slice(0,10)===fecha && s.estado!=="cancelada" && (String(s.vendorId||"")===String(v.id) || em.indexOf(String(s.vendorEmail||"").toLowerCase())>=0); })
+    .sort(function(a,b){ return (a.orden||0)-(b.orden||0); });
+}
+function swapEstadoTxt(e){ return e==="pendiente_recibe"?"Esperando al otro técnico" : e==="pendiente_origen"?"Esperando tu confirmación" : e==="aceptada"?"Aceptado" : e==="rechazada"?"Rechazado" : e; }
+function swapEstadoColor(e){ return e==="aceptada"?"#3d6b52" : e==="rechazada"?"#C0392B" : "#9a5020"; }
+
+/* Entrada en la programación del técnico: abre el flujo para ceder tareas. */
+function IntercambioTareas({vendor, schedules, allVendors, swaps, onSvSwaps}){
+  const [abierto,setAbierto] = useState(false);
+  const [cuando,setCuando]   = useState("hoy");
+  const [fecha,setFecha]     = useState("");
+  const [sel,setSel]         = useState({});
+  const [aQuien,setAQuien]   = useState("");
+  const [ok,setOk]           = useState("");
+  var hoy=SCHED.hoyGT(), manana=SCHED.shift(hoy,1);
+  var fechaUso = cuando==="hoy"?hoy : cuando==="manana"?manana : (fecha||"");
+  var misEmails=vendorEmailSet(vendor);
+  var mias = fechaUso ? (schedules||[]).filter(function(s){ return s && String(s.fecha).slice(0,10)===fechaUso && s.estado!=="cancelada"; }).sort(function(a,b){return (a.orden||0)-(b.orden||0);}) : [];
+  /* Solo técnicos de limpieza de la MISMA zona asignada, activos y que no sea uno mismo. */
+  var candidatos = (allVendors||[]).filter(function(v){ return SCHED.esLimpieza(v) && v.active!==false && String(v.email||"").toLowerCase()!==String(vendor.email||"").toLowerCase() && misEmails.indexOf(String(v.email||"").toLowerCase())<0 && swapMismaZona(vendor,v); });
+  var elegidas = mias.filter(function(s){ return sel[s.id]; });
+  var misSwaps = (swaps||[]).filter(function(sw){ return String(sw.fromEmail||"").toLowerCase()===String(vendor.email||"").toLowerCase(); }).slice(0,4);
+  var listo = elegidas.length>0 && !!aQuien;
+  function enviar(){
+    if(!listo) return;
+    var to=candidatos.find(function(v){ return String(v.email||"").toLowerCase()===aQuien; });
+    if(!to) return;
+    var sw={ id:swapId(), createdAt:Date.now(), fecha:fechaUso,
+      fromEmail:String(vendor.email||"").toLowerCase(), fromNombre:vendorDisplay(vendor),
+      toEmail:String(to.email||"").toLowerCase(), toNombre:vendorDisplay(to),
+      offer:elegidas.map(function(s){return s.id;}), offerProps:elegidas.map(function(s){return s.propiedad;}),
+      returnOffer:[], returnProps:[], estado:"pendiente_recibe",
+      historia:[{ts:Date.now(), quien:vendorDisplay(vendor), accion:"envió la solicitud"}] };
+    onSvSwaps&&onSvSwaps([sw].concat(swaps||[]));
+    try{ notifyTemplate([to.notifEmail||to.email], "intercambioSolicitud", {
+      de: vendorDisplay(vendor), para: vendorDisplay(to), fecha: fmtDate(fechaUso), dia: schedDiaNombre(fechaUso),
+      total: String(elegidas.length),
+      tareas: elegidas.map(function(s,i){ return (i+1)+". "+s.propiedad+" — "+(s.habitaciones||1)+" hab · "+s.tipo; }).join("\n")
+    }); }catch(_){}
+    try{ apiCall("logEvento",{tipo:"intercambio",detalle:vendorDisplay(vendor)+" solicitó ceder "+sw.offerProps.join(", ")+" ("+fmtDate(fechaUso)+") a "+vendorDisplay(to),usuario:"app · "+vendorDisplay(vendor)}).catch(function(){}); }catch(_){}
+    setOk("Solicitud enviada a "+vendorDisplay(to)+". Le aparecerá para aceptar o rechazar.");
+    setSel({}); setAQuien(""); setAbierto(false);
+    setTimeout(function(){ setOk(""); }, 6000);
+  }
+  return (
+    <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px"}}>
+      {ok&&<div style={{fontSize:11.5,color:C.green,fontWeight:600,lineHeight:1.6,marginBottom:10}}>{ok}</div>}
+      {misSwaps.length>0&&(
+        <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:12}}>
+          {misSwaps.map(function(sw){
+            return (
+              <div key={sw.id} style={{display:"flex",justifyContent:"space-between",gap:10,fontSize:11.5,flexWrap:"wrap"}}>
+                <span style={{color:C.black,minWidth:0}}>{sw.offerProps.join(", ")} → {sw.toNombre}</span>
+                <span style={{fontWeight:600,color:swapEstadoColor(sw.estado),flexShrink:0}}>{swapEstadoTxt(sw.estado)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {!abierto
+        ? <button onClick={function(){setAbierto(true);}} style={{width:"100%",padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Intercambiar tareas con otro técnico</button>
+        : <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{fontSize:11.5,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>Cede una o varias de tus limpiezas a otro técnico de tu misma zona. Él decide si acepta y si te devuelve alguna de las suyas.</div>
+            <div style={{display:"flex",background:C.surfaceWarm,borderRadius:"var(--sa-pill)",padding:3,gap:3,border:"1px solid "+C.line}}>
+              {[["hoy","Hoy"],["manana","Mañana"],["otra","Otra fecha"]].map(function(it){
+                var s=cuando===it[0];
+                return <button key={it[0]} onClick={function(){setCuando(it[0]);setSel({});}} style={{flex:1,padding:"0 8px",minHeight:42,borderRadius:"var(--sa-pill)",border:"none",background:s?C.black:"transparent",color:s?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{it[1]}</button>;
+              })}
+            </div>
+            {cuando==="otra"&&(
+              <input type="date" min={hoy} value={fecha} onChange={function(e){setFecha(e.target.value);setSel({});}} style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"11px 12px",fontSize:13,fontFamily:"Montserrat,sans-serif",minHeight:46,outline:"none"}}/>
+            )}
+            {fechaUso&&(
+              mias.length===0
+                ? <div style={{fontSize:12,color:C.taupe,lineHeight:1.6,background:C.surfaceWarm,borderRadius:9,padding:"11px 13px"}}>No tienes limpiezas programadas el {fmtDate(fechaUso)}.</div>
+                : <div>
+                    <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:7}}>¿Qué tareas cedes?</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                      {mias.map(function(s){
+                        var on=!!sel[s.id];
+                        return (
+                          <button key={s.id} onClick={function(){ setSel(function(p){ var u=Object.assign({},p); if(u[s.id]) delete u[s.id]; else u[s.id]=1; return u; }); }}
+                            style={{display:"flex",alignItems:"center",gap:11,textAlign:"left",background:on?"#FCEDE8":C.surfaceWarm,border:"1.5px solid "+(on?C.peach:"transparent"),borderRadius:12,padding:"11px 13px",cursor:"pointer",fontFamily:"Montserrat,sans-serif",minHeight:48}}>
+                            <span style={{width:20,height:20,borderRadius:6,border:"1.5px solid "+(on?C.peach:C.gray),background:on?C.peach:"#fff",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:13,fontWeight:700}}>{on?"✓":""}</span>
+                            <span style={{minWidth:0}}>
+                              <span style={{display:"block",fontSize:13,fontWeight:600,color:C.black,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.propiedad}</span>
+                              <span style={{display:"block",fontSize:11,color:C.earth,marginTop:2}}>{(s.habitaciones||1)} hab · {s.tipo}{s.entradaHoy?" · entra huésped":""}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+            )}
+            {elegidas.length>0&&(
+              <div>
+                <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:7}}>¿A qué técnico?</div>
+                {candidatos.length===0
+                  ? <div style={{fontSize:12,color:C.orange,lineHeight:1.6,background:C.surfaceWarm,borderRadius:9,padding:"11px 13px"}}>No hay otros técnicos de tu misma zona. Solo puedes ceder a alguien con tu zona asignada.</div>
+                  : <select value={aQuien} onChange={function(e){setAQuien(e.target.value);}} style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:14,padding:"12px 13px",fontSize:13,fontFamily:"Montserrat,sans-serif",background:"#fff",outline:"none",minHeight:46}}>
+                      <option value="">Selecciona un técnico…</option>
+                      {candidatos.map(function(v){ return <option key={v.email} value={String(v.email).toLowerCase()}>{vendorDisplay(v)} — {swapVZonas(v).map(SCHED.zonaLabel).join(", ")}</option>; })}
+                    </select>}
+              </div>
+            )}
+            <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+              <button onClick={enviar} disabled={!listo} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"none",background:listo?C.black:C.gray,color:listo?"#fff":C.taupe,fontSize:12.5,fontWeight:600,cursor:listo?"pointer":"not-allowed",fontFamily:"Montserrat,sans-serif"}}>Enviar solicitud</button>
+              <button onClick={function(){setAbierto(false);setSel({});setAQuien("");}} style={{padding:"12px 18px",minHeight:46,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cancelar</button>
+            </div>
+          </div>}
+    </div>
+  );
+}
+
+/* Lightbox intrusivo al centro: le aparece al técnico cuando una solicitud
+   necesita su decisión, o para avisarle el resultado. Uno a la vez. */
+function SwapLightbox({vendor, allVendors, swaps, onSvSwaps, allSchedules, onSvSchedules}){
+  const [snooze,setSnooze] = useState({});
+  const [paso,setPaso]     = useState("ver");   /* ver | devolver (recibe) */
+  const [devol,setDevol]   = useState({});
+  const [seenTick,setSeenTick] = useState(0);
+  var me=String(vendor&&vendor.email||"").toLowerCase();
+  function seenKey(id){ return "epi_swap_seen_"+id+"_"+me; }
+  function marcarVisto(id){ try{ localStorage.setItem(seenKey(id),"1"); }catch(_){} setSeenTick(function(n){return n+1;}); }
+  function visto(id){ try{ return !!localStorage.getItem(seenKey(id)); }catch(_){ return false; } }
+  /* Prioridad: lo que exige acción primero; luego lo informativo no visto. */
+  var pend = (swaps||[]).filter(function(sw){
+    if(snooze[sw.id]) return false;
+    if(sw.toEmail===me && sw.estado==="pendiente_recibe") return true;
+    if(sw.fromEmail===me && sw.estado==="pendiente_origen") return true;
+    return false;
+  });
+  var info = (swaps||[]).filter(function(sw){
+    if(visto(sw.id)) return false;
+    if(sw.estado==="aceptada") return sw.toEmail===me;              /* el que aceptó recibir se entera del cierre */
+    if(sw.estado==="rechazada") return (sw.rechazadaPor&&sw.rechazadaPor!==me) && (sw.fromEmail===me||sw.toEmail===me);
+    return false;
+  });
+  var sw = pend[0] || info[0];
+  React.useEffect(function(){ setPaso("ver"); setDevol({}); },[sw&&sw.id]);
+  if(!sw) return null;
+  var soyRecibe = sw.toEmail===me && sw.estado==="pendiente_recibe";
+  var soyOrigen = sw.fromEmail===me && sw.estado==="pendiente_origen";
+  var esInfo = !soyRecibe && !soyOrigen;
+  var cerrar=function(){ setSnooze(function(p){ var u=Object.assign({},p); u[sw.id]=1; return u; }); };
+
+  function vFor(email){ return (allVendors||[]).find(function(v){ return String(v.email||"").toLowerCase()===String(email||"").toLowerCase(); }); }
+  function mailTo(v){ return v?(v.notifEmail||v.email):null; }
+  function historia(accion){ return (sw.historia||[]).concat([{ts:Date.now(), quien:vendorDisplay(vendor), accion:accion}]); }
+  function saveSwap(patch){ onSvSwaps&&onSvSwaps((swaps||[]).map(function(x){ return x.id===sw.id?Object.assign({},x,patch):x; })); }
+
+  function rechazar(){
+    saveSwap({estado:"rechazada", rechazadaPor:me, resueltoEn:Date.now(), historia:historia("rechazó")});
+    var otro=vFor(soyOrigen?sw.toEmail:sw.fromEmail);
+    if(mailTo(otro)) try{ notifyTemplate([mailTo(otro)], "intercambioRechazado", {de:vendorDisplay(vendor), para:vendorDisplay(otro), fecha:fmtDate(sw.fecha)}); }catch(_){}
+    try{ apiCall("logEvento",{tipo:"intercambio",detalle:vendorDisplay(vendor)+" rechazó el intercambio de "+(sw.offerProps||[]).join(", ")+" entre "+sw.fromNombre+" y "+sw.toNombre,usuario:"app · "+vendorDisplay(vendor)}).catch(function(){}); }catch(_){}
+  }
+  /* Recibe acepta → decide devolución → pasa a pendiente_origen. */
+  function recibeConfirmar(){
+    var misTareas = swapTasksFor(allSchedules, vendor, sw.fecha);
+    var ret = misTareas.filter(function(s){ return devol[s.id]; });
+    saveSwap({estado:"pendiente_origen", returnOffer:ret.map(function(s){return s.id;}), returnProps:ret.map(function(s){return s.propiedad;}), historia:historia(ret.length?("aceptó y ofrece a cambio "+ret.map(function(s){return s.propiedad;}).join(", ")):"aceptó sin devolver tareas")});
+    var reqV=vFor(sw.fromEmail);
+    if(mailTo(reqV)) try{ notifyTemplate([mailTo(reqV)], "intercambioRespuesta", {de:vendorDisplay(vendor), para:vendorDisplay(reqV), fecha:fmtDate(sw.fecha), devuelve: ret.length?ret.map(function(s){return s.propiedad;}).join(", "):"ninguna tarea"}); }catch(_){}
+    try{ apiCall("logEvento",{tipo:"intercambio",detalle:sw.toNombre+" aceptó recibir "+(sw.offerProps||[]).join(", ")+(ret.length?(" y devuelve "+ret.map(function(s){return s.propiedad;}).join(", ")):" sin devolver tareas"),usuario:"app · "+vendorDisplay(vendor)}).catch(function(){}); }catch(_){}
+  }
+  /* Origen acepta el trato final → se aplican los cambios de programación. */
+  function origenAceptar(){
+    var toV=(allVendors||[]).find(function(v){ return String(v.email||"").toLowerCase()===sw.toEmail; });
+    var fromV=(allVendors||[]).find(function(v){ return String(v.email||"").toLowerCase()===sw.fromEmail; })||vendor;
+    if(!toV){ saveSwap({estado:"rechazada", rechazadaPor:"sistema", historia:historia("no se pudo aplicar (técnico no encontrado)")}); return; }
+    var offer={}, ret={};
+    (sw.offer||[]).forEach(function(i){ offer[i]=1; });
+    (sw.returnOffer||[]).forEach(function(i){ ret[i]=1; });
+    var upd=(allSchedules||[]).map(function(s){
+      if(offer[s.id]) return Object.assign({},s,{vendorEmail:String(toV.email||"").toLowerCase(), vendorId:toV.id||"", motivo:"intercambio · de "+sw.fromNombre, reajustada:true, deSwap:sw.id});
+      if(ret[s.id])   return Object.assign({},s,{vendorEmail:String(fromV.email||"").toLowerCase(), vendorId:fromV.id||"", motivo:"intercambio · de "+sw.toNombre, reajustada:true, deSwap:sw.id});
+      return s;
+    });
+    onSvSchedules&&onSvSchedules(upd);
+    saveSwap({estado:"aceptada", resueltoEn:Date.now(), historia:historia("aceptó el trato — cambios aplicados")});
+    [vFor(sw.fromEmail), vFor(sw.toEmail)].forEach(function(vv){ if(mailTo(vv)) try{ notifyTemplate([mailTo(vv)], "intercambioAceptado", {de:sw.fromNombre, para:sw.toNombre, fecha:fmtDate(sw.fecha), cede:(sw.offerProps||[]).join(", ")||"—", devuelve:(sw.returnProps||[]).length?(sw.returnProps||[]).join(", "):"ninguna"}); }catch(_){} });
+    try{ apiCall("logEvento",{tipo:"intercambio",detalle:"Intercambio aceptado · "+sw.fromNombre+" cedió "+(sw.offerProps||[]).join(", ")+" a "+sw.toNombre+((sw.returnProps||[]).length?(" · "+sw.toNombre+" devolvió "+(sw.returnProps||[]).join(", ")):"")+" ("+fmtDate(sw.fecha)+")",usuario:"app · "+vendorDisplay(vendor)}).catch(function(){}); }catch(_){}
+  }
+
+  var misTareasDia = soyRecibe ? swapTasksFor(allSchedules, vendor, sw.fecha) : [];
+  var titulo = soyRecibe ? (paso==="ver"?"Solicitud de intercambio":"¿Devuelves alguna tarea?")
+             : soyOrigen ? "Respuesta a tu solicitud"
+             : sw.estado==="aceptada" ? "Intercambio aceptado" : "Intercambio rechazado";
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:9700,background:"rgba(62,63,63,.55)",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"Montserrat,sans-serif"}}>
+      <div style={{width:"100%",maxWidth:440,background:"#fff",borderRadius:28,padding:"26px 24px",boxShadow:"var(--sa-shadow-lg)",maxHeight:"90vh",overflowY:"auto"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{width:8,height:8,borderRadius:"50%",background:C.peach,flexShrink:0}}/>
+          <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>Intercambio de tareas</span>
+        </div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,color:C.black,marginTop:8,lineHeight:1.2}}>{titulo}</div>
+
+        {soyRecibe&&paso==="ver"&&(<>
+          <div style={{fontSize:13,color:C.earth,marginTop:10,lineHeight:1.6,textWrap:"pretty"}}><b style={{color:C.black}}>{sw.fromNombre}</b> quiere darte {sw.offer.length===1?"esta limpieza":"estas limpiezas"} del <b style={{color:C.black}}>{fmtDate(sw.fecha)}</b>:</div>
+          <div style={{margin:"14px 0",display:"flex",flexDirection:"column",gap:7}}>
+            {(sw.offerProps||[]).map(function(p,i){ return <div key={i} style={{background:C.surfaceWarm,borderRadius:12,padding:"11px 13px",fontSize:13,fontWeight:600,color:C.black}}>{p}</div>; })}
+          </div>
+          <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+            <button onClick={function(){ if(misTareasDia.length){ setPaso("devolver"); } else { recibeConfirmar(); } }} style={{flex:1,minWidth:150,padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Aceptar</button>
+            <button onClick={rechazar} style={{padding:"13px 18px",minHeight:48,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.red,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Rechazar</button>
+          </div>
+          <button onClick={cerrar} style={{width:"100%",marginTop:10,padding:"8px",background:"none",border:"none",color:C.taupe,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Después</button>
+        </>)}
+
+        {soyRecibe&&paso==="devolver"&&(<>
+          <div style={{fontSize:13,color:C.earth,marginTop:10,lineHeight:1.6,textWrap:"pretty"}}>Puedes darle a <b style={{color:C.black}}>{sw.fromNombre}</b> una de tus tareas del {fmtDate(sw.fecha)} a cambio, o ninguna. Él decidirá si la acepta.</div>
+          <div style={{margin:"14px 0",display:"flex",flexDirection:"column",gap:7}}>
+            {misTareasDia.map(function(s){
+              var on=!!devol[s.id];
+              return (
+                <button key={s.id} onClick={function(){ setDevol(function(p){ var u=Object.assign({},p); if(u[s.id]) delete u[s.id]; else u[s.id]=1; return u; }); }}
+                  style={{display:"flex",alignItems:"center",gap:11,textAlign:"left",background:on?"#FCEDE8":C.surfaceWarm,border:"1.5px solid "+(on?C.peach:"transparent"),borderRadius:12,padding:"11px 13px",cursor:"pointer",fontFamily:"Montserrat,sans-serif",minHeight:48}}>
+                  <span style={{width:20,height:20,borderRadius:6,border:"1.5px solid "+(on?C.peach:C.gray),background:on?C.peach:"#fff",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:13,fontWeight:700}}>{on?"✓":""}</span>
+                  <span style={{minWidth:0}}>
+                    <span style={{display:"block",fontSize:13,fontWeight:600,color:C.black,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.propiedad}</span>
+                    <span style={{display:"block",fontSize:11,color:C.earth,marginTop:2}}>{(s.habitaciones||1)} hab · {s.tipo}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
+            <button onClick={recibeConfirmar} style={{flex:1,minWidth:150,padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{Object.keys(devol).length?"Devolver y enviar":"No devolver ninguna"}</button>
+            <button onClick={function(){setPaso("ver");}} style={{padding:"13px 18px",minHeight:48,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Atrás</button>
+          </div>
+        </>)}
+
+        {soyOrigen&&(<>
+          <div style={{fontSize:13,color:C.earth,marginTop:10,lineHeight:1.6,textWrap:"pretty"}}><b style={{color:C.black}}>{sw.toNombre}</b> aceptó recibir {(sw.offerProps||[]).join(", ")} del {fmtDate(sw.fecha)}.</div>
+          {(sw.returnProps||[]).length>0
+            ? <div style={{marginTop:12}}>
+                <div style={{fontSize:11,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase",marginBottom:7}}>Te da a cambio</div>
+                <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                  {(sw.returnProps||[]).map(function(p,i){ return <div key={i} style={{background:C.surfaceWarm,borderRadius:12,padding:"11px 13px",fontSize:13,fontWeight:600,color:C.black}}>{p}</div>; })}
+                </div>
+              </div>
+            : <div style={{marginTop:12,fontSize:12.5,color:C.earth,background:C.surfaceWarm,borderRadius:9,padding:"11px 13px",lineHeight:1.6}}>No te devuelve ninguna tarea a cambio.</div>}
+          <div style={{display:"flex",gap:9,flexWrap:"wrap",marginTop:16}}>
+            <button onClick={origenAceptar} style={{flex:1,minWidth:150,padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Aceptar y aplicar</button>
+            <button onClick={rechazar} style={{padding:"13px 18px",minHeight:48,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.red,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Rechazar</button>
+          </div>
+          <button onClick={cerrar} style={{width:"100%",marginTop:10,padding:"8px",background:"none",border:"none",color:C.taupe,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Después</button>
+        </>)}
+
+        {esInfo&&(<>
+          <div style={{fontSize:13,color:C.earth,marginTop:10,lineHeight:1.6,textWrap:"pretty"}}>
+            {sw.estado==="aceptada"
+              ? <>El intercambio con <b style={{color:C.black}}>{sw.fromNombre}</b> quedó cerrado. Recibes {(sw.offerProps||[]).join(", ")}{(sw.returnProps||[]).length?(" y cediste "+(sw.returnProps||[]).join(", ")):""} el {fmtDate(sw.fecha)}. Ya está en tu programación.</>
+              : <>Tu solicitud de intercambio {(sw.offerProps||[]).length?("de "+(sw.offerProps||[]).join(", ")+" "):""}fue rechazada. Tu programación no cambió.</>}
+          </div>
+          <button onClick={function(){ marcarVisto(sw.id); }} style={{width:"100%",marginTop:16,padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Entendido</button>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
+/* Bitácora de intercambios para el administrador (minimizada en Programación). */
+function SwapsBitacora({swaps}){
+  const [abierto,setAbierto] = useState(false);
+  var lista=(swaps||[]).slice().sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
+  if(!lista.length) return null;
+  var activos=lista.filter(function(s){ return s.estado==="pendiente_recibe"||s.estado==="pendiente_origen"; }).length;
+  return (
+    <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px"}}>
+      <button onClick={function(){setAbierto(function(o){return !o;});}} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,flexWrap:"wrap",width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Intercambios entre técnicos</div>
+          <div style={{fontSize:11,color:C.taupe,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>Quién le cedió qué a quién, y en qué quedó. {activos>0?activos+" en curso.":"Sin solicitudes en curso."}</div>
+        </div>
+        <span style={{display:"flex",alignItems:"center",gap:9,flexShrink:0}}>
+          <span style={{fontSize:15,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>{lista.length}</span>
+          <span style={{fontSize:11,color:C.taupe}}>{abierto?"▴":"▾"}</span>
+        </span>
+      </button>
+      {abierto&&(
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:12}}>
+          {lista.map(function(sw){
+            return (
+              <div key={sw.id} style={{background:C.surfaceWarm,borderRadius:10,padding:"11px 13px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"baseline"}}>
+                  <span style={{fontSize:12.5,fontWeight:600,color:C.black,minWidth:0}}>{sw.fromNombre} → {sw.toNombre}</span>
+                  <span style={{fontSize:9,fontWeight:700,color:swapEstadoColor(sw.estado),letterSpacing:".08em",textTransform:"uppercase",flexShrink:0}}>{swapEstadoTxt(sw.estado)}</span>
+                </div>
+                <div style={{fontSize:11,color:C.earth,marginTop:3,lineHeight:1.5,textWrap:"pretty"}}>
+                  {schedDiaNombre(sw.fecha)} {fmtDate(sw.fecha)} · cede {(sw.offerProps||[]).join(", ")||"—"}{(sw.returnProps||[]).length?" · recibe "+(sw.returnProps||[]).join(", "):""}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, reps, allVendors, swaps, onSvSwaps, allSchedules, onSvSchedules}) {
   const [view, setView] = useState("hoy");
   const [diasAbiertos, setDiasAbiertos] = useState({});
   const [pedir, setPedir] = useState(false);
@@ -12194,10 +13328,10 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
             )}
             <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{horaOk(s.hora,SCHED.HORA_INI)} a {horaOk(s.horaFin,SCHED.HORA_FIN)}</div>
           </div>
-          {codigoSemana(codigos, s.propiedad, s.fecha, s.codigoAcceso)&&(
+          {codigoVigente(codigos, s.propiedad, s.fecha, s.codigoAcceso)&&(
             <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontSize:8.5,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:3}}>Código de la semana</div>
-              <div style={{fontSize:20,fontWeight:700,color:C.black,letterSpacing:".12em",background:C.surfaceWarm,padding:"6px 13px",borderRadius:8,fontVariantNumeric:"tabular-nums"}}>{codigoSemana(codigos, s.propiedad, s.fecha, s.codigoAcceso)}</div>
+              <div style={{fontSize:8.5,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:3}}>Código de acceso</div>
+              <div style={{fontSize:20,fontWeight:700,color:C.black,letterSpacing:".12em",background:C.surfaceWarm,padding:"6px 13px",borderRadius:8,fontVariantNumeric:"tabular-nums"}}>{codigoVigente(codigos, s.propiedad, s.fecha, s.codigoAcceso)}</div>
             </div>
           )}
         </div>
@@ -12329,6 +13463,9 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
           </div>
         );
       })}
+
+      {/* Intercambiar tareas con otro técnico */}
+      <IntercambioTareas vendor={vendor} schedules={schedules} allVendors={allVendors||[]} swaps={swaps||[]} onSvSwaps={onSvSwaps}/>
 
       {/* Avisar que no podrá trabajar */}
       <div style={{background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px"}}>
