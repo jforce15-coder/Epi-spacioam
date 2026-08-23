@@ -10,9 +10,9 @@ const __ds_scope = {};
 
 // components/brand/Brushstroke.jsx
 try { (() => {
-/* Tratamiento canÃ³nico de imagen: el ribbon 3D teje por DETRÃS y reemerge por DELANTE.
+/* Tratamiento canónico de imagen: el ribbon 3D teje por DETRÁS y reemerge por DELANTE.
    Regla del sistema: toda imagen editorial/destacada >= ~160px lo lleva.
-   Miniaturas, avatares e Ã­conos de foto quedan exentos. */
+   Miniaturas, avatares e íconos de foto quedan exentos. */
 function Brushstroke({
   src,
   alt = "",
@@ -92,7 +92,7 @@ Object.assign(__ds_scope, { Brushstroke });
 
 // components/brand/Icon.jsx
 try { (() => {
-/* Set Lucide curado, inline. Grosor Ãºnico 1.5, tamaÃ±os 20/24.
+/* Set Lucide curado, inline. Grosor único 1.5, tamaños 20/24.
    Los paths vienen del set inline de las apps de Spacio AM. */
 const ICON_PATHS = {
   chevronDown: "M6 9l6 6 6-6",
@@ -154,8 +154,8 @@ function Icon({
   title
 }) {
   const d = ICON_PATHS[name] || "";
-  /* El stroke va por `style`, no por atributo: un atributo de presentaciÃ³n SVG
-     no resuelve var(--token), y el Ã­cono terminarÃ­a pintado del color por defecto. */
+  /* El stroke va por `style`, no por atributo: un atributo de presentación SVG
+     no resuelve var(--token), y el ícono terminaría pintado del color por defecto. */
   return /*#__PURE__*/React.createElement("svg", {
     width: size,
     height: size,
@@ -201,7 +201,7 @@ const SRC = {
   }
 };
 
-/* Marca oficial: SIEMPRE archivo, nunca tipografÃ­a recompuesta.
+/* Marca oficial: SIEMPRE archivo, nunca tipografía recompuesta.
    El nombre es "Spacio AM", nunca "Espacio AM". */
 function Wordmark({
   variant = "primary",
@@ -225,7 +225,7 @@ function Wordmark({
   });
 }
 
-/* Sparkle: sigilo de 4 puntas de la marca. Acento grÃ¡fico, nunca contenedor de texto. */
+/* Sparkle: sigilo de 4 puntas de la marca. Acento gráfico, nunca contenedor de texto. */
 function Sparkle({
   size = 14,
   color = "var(--accent)",
@@ -252,8 +252,8 @@ Object.assign(__ds_scope, { Wordmark, Sparkle });
 
 // components/core/Amount.jsx
 try { (() => {
-/* Monto editorial: sÃ­mbolo + enteros con peso, decimales atenuados.
-   Los nÃºmeros SIEMPRE en Montserrat tabular. */
+/* Monto editorial: símbolo + enteros con peso, decimales atenuados.
+   Los números SIEMPRE en Montserrat tabular. */
 function Amount({
   value = 0,
   currency = "GTQ",
@@ -280,7 +280,7 @@ function Amount({
       whiteSpace: "nowrap",
       ...style
     }
-  }, (neg ? "â" : "") + sym + (currency === "GTQ" ? "" : "") + int, decimals ? /*#__PURE__*/React.createElement("span", {
+  }, (neg ? "−" : "") + sym + (currency === "GTQ" ? "" : "") + int, decimals ? /*#__PURE__*/React.createElement("span", {
     style: {
       color: "var(--fg-subtle)",
       fontSize: "0.62em"
@@ -341,8 +341,8 @@ const SIZES = {
   }
 };
 
-/* PÃ­ldora siempre. El peach NUNCA carga texto (blanco 2.56:1, ink 3.96:1 â ambos fallan):
-   el CTA cÃ¡lido es tinte peach + borde peach + texto ink. MÃ¡ximo un primario por vista. */
+/* Píldora siempre. El peach NUNCA carga texto (blanco 2.56:1, ink 3.96:1 — ambos fallan):
+   el CTA cálido es tinte peach + borde peach + texto ink. Máximo un primario por vista. */
 function Button({
   children,
   variant = "primary",
@@ -434,7 +434,7 @@ function _extends() { return _extends = Object.assign ? Object.assign.bind() : f
 const {
   useState
 } = React;
-/* La card es la unidad de informaciÃ³n por defecto, sobre todo en mÃ³vil. */
+/* La card es la unidad de información por defecto, sobre todo en móvil. */
 function Card({
   children,
   variant = "elevated",
@@ -515,9 +515,9 @@ const LABELS = {
   "mantenimiento": "Mantenimiento",
   "nuevo-producto": "Nuevo producto",
   "ajuste": "Ajuste",
-  "danos": "DaÃ±os",
-  "supervision": "SupervisiÃ³n",
-  "cancelacion": "CancelaciÃ³n",
+  "danos": "Daños",
+  "supervision": "Supervisión",
+  "cancelacion": "Cancelación",
   "wifi": "Wi-Fi"
 };
 
@@ -551,7 +551,7 @@ Object.assign(__ds_scope, { DOMAIN_CATEGORIES, DomainBadge });
 // components/core/Eyebrow.jsx
 try { (() => {
 function _extends() { return _extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, _extends.apply(null, arguments); }
-/* Label en mayÃºsculas, tracking 0.32em. El susurro sobre el titular. */
+/* Label en mayúsculas, tracking 0.32em. El susurro sobre el titular. */
 function Eyebrow({
   children,
   as = "div",
@@ -573,7 +573,7 @@ function Eyebrow({
   }, rest), children);
 }
 
-/* Cabecera de secciÃ³n editorial: eyebrow + titular serif + subtÃ­tulo. */
+/* Cabecera de sección editorial: eyebrow + titular serif + subtítulo. */
 function SectionHead({
   eyebrow,
   title,
@@ -651,7 +651,7 @@ const SCALE = {
   }
 };
 
-/* Escala Ãºnica de estados de las 3 apps. El peach NUNCA es un farol. */
+/* Escala única de estados de las 3 apps. El peach NUNCA es un farol. */
 function Farol({
   state = "pending",
   children,
@@ -713,9 +713,9 @@ const EDGE = {
   pending: "var(--color-pending)"
 };
 
-/* Card de trabajo de la EPI App: filete de estado a la izquierda, badge de categorÃ­a,
-   propiedad en serif, descripciÃ³n, tÃ©cnico, total y farol de pago. Es la presentaciÃ³n
-   mÃ³vil de la tabla de trabajos (regla de densidad: cards en telÃ©fono). */
+/* Card de trabajo de la EPI App: filete de estado a la izquierda, badge de categoría,
+   propiedad en serif, descripción, técnico, total y farol de pago. Es la presentación
+   móvil de la tabla de trabajos (regla de densidad: cards en teléfono). */
 function JobCard({
   property,
   category,
@@ -920,8 +920,8 @@ const STATE = {
   pending: "var(--color-pending)"
 };
 
-/* Calendario mensual de EPI: celdas radio --r-sm, dÃ­a en tabular,
-   estado del dÃ­a por farol (punto), hoy = borde --accent, seleccionado = fondo --fg. */
+/* Calendario mensual de EPI: celdas radio --r-sm, día en tabular,
+   estado del día por farol (punto), hoy = borde --accent, seleccionado = fondo --fg. */
 function Calendar({
   year,
   month,
@@ -1010,10 +1010,10 @@ Object.assign(__ds_scope, { Calendar });
 
 // components/data/Donut.jsx
 try { (() => {
-/* Ink para la rebanada base, peach para LA que importa, neutros cÃ¡lidos para el resto. */
+/* Ink para la rebanada base, peach para LA que importa, neutros cálidos para el resto. */
 const PALETTE = ["var(--series-1)", "var(--series-accent)", "var(--series-6)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)"];
 
-/* DistribuciÃ³n en anillo + filas de leyenda con % y monto ("Â¿A dÃ³nde fue el dinero?"). */
+/* Distribución en anillo + filas de leyenda con % y monto ("¿A dónde fue el dinero?"). */
 function Donut({
   data = [],
   size = 220,
@@ -1142,8 +1142,8 @@ Object.assign(__ds_scope, { Donut });
 
 // components/data/KpiCard.jsx
 try { (() => {
-/* KPI editorial: el nÃºmero manda, el contexto susurra.
-   NÃºmeros SIEMPRE en Montserrat tabular (.t-num). */
+/* KPI editorial: el número manda, el contexto susurra.
+   Números SIEMPRE en Montserrat tabular (.t-num). */
 function KpiCard({
   label,
   value,
@@ -1216,7 +1216,7 @@ function KpiCard({
   }, help) : null);
 }
 
-/* Chip de variaciÃ³n. Verde = mejora, error = deterioro. Nunca peach como texto. */
+/* Chip de variación. Verde = mejora, error = deterioro. Nunca peach como texto. */
 function Trend({
   value = 0,
   suffix = "%",
@@ -1241,7 +1241,7 @@ function Trend({
   }, /*#__PURE__*/React.createElement(__ds_scope.Icon, {
     name: up ? "trendUp" : "trendDown",
     size: 13
-  }), (up ? "+" : "â") + Math.abs(value).toLocaleString("es-GT", {
+  }), (up ? "+" : "−") + Math.abs(value).toLocaleString("es-GT", {
     maximumFractionDigits: 1
   }) + suffix);
 }
@@ -1253,11 +1253,11 @@ try { (() => {
 const {
   useState
 } = React;
-/* JerarquÃ­a, no paleta categÃ³rica: la serie base va en ink y UNA serie va en peach.
-   El peach dice "mira esto". El resto son neutros cÃ¡lidos. */
+/* Jerarquía, no paleta categórica: la serie base va en ink y UNA serie va en peach.
+   El peach dice "mira esto". El resto son neutros cálidos. */
 const SERIES = ["var(--series-1)", "var(--series-accent)", "var(--series-2)", "var(--series-3)", "var(--series-6)", "var(--series-4)"];
 
-/* Curva Catmull-Rom â BÃ©zier: las lÃ­neas de Spacio AM son suaves, nunca quebradas. */
+/* Curva Catmull-Rom → Bézier: las líneas de Spacio AM son suaves, nunca quebradas. */
 function smoothPath(pts) {
   if (pts.length < 2) return "";
   let d = "M" + pts[0][0] + " " + pts[0][1];
@@ -1567,7 +1567,7 @@ function Gauge({
   }, sub) : null));
 }
 
-/* Columnas. La barra destacada va en peach: es el "mira esto" del grÃ¡fico. */
+/* Columnas. La barra destacada va en peach: es el "mira esto" del gráfico. */
 function BarChart({
   data = [],
   height = 200,
@@ -1627,8 +1627,8 @@ Object.assign(__ds_scope, { SERIES, LineChart, Gauge, BarChart });
 
 // components/data/SummaryTable.jsx
 try { (() => {
-/* Tabla-resumen: SOLO escritorio denso (admin, configuraciÃ³n).
-   Colapsa a cards por debajo de --bp-md â pÃ¡sale collapse para renderizar la vista de cards. */
+/* Tabla-resumen: SOLO escritorio denso (admin, configuración).
+   Colapsa a cards por debajo de --bp-md — pásale collapse para renderizar la vista de cards. */
 function SummaryTable({
   columns = [],
   rows = [],
@@ -1739,7 +1739,7 @@ Object.assign(__ds_scope, { SummaryTable });
 // components/email/EmailLayout.jsx
 try { (() => {
 /* Sistema de correo basado en el template de EPI. Los tokens NO viven como var() en email:
-   se compilan a hex. Esta es la paleta compilada â misma marca, estilos inline. */
+   se compilan a hex. Esta es la paleta compilada — misma marca, estilos inline. */
 const EMAIL_HEX = {
   ink: "#3E3F3F",
   alabaster: "#FAFAFA",
@@ -1751,7 +1751,7 @@ const EMAIL_HEX = {
   white: "#FFFFFF"
 };
 
-/* Cabecera con logo, cuerpo Montserrat, botÃ³n primario ink, acentos peach grÃ¡ficos, pie en graphite. */
+/* Cabecera con logo, cuerpo Montserrat, botón primario ink, acentos peach gráficos, pie en graphite. */
 function EmailLayout({
   preheader,
   logo,
@@ -1892,15 +1892,15 @@ function EmailLayout({
       color: H.graphite,
       letterSpacing: "0.14em"
     }
-  }, footer || "Spacio AM Â· Guatemala Â· hola@spacioam.com"))))))));
+  }, footer || "Spacio AM · Guatemala · hola@spacioam.com"))))))));
 }
 Object.assign(__ds_scope, { EMAIL_HEX, EmailLayout });
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/email/EmailLayout.jsx", error: String((e && e.message) || e) }); }
 
 // components/feedback/LoadingScreen.jsx
 try { (() => {
-/* Loader inicial canÃ³nico del sistema (del Dashboard). EPI y Guest se alinean a este.
-   Respeta prefers-reduced-motion vÃ­a tokens/motion.css. */
+/* Loader inicial canónico del sistema (del Dashboard). EPI y Guest se alinean a este.
+   Respeta prefers-reduced-motion vía tokens/motion.css. */
 function LoadingScreen({
   base = "",
   label,
@@ -1950,7 +1950,7 @@ function LoadingScreen({
   }, label) : null);
 }
 
-/* Skeleton localizado: nunca dejes un control vacÃ­o sin feedback. */
+/* Skeleton localizado: nunca dejes un control vacío sin feedback. */
 function Skeleton({
   height = 14,
   width = "100%",
@@ -1977,8 +1977,8 @@ try { (() => {
 const {
   useEffect
 } = React;
-/* Template estÃ¡ndar de EPI: overlay ink 55% + blur 4, panel radio 28, sombra lg.
-   Cierra con Esc y con click en el overlay. En mÃ³vil puede subir como hoja inferior. */
+/* Template estándar de EPI: overlay ink 55% + blur 4, panel radio 28, sombra lg.
+   Cierra con Esc y con click en el overlay. En móvil puede subir como hoja inferior. */
 function Modal({
   open = true,
   title,
@@ -2225,7 +2225,7 @@ const {
   useRef,
   useEffect
 } = React;
-/* Select editorial: disparador pÃ­ldora + panel radio lg. Usado en el chrome del Dashboard. */
+/* Select editorial: disparador píldora + panel radio lg. Usado en el chrome del Dashboard. */
 function Select({
   value,
   options = [],
@@ -2295,7 +2295,7 @@ function Select({
       flex: 1,
       textAlign: "left"
     }
-  }, cur ? cur.label : "â"), /*#__PURE__*/React.createElement(__ds_scope.Icon, {
+  }, cur ? cur.label : "—"), /*#__PURE__*/React.createElement(__ds_scope.Icon, {
     name: "chevronDown",
     size: 14,
     color: "var(--fg-muted)",
@@ -2369,7 +2369,7 @@ Object.assign(__ds_scope, { Select });
 
 // components/forms/Toggle.jsx
 try { (() => {
-/* Pista 36x20 pÃ­ldora: --fg encendido, --divider apagado. */
+/* Pista 36x20 píldora: --fg encendido, --divider apagado. */
 function Toggle({
   checked = false,
   onChange,
@@ -2428,7 +2428,7 @@ function Toggle({
   }, label) : null);
 }
 
-/* Checkbox: radio --r-sm, borde 1.5px, check con Ã­cono 1.5. */
+/* Checkbox: radio --r-sm, borde 1.5px, check con ícono 1.5. */
 function Checkbox({
   checked = false,
   onChange,
@@ -2485,7 +2485,7 @@ Object.assign(__ds_scope, { Toggle, Checkbox });
 // components/navigation/Bento.jsx
 try { (() => {
 /* Bento de la Guest App: pantalla de inicio / lanzador y cara visual de marca.
-   2 columnas en mÃ³vil â 4 desde --bp-md. NO es la navegaciÃ³n permanente. */
+   2 columnas en móvil → 4 desde --bp-md. NO es la navegación permanente. */
 function Bento({
   children,
   style
@@ -2504,7 +2504,7 @@ function Bento({
   }, children);
 }
 
-/* Tile: imagen (con degradado de protecciÃ³n) o bloque de color con label. */
+/* Tile: imagen (con degradado de protección) o bloque de color con label. */
 function BentoTile({
   image,
   label,
@@ -2597,10 +2597,10 @@ Object.assign(__ds_scope, { Bento, BentoTile });
 
 // components/navigation/BottomNav.jsx
 try { (() => {
-/* NavegaciÃ³n inferior mÃ³vil. Dos formas reales del sistema:
-   - "bar": barra a ancho completo con FAB peach central e Ã­cono de casita blanco (EPI App).
-   - "pill": pÃ­ldora flotante con blur (Dashboard de Propietarios).
-   Alturas de toque mÃ­nimo 44px. */
+/* Navegación inferior móvil. Dos formas reales del sistema:
+   - "bar": barra a ancho completo con FAB peach central e ícono de casita blanco (EPI App).
+   - "pill": píldora flotante con blur (Dashboard de Propietarios).
+   Alturas de toque mínimo 44px. */
 function BottomNav({
   items = [],
   value,
@@ -2721,8 +2721,8 @@ try { (() => {
 const {
   useState
 } = React;
-/* PatrÃ³n de EPI: minimizar todo lo que no se estÃ¡ usando.
-   En mÃ³vil, las secciones secundarias arrancan colapsadas; en escritorio, expandidas. */
+/* Patrón de EPI: minimizar todo lo que no se está usando.
+   En móvil, las secciones secundarias arrancan colapsadas; en escritorio, expandidas. */
 function Collapsible({
   title,
   meta,
@@ -2788,7 +2788,7 @@ Object.assign(__ds_scope, { Collapsible });
 
 // components/navigation/Segmented.jsx
 try { (() => {
-/* Display de filtros: control segmentado en pÃ­ldora sobre --bg-alt. */
+/* Display de filtros: control segmentado en píldora sobre --bg-alt. */
 function Segmented({
   options = [],
   value,
@@ -2837,9 +2837,9 @@ Object.assign(__ds_scope, { Segmented });
 
 // components/navigation/TabNav.jsx
 try { (() => {
-/* Tabs de secciÃ³n de las apps de producto: etiqueta eyebrow + Ã­cono 1.5,
-   activo subrayado en --accent (el peach como filete: uso grÃ¡fico correcto).
-   Dashboard: RESUMEN Â· GASTOS E INVERSIONES Â· DETALLE DEL MES Â· â¦ */
+/* Tabs de sección de las apps de producto: etiqueta eyebrow + ícono 1.5,
+   activo subrayado en --accent (el peach como filete: uso gráfico correcto).
+   Dashboard: RESUMEN · GASTOS E INVERSIONES · DETALLE DEL MES · … */
 function TabNav({
   tabs = [],
   value,
@@ -2892,7 +2892,7 @@ function TabNav({
   })));
 }
 
-/* Tabs en pÃ­ldora (chrome secundario de EPI: Dashboard Â· Formulario Â· Programa Â· Calidad Â· Adelantos). */
+/* Tabs en píldora (chrome secundario de EPI: Dashboard · Formulario · Programa · Calidad · Adelantos). */
 function PillTabs({
   tabs = [],
   value,
@@ -2944,8 +2944,8 @@ Object.assign(__ds_scope, { TabNav, PillTabs });
 
 // components/navigation/TopBar.jsx
 try { (() => {
-/* Chrome de navegaciÃ³n de las apps de producto (Dashboard, EPI):
-   barra superior persistente Â· filtro global de mes arriba-izquierda Â·
+/* Chrome de navegación de las apps de producto (Dashboard, EPI):
+   barra superior persistente · filtro global de mes arriba-izquierda ·
    moneda + idioma arriba-derecha. */
 function TopBar({
   base = "",
@@ -3077,8 +3077,8 @@ function TopBar({
   }, initials) : null)));
 }
 
-/* Nav translÃºcida editorial (marketing / Guest): pÃ­ldora flotante con blur.
-   El logo principal va a escala completa: nunca mÃ¡s bajo que el resto de la pÃ­ldora. */
+/* Nav translúcida editorial (marketing / Guest): píldora flotante con blur.
+   El logo principal va a escala completa: nunca más bajo que el resto de la píldora. */
 function PillNav({
   links = [],
   active,
@@ -3187,7 +3187,7 @@ function Adelantos() {
       label: "Casa de la Luz Dorada"
     }, {
       value: "suite",
-      label: "Suite Editorial nÂº 04"
+      label: "Suite Editorial nº 04"
     }, {
       value: "nook",
       label: "Nook Antigua"
@@ -3198,7 +3198,7 @@ function Adelantos() {
     value: motivo,
     onChange: setMotivo,
     placeholder: "Compra de insumos de limpieza",
-    error: !motivo && sent ? "CuÃ©ntanos para quÃ© es el adelanto." : null
+    error: !motivo && sent ? "Cuéntanos para qué es el adelanto." : null
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -3304,7 +3304,7 @@ function Agenda({
   return /*#__PURE__*/React.createElement("div", {
     className: "epi-grid"
   }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(SectionHead, {
-    eyebrow: "Agosto 2026 Â· dÃ­a " + day,
+    eyebrow: "Agosto 2026 · día " + day,
     title: "Tu agenda",
     right: /*#__PURE__*/React.createElement(Segmented, {
       size: "sm",
@@ -3443,7 +3443,7 @@ function Calidad() {
       minWidth: 150,
       options: [{
         value: "all",
-        label: "Todo el perÃ­odo"
+        label: "Todo el período"
       }]
     })
   }), /*#__PURE__*/React.createElement("div", {
@@ -3645,7 +3645,7 @@ function EpiDashboard({
     help: "Descuento autom\xE1tico"
   })), /*#__PURE__*/React.createElement("div", {
     className: "epi-filters"
-  }, [["TÃ©cnico", "tec"], ["VÃ­nculo", "vin"], ["Tipo de trabajo", "tipo"], ["Estado de pago", "est"]].map(([l, k]) => /*#__PURE__*/React.createElement(Select, {
+  }, [["Técnico", "tec"], ["Vínculo", "vin"], ["Tipo de trabajo", "tipo"], ["Estado de pago", "est"]].map(([l, k]) => /*#__PURE__*/React.createElement(Select, {
     key: k,
     label: l,
     value: "all",
@@ -3893,7 +3893,7 @@ const {
 const {
   useState
 } = React;
-const TIPOS = ["Limpieza tradicional", "Limpieza profunda", "Mantenimiento", "Nuevo Producto", "Ajuste", "Reporte de DaÃ±os"];
+const TIPOS = ["Limpieza tradicional", "Limpieza profunda", "Mantenimiento", "Nuevo Producto", "Ajuste", "Reporte de Daños"];
 function Formulario() {
   const [tipo, setTipo] = useState("Limpieza tradicional");
   const [desc, setDesc] = useState("");
@@ -3956,7 +3956,7 @@ function Formulario() {
     },
     options: [{
       value: "all",
-      label: "Seleccionarâ¦"
+      label: "Seleccionar…"
     }, {
       value: "j",
       label: "Jackeline Ruano"
@@ -3988,7 +3988,7 @@ function Formulario() {
     },
     options: [{
       value: "all",
-      label: "Seleccionarâ¦"
+      label: "Seleccionar…"
     }, {
       value: "a",
       label: "Z1 - Centro Vivo - 1107"
@@ -4016,7 +4016,7 @@ function Formulario() {
     value: desc,
     onChange: setDesc,
     placeholder: "Describe brevemente el trabajo realizado\u2026",
-    error: sent && !desc ? "CuÃ©ntanos quÃ© se hizo antes de enviar." : null
+    error: sent && !desc ? "Cuéntanos qué se hizo antes de enviar." : null
   })), /*#__PURE__*/React.createElement(Card, {
     variant: "flat",
     style: {
@@ -4233,7 +4233,7 @@ try { (() => {
 window.EPI_DATA = {
   user: {
     name: "Marvin Coc",
-    role: "Supervisor Â· Antigua",
+    role: "Supervisor · Antigua",
     initials: "MC"
   },
   month: {
@@ -4263,7 +4263,7 @@ window.EPI_DATA = {
     monto: 75,
     st: "pending",
     stl: "Pendiente",
-    nota: "Limpieza tradicional â Z1 - Centro Vivo - 1107"
+    nota: "Limpieza tradicional — Z1 - Centro Vivo - 1107"
   }, {
     id: 2,
     hora: "09:00",
@@ -4274,7 +4274,7 @@ window.EPI_DATA = {
     monto: 75,
     st: "pending",
     stl: "Pendiente",
-    nota: "Limpieza tradicional â Z13 - Narama - 623"
+    nota: "Limpieza tradicional — Z13 - Narama - 623"
   }, {
     id: 3,
     hora: "10:15",
@@ -4285,7 +4285,7 @@ window.EPI_DATA = {
     monto: 38,
     st: "error",
     stl: "Cancelado",
-    nota: "Limpieza cancelada por la administraciÃ³n a las 10:52 am â se paga media tarifa"
+    nota: "Limpieza cancelada por la administración a las 10:52 am — se paga media tarifa"
   }, {
     id: 4,
     hora: "12:00",
@@ -4296,7 +4296,7 @@ window.EPI_DATA = {
     monto: 75,
     st: "info",
     stl: "En progreso",
-    nota: "Limpieza profunda â Z2 - Baldone - 1010"
+    nota: "Limpieza profunda — Z2 - Baldone - 1010"
   }, {
     id: 5,
     hora: "14:30",
@@ -4307,7 +4307,7 @@ window.EPI_DATA = {
     monto: 45,
     st: "warning",
     stl: "Por vencer",
-    nota: "Tokens de lavado â Tokens de lavado y secado de ropa"
+    nota: "Tokens de lavado — Tokens de lavado y secado de ropa"
   }, {
     id: 6,
     hora: "16:00",
@@ -4318,7 +4318,7 @@ window.EPI_DATA = {
     monto: 60,
     st: "success",
     stl: "Pagado",
-    nota: "SupervisiÃ³n mensual de inventario"
+    nota: "Supervisión mensual de inventario"
   }],
   tecnicos: [{
     n: "Flor Samayoa",
@@ -4544,7 +4544,7 @@ function Checkin({
       margin: "0 0 10px",
       textAlign: "center"
     }
-  }, step === 1 ? "Tu documento" : step === 2 ? "CÃ³mo te contactamos" : "Las reglas de la casa"), /*#__PURE__*/React.createElement("p", {
+  }, step === 1 ? "Tu documento" : step === 2 ? "Cómo te contactamos" : "Las reglas de la casa"), /*#__PURE__*/React.createElement("p", {
     style: {
       textAlign: "center",
       fontFamily: "var(--font-sans)",
@@ -4555,7 +4555,7 @@ function Checkin({
       margin: "0 auto var(--s-5)",
       maxWidth: 380
     }
-  }, step === 1 ? "Toma una foto de tu DPI o pasaporte y llenamos los datos por ti." : step === 2 ? "Solo lo usamos para avisarte de tu llegada." : "Un espacio que se cuida se disfruta mÃ¡s."), step === 1 ? /*#__PURE__*/React.createElement(DocCapture, null) : null, step === 2 ? /*#__PURE__*/React.createElement(Card, {
+  }, step === 1 ? "Toma una foto de tu DPI o pasaporte y llenamos los datos por ti." : step === 2 ? "Solo lo usamos para avisarte de tu llegada." : "Un espacio que se cuida se disfruta más."), step === 1 ? /*#__PURE__*/React.createElement(DocCapture, null) : null, step === 2 ? /*#__PURE__*/React.createElement(Card, {
     variant: "flat"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4584,7 +4584,7 @@ function Checkin({
       flexDirection: "column",
       gap: 12
     }
-  }, ["Sin fiestas ni eventos.", "No se permite fumar dentro de la casa.", "Silencio despuÃ©s de las 22:00.", "MÃ¡ximo 4 huÃ©spedes."].map(r => /*#__PURE__*/React.createElement("li", {
+  }, ["Sin fiestas ni eventos.", "No se permite fumar dentro de la casa.", "Silencio después de las 22:00.", "Máximo 4 huéspedes."].map(r => /*#__PURE__*/React.createElement("li", {
     key: r,
     style: {
       display: "flex",
@@ -4968,7 +4968,7 @@ const TABS = [{
   icon: "file"
 }, {
   value: "depositos",
-  label: "DepÃ³sitos a socios",
+  label: "Depósitos a socios",
   icon: "bank"
 }, {
   value: "conta",
@@ -5000,7 +5000,7 @@ function DashboardApp() {
   const moneyShort = v => sym + Math.round(v * rate / 1000) + "k";
   const k = D.kpis[month];
   const periodText = D.months.find(m => m.value === month).label;
-  const context = "Tu mejor agosto: " + money(k.neto) + " netos con " + k.occ + "% de ocupaciÃ³n ajustada.";
+  const context = "Tu mejor agosto: " + money(k.neto) + " netos con " + k.occ + "% de ocupación ajustada.";
   if (screen === "login") return /*#__PURE__*/React.createElement(Login, {
     lang: lang,
     setLang: setLang,
@@ -5091,7 +5091,7 @@ function DashboardApp() {
       icon: "file"
     }, {
       value: "setup",
-      label: "MÃ¡s",
+      label: "Más",
       icon: "plus"
     }]
   }) : null);
@@ -5231,7 +5231,7 @@ function Login({
       color: "var(--fg-muted)",
       margin: "12px 0 30px"
     }
-  }, lang === "es" ? "Tus propiedades, tu mes y tus nÃºmeros â en una sola pÃ¡gina." : "Your properties, your month and your numbers â on one page."), /*#__PURE__*/React.createElement("form", {
+  }, lang === "es" ? "Tus propiedades, tu mes y tus números — en una sola página." : "Your properties, your month and your numbers — on one page."), /*#__PURE__*/React.createElement("form", {
     onSubmit: submit,
     style: {
       display: "flex",
@@ -5244,7 +5244,7 @@ function Login({
     onChange: setUser,
     icon: "user"
   }), /*#__PURE__*/React.createElement(Input, {
-    label: lang === "es" ? "ContraseÃ±a" : "Password",
+    label: lang === "es" ? "Contraseña" : "Password",
     type: show ? "text" : "password",
     value: pass,
     onChange: setPass,
@@ -5301,7 +5301,7 @@ function Login({
       color: "var(--fg-muted)",
       margin: 0
     }
-  }, lang === "es" ? "Tu contraseÃ±a por defecto es " : "Your default password is ", /*#__PURE__*/React.createElement("strong", {
+  }, lang === "es" ? "Tu contraseña por defecto es " : "Your default password is ", /*#__PURE__*/React.createElement("strong", {
     style: {
       color: "var(--fg)",
       fontWeight: 600
@@ -5454,11 +5454,11 @@ function Financial({
   }, /*#__PURE__*/React.createElement(Eyebrow, null, "Contexto"), [{
     i: "trendUp",
     t: "Temporada",
-    b: "Agosto es tu mejor mes del semestre: +12% sobre julio y el bruto mÃ¡s alto del aÃ±o."
+    b: "Agosto es tu mejor mes del semestre: +12% sobre julio y el bruto más alto del año."
   }, {
     i: "coins",
-    t: "ComisiÃ³n",
-    b: "La comisiÃ³n del mes fue " + money(k.fee) + ", un 15% del bruto segÃºn tu plan Full Management."
+    t: "Comisión",
+    b: "La comisión del mes fue " + money(k.fee) + ", un 15% del bruto según tu plan Full Management."
   }].map((h, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     className: "kit-highlight"
@@ -5529,7 +5529,7 @@ function Occupancy({
       width: "100%",
       marginTop: 14
     }
-  }, [["OcupaciÃ³n total", k.occ + 4 + "%"], ["Noches vendidas", k.noches], ["Noches bloqueadas", 11]].map(([l, v], i) => /*#__PURE__*/React.createElement("div", {
+  }, [["Ocupación total", k.occ + 4 + "%"], ["Noches vendidas", k.noches], ["Noches bloqueadas", 11]].map(([l, v], i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     style: {
       textAlign: "center",
@@ -5639,7 +5639,7 @@ function Admin({
       num: true
     }, {
       key: "occ",
-      header: "OcupaciÃ³n",
+      header: "Ocupación",
       num: true
     }, {
       key: "adr",
@@ -5846,7 +5846,7 @@ window.KIT_DATA = {
     sub: "Antigua Guatemala"
   }, {
     value: "suite",
-    label: "Suite Editorial nÂº 04",
+    label: "Suite Editorial nº 04",
     sub: "Ciudad de Guatemala"
   }, {
     value: "nook",
@@ -5930,9 +5930,9 @@ window.KIT_DATA = {
     occ: 91,
     adr: 705,
     st: "success",
-    stl: "Al dÃ­a"
+    stl: "Al día"
   }, {
-    p: "Suite Editorial nÂº 04",
+    p: "Suite Editorial nº 04",
     z: "Ciudad",
     neto: 12180,
     occ: 84,
@@ -5946,7 +5946,7 @@ window.KIT_DATA = {
     occ: 78,
     adr: 512,
     st: "success",
-    stl: "Al dÃ­a"
+    stl: "Al día"
   }]
 };
 })(); } catch (e) { __ds_ns.__errors.push({ path: "ui_kits/owner-dashboard/data.js", error: String((e && e.message) || e) }); }
