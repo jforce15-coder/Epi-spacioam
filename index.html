@@ -21,16 +21,10 @@
   @keyframes sa-spin{to{transform:rotate(360deg)}}
   @media (prefers-reduced-motion:reduce){.sa-spin,#__splash .dot{animation-duration:2.4s}}
 </style>
-<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.min.js" crossorigin="anonymous"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
-<script>
-  if (typeof window.Recharts === "undefined") { var __noop=function(){return null;}; window.Recharts=new Proxy({},{get:function(){return __noop;}}); }
-</script>
+<!-- Las librerías (React, Recharts, Babel, etc.) ya NO se cargan con <script src> fijos:
+     en conexión débil una sola petición fallida impedía arrancar el app. Ahora se cargan
+     con un cargador resiliente (reintento + CDN de respaldo) al final del <body>, y un
+     service worker las cachea para que el app abra aun sin señal. -->
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><filter id="lg-refract" x="-20%" y="-20%" width="140%" height="140%"><feTurbulence type="fractalNoise" baseFrequency="0.008 0.012" numOctaves="2" seed="7" result="noise"></feTurbulence><feGaussianBlur in="noise" stdDeviation="1.2" result="soft"></feGaussianBlur><feDisplacementMap in="SourceGraphic" in2="soft" scale="16" xChannelSelector="R" yChannelSelector="G"></feDisplacementMap></filter></svg>
@@ -50,13 +44,15 @@
     var e=document.getElementById("__err");
     var l=document.querySelector("#__splash .lbl"), d=document.querySelector("#__splash .dot");
     if(l)l.style.display="none"; if(d)d.style.display="none";
-    if(e){e.style.display="block";e.innerHTML="<b>No se pudo iniciar el app.</b><br>"+String(msg).slice(0,300)+"<br><br>Revisa tu conexi\u00f3n e intenta recargar la p\u00e1gina.";}
+    if(e){e.style.display="block";e.innerHTML="<b>No se pudo iniciar el app.</b><br>"+String(msg).slice(0,300)+"<br><br>Revisa tu conexi\u00f3n e intenta de nuevo.<br><button onclick=\"location.reload()\" style=\"margin-top:12px;border:none;background:#3E3F3F;color:#fff;font:600 12px Montserrat,sans-serif;letter-spacing:.08em;padding:10px 18px;border-radius:999px;cursor:pointer\">Reintentar</button>";}
   }
-  window.addEventListener("error",function(ev){ if(!document.getElementById("root").childNodes.length) __showErr(ev.message||"Error de carga"); });
-  window.addEventListener("unhandledrejection",function(ev){ if(!document.getElementById("root").childNodes.length) __showErr((ev.reason&&ev.reason.message)||"Error de red"); });
-  window.addEventListener("DOMContentLoaded",function(){
-    if(!window.React||!window.ReactDOM) __showErr("No cargaron las librer\u00edas (CDN bloqueado o sin internet).");
-  });
+  /* Un error transitorio (un recurso de terceros que falla) no debe tapar el app
+     con la pantalla de error si el app está a punto de montar: se espera un
+     momento y solo se muestra si de verdad no montó. Los fallos reales de carga
+     los reporta el cargador directamente con __showErr. */
+  function __maybeErr(msg){ setTimeout(function(){ if(!document.getElementById("root").childNodes.length) __showErr(msg); }, 2500); }
+  window.addEventListener("error",function(ev){ if(!document.getElementById("root").childNodes.length) __maybeErr(ev.message||"Error de carga"); });
+  window.addEventListener("unhandledrejection",function(ev){ if(!document.getElementById("root").childNodes.length) __maybeErr((ev.reason&&ev.reason.message)||"Error de red"); });
   /* La quita el propio app en cuanto pinta (ver Loader en app.jsx). Sin
      fundido: si se desvanece encima del Loader se ven los dos a la vez. */
   window.__samSplashOff=function(){
@@ -77,8 +73,57 @@
     },200);
   })();
 </script>
-<script src="_ds/spacio-am-design-system-2c08fe78-561e-46a1-8758-5fd6396bf54d/_ds_bundle.js"></script>
-<script src="sched-engine.js?v=20260801rondas"></script>
-<script type="text/babel" data-presets="react" src="app.jsx?v=20260806guard"></script>
+<!-- Carga resiliente: cada librería con reintento y CDN de respaldo; el app se compila
+     solo cuando React y Babel están confirmados. sw.js cachea todo tras la 1ª carga. -->
+<script>
+(function(){
+  var DS="_ds/spacio-am-design-system-2c08fe78-561e-46a1-8758-5fd6396bf54d/_ds_bundle.js";
+  var CDN={
+    react:["https://unpkg.com/react@18.3.1/umd/react.production.min.js","https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js","https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"],
+    reactDom:["https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js","https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js","https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"],
+    propTypes:["https://unpkg.com/prop-types@15.8.1/prop-types.min.js","https://cdn.jsdelivr.net/npm/prop-types@15.8.1/prop-types.min.js","https://cdnjs.cloudflare.com/ajax/libs/prop-types/15.8.1/prop-types.min.js"],
+    recharts:["https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.min.js","https://unpkg.com/recharts@2.12.7/umd/Recharts.min.js"],
+    babel:["https://unpkg.com/@babel/standalone@7.29.0/babel.min.js","https://cdn.jsdelivr.net/npm/@babel/standalone@7.29.0/babel.min.js","https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.29.0/babel.min.js"],
+    html2canvas:["https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js","https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"],
+    jspdf:["https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js","https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"]
+  };
+  function loadSeq(urls,i,check,ok,fail){
+    if(i>=urls.length){ fail&&fail(); return; }
+    var s=document.createElement("script"); s.src=urls[i]; s.async=false;
+    if(/^https?:/.test(urls[i])) s.crossOrigin="anonymous";
+    var done=false;
+    s.onload=function(){ if(done)return; done=true; if(!check||check()) ok&&ok(); else loadSeq(urls,i+1,check,ok,fail); };
+    s.onerror=function(){ if(done)return; done=true; loadSeq(urls,i+1,check,ok,fail); };
+    document.head.appendChild(s);
+  }
+  function step(key,check){ return function(next){ loadSeq(CDN[key],0,check,next,next); }; }
+  function plain(url){ return function(next){ loadSeq([url],0,null,next,next); }; }
+  function run(steps,done){ (function go(i){ if(i>=steps.length){ done(); return; } steps[i](function(){ go(i+1); }); })(0); }
+  function fatal(msg){ if(window.__showErr) window.__showErr(msg); }
+  run([
+    step("react",function(){return !!window.React;}),
+    step("reactDom",function(){return !!window.ReactDOM;}),
+    step("propTypes",function(){return !!window.PropTypes;}),
+    step("recharts",function(){return !!window.Recharts;}),
+    step("babel",function(){return !!window.Babel;}),
+    plain(DS),
+    plain("sched-engine.js?v=20260801rondas")
+  ],function(){
+    if(!window.React||!window.ReactDOM){ fatal("No cargaron las librer\u00edas (React)."); return; }
+    if(typeof window.Recharts==="undefined"){ var n=function(){return null;}; window.Recharts=new Proxy({},{get:function(){return n;}}); }
+    if(!window.Babel){ fatal("No carg\u00f3 el compilador (Babel)."); return; }
+    // Compilar y ejecutar el app en ámbito global (equivale al <script type=text/babel> original).
+    fetch("app.jsx?v=20260806guard").then(function(r){ if(!r.ok) throw 0; return r.text(); }).then(function(src){
+      var code;
+      try{ code=window.Babel.transform(src,{presets:["react"],filename:"app.jsx"}).code; }
+      catch(e){ fatal((e&&e.message)||"Error al compilar el app."); return; }
+      var tag=document.createElement("script"); tag.textContent=code; document.body.appendChild(tag);
+    }).catch(function(){ fatal("No se pudo cargar el app. Revisa tu conexi\u00f3n e intenta de nuevo."); });
+    loadSeq(CDN.html2canvas,0,function(){return !!window.html2canvas;},null,null);
+    loadSeq(CDN.jspdf,0,function(){return !!(window.jspdf||window.jsPDF);},null,null);
+  });
+  if("serviceWorker" in navigator){ window.addEventListener("load",function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); }); }
+})();
+</script>
 </body>
 </html>

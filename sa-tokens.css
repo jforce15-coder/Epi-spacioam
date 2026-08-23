@@ -39,4 +39,10 @@
   --sa-b-sup-bg:#EEE8F3;  --sa-b-sup-tx:#6D3B91;  /* Supervisión */
   --sa-b-canc-bg:#F3E8ED; --sa-b-canc-tx:#913B66; /* Cancelación */
   --sa-b-wifi-bg:#E8F1F3; --sa-b-wifi-tx:#357682; /* Wi-Fi */
+
+  /* easing único del DS (mismo cubic-bezier de mi-spacioam) */
+  --sa-ease:cubic-bezier(0.22,0.61,0.36,1);
+  --ease:cubic-bezier(0.22,0.61,0.36,1);
 }
+/* Fade-in corto para menús y popovers (menú de usuario, filtros píldora). */
+@keyframes sa-fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}

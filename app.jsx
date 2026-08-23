@@ -1,6 +1,48 @@
 const {useState,useEffect,useRef,Component}=React;
 const {BarChart,Bar,XAxis,YAxis,Tooltip,ResponsiveContainer,LineChart,Line,CartesianGrid,ComposedChart,Cell}=(window.Recharts||{});
 
+/* ─── Preferencias globales: idioma (es/en) + moneda (GTQ/USD) ──────────────
+   El app nació solo en español y solo en quetzales. Este store agrega ambas
+   preferencias a nivel de TODA la app, persistidas en localStorage, con
+   suscripción para que cualquier componente se repinte al cambiarlas desde el
+   menú de usuario. epiMoney() y epiT() leen de aquí; el tipo de cambio se
+   ajusta con EPI_USD_RATE sin tocar el código de pantallas. */
+var EPI_USD_RATE = 7.8;   /* 1 USD ≈ Q7.80 (quetzales por dólar) */
+var EPIPrefs = (function(){
+  var subs=[];
+  var state={lang:"es",currency:"GTQ"};
+  try{ var raw=localStorage.getItem("epi:prefs"); if(raw){ var p=JSON.parse(raw)||{}; if(p.lang==="es"||p.lang==="en") state.lang=p.lang; if(p.currency==="GTQ"||p.currency==="USD") state.currency=p.currency; } }catch(_){}
+  function persist(){ try{ localStorage.setItem("epi:prefs",JSON.stringify(state)); }catch(_){} }
+  return {
+    get:function(){ return state; },
+    set:function(patch){ state=Object.assign({},state,patch); persist(); subs.forEach(function(f){ try{f(state);}catch(_){} }); },
+    subscribe:function(f){ subs.push(f); return function(){ subs=subs.filter(function(x){return x!==f;}); }; }
+  };
+})();
+try{ if(typeof window!=="undefined") window.EPIPrefs=EPIPrefs; }catch(_){}
+/* Hook: se re-renderiza cuando cambia idioma o moneda. */
+function useEPIPrefs(){
+  var st=useState(0), force=st[1];
+  useEffect(function(){ return EPIPrefs.subscribe(function(){ force(function(n){return n+1;}); }); },[]);
+  return EPIPrefs.get();
+}
+/* Traducción puntual: epiT("Hola","Hello") — lee el idioma actual. */
+function epiT(es,en){ return EPIPrefs.get().lang==="en" ? en : es; }
+/* Formato de dinero según la moneda elegida. Los montos del app están en
+   quetzales; en USD se convierten con EPI_USD_RATE. `dec` fuerza decimales. */
+function epiMoney(n, opts){
+  opts=opts||{};
+  var cur=opts.currency||EPIPrefs.get().currency;
+  var q=parseFloat(n)||0;
+  if(cur==="USD"){
+    var usd=q/EPI_USD_RATE;
+    var d=(opts.dec!=null)?opts.dec:((Math.round(usd*100)%100===0)?0:2);
+    return "$"+usd.toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:2});
+  }
+  var v=Math.round(q*100)/100, dd=(opts.dec!=null)?opts.dec:(((v*100)%100===0)?0:2);
+  return "Q"+v.toLocaleString("es-GT",{minimumFractionDigits:dd,maximumFractionDigits:2});
+}
+
 /* ─── Responsive hook */
 function useScreen() {
   var [w,setW] = useState(typeof window!=="undefined"?window.innerWidth:1024);
@@ -2014,7 +2056,7 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
 
       {/* Estado de Sheets (punto tipo farol) + toggle de idioma — top right, fixed */}
       <div style={{position:"fixed",top:14,right:14,display:"flex",alignItems:"center",gap:12,zIndex:200}}>
-        {sheetsOk!=null&&<span title={sheetsOk?L("Conectado a Sheets","Connected to Sheets"):L("Sin conexión a Sheets","No connection to Sheets")} style={{width:11,height:11,borderRadius:"50%",flexShrink:0,display:"inline-block",background:sheetsOk?"#3d6b52":"#C0392B",boxShadow:"0 0 0 3px "+(sheetsOk?"#3d6b52":"#C0392B")+"22"}}/>}
+        {sheetsOk!=null&&<span title={sheetsOk?L("Conectado a Sheets","Connected to Sheets"):L("Sin conexión a Sheets","No connection to Sheets")}><SheetsDot ok={sheetsOk}/></span>}
         <div style={{display:"inline-flex",padding:3,background:C.surfaceWarm,borderRadius:999,gap:2}}>
           {[["es","ES"],["en","EN"]].map(function(o){var active=lang===o[0];return (
             <button key={o[0]} onClick={function(){setLang(o[0]);}} style={{border:"none",cursor:"pointer",padding:"7px 12px",borderRadius:999,fontFamily:"Montserrat,sans-serif",fontSize:10.5,fontWeight:600,letterSpacing:".12em",textTransform:"uppercase",background:active?C.alabaster:"transparent",color:active?C.black:C.earth,boxShadow:active?"0 1px 2px rgba(62,63,63,.05)":"none",transition:"all .18s"}}>{o[1]}</button>
@@ -2133,6 +2175,7 @@ function NotifCfg({prefs, vendors, onSave, readOnly}){
 /* ═══ ADMIN */
 function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regSol,onSvRegSol,nomAjustes,onSvNomAjustes,reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,vendors,props,adminPin,company,extCats,schedules,codigos,onSvCodigos,schedErr,onVerComo,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
   const [tab,    setTab]    = useState("dash");
+  useEPIPrefs();   /* repinta al cambiar idioma/moneda desde el menú de usuario */
   const [detail, setDetail] = useState(null);
   const [cDel,   setCDel]   = useState(null);
   const [pagoDetail, setPagoDetail] = useState(null);
@@ -2227,9 +2270,10 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
      cierra la ausencia y avisa al que las recibe y al que faltó. */
   function aplicarAusenciaHoy(aus, aEmail, afectadas){
     var hoy=SCHED.hoyGT();
+    var f=String(aus.fecha||"").slice(0,10)||hoy;
     var v=schedTecnicos(vendors).find(function(x){ return String(x.email||"").toLowerCase()===aEmail; });
     var ids={}; (afectadas||[]).forEach(function(sc){ ids[sc.id]=1; });
-    var n=(schedules||[]).filter(function(sc){ return String(sc.fecha).slice(0,10)===hoy && String(sc.vendorEmail||"").toLowerCase()===aEmail && sc.estado!=="cancelada"; }).length;
+    var n=(schedules||[]).filter(function(sc){ return String(sc.fecha).slice(0,10)===f && String(sc.vendorEmail||"").toLowerCase()===aEmail && sc.estado!=="cancelada"; }).length;
     var upd=(schedules||[]).map(function(sc){
       if(!ids[sc.id]) return sc; n++;
       return Object.assign({},sc,{vendorEmail:aEmail, vendorId:(v&&v.id)||"", orden:n, motivo:"cubre ausencia de "+(aus.vendorNombre||""), estado:"confirmada", reajustada:true});
@@ -2239,10 +2283,10 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
     [aEmail, String(aus.vendorEmail||"").toLowerCase()].filter(function(e,i,a){ return e&&a.indexOf(e)===i; }).forEach(function(em){
       var vv=schedTecnicos(vendors).find(function(x){ return String(x.email||"").toLowerCase()===em; });
       if(!vv) return;
-      var mias=upd.filter(function(sc){ return String(sc.fecha).slice(0,10)===hoy && String(sc.vendorEmail||"").toLowerCase()===em; });
+      var mias=upd.filter(function(sc){ return String(sc.fecha).slice(0,10)===f && String(sc.vendorEmail||"").toLowerCase()===em; });
       try{ notifyTemplate([vv.notifEmail||vv.email], "programacionCambio", {
-        tecnico:vendorDisplay(vv), fecha:fmtDate(hoy), dia:schedDiaNombre(hoy), total:String(mias.length),
-        limpiezas: mias.length ? mias.map(function(sc,i){ return (i+1)+". "+sc.propiedad+" — "+(sc.habitaciones||1)+" hab · "+sc.tipo+(sc.entradaHoy?" · TIENE ENTRADA HOY":""); }).join("\n") : "Sin limpiezas asignadas hoy." }); }catch(_){}
+        tecnico:vendorDisplay(vv), fecha:fmtDate(f), dia:schedDiaNombre(f), total:String(mias.length),
+        limpiezas: mias.length ? mias.map(function(sc,i){ return (i+1)+". "+sc.propiedad+" — "+(sc.habitaciones||1)+" hab · "+sc.tipo+(sc.entradaHoy?" · TIENE ENTRADA HOY":""); }).join("\n") : "Sin limpiezas asignadas ese día." }); }catch(_){}
     });
     setAusPopup(null);
   }
@@ -2398,6 +2442,8 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
         onConfig={function(){setTab("cfg");}} configActive={tab==="cfg"}
         onLogout={onLogout}
         role="Admin"
+        userName={adminVendor?vendorDisplay(adminVendor):"Admin"} userEmail={adminVendor?adminVendor.email:""} userAvatar={(adminVendor&&(adminVendor.foto||adminVendor.avatar))||""}
+        isAdmin={true} canAccount={!!adminVendor} onAccount={adminVendor?function(){setTab("account");}:null} onSetup={function(){setTab("cfg");}}
         wifiProps={props}
         wifiVendor={adminVendor?adminVendor.email:""}
       />
@@ -2408,7 +2454,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
       <div style={{display:tab==="sched"?"block":"none"}}>
         <ProgramacionAdmin schedules={schedules||[]} onSvSchedules={onSvSchedules} vendors={vendors||[]} props={props||[]}
           reservas={reservas||[]} onSvReservas={onSvReservas} ausencias={ausencias||[]} onSvAusencias={onSvAusencias}
-          reps={reps} reviews={reviews} rvCasos={rvCasos} onSvP={onSvP} onSvV={onSvV} canNom={canNotif} codigos={codigos||{}} schedErr={schedErr} onUpsert={onUpsert}/>
+          reps={reps} reviews={reviews} rvCasos={rvCasos} onSvP={onSvP} onSvV={onSvV} canNom={canNotif} codigos={codigos||{}} schedErr={schedErr} onUpsert={onUpsert} onReasignar={setAusPopup}/>
       </div>
       <div style={{display:tab==="qa"?"block":"none"}}>
         <AdminQAPanel reps={reps} vendors={vendors} reviews={reviews} onSvReviews={onSvReviews} rvCasos={rvCasos} onSvRvCasos={onSvRvCasos} rvIA={rvIA} onSvRvIA={onSvRvIA} onQA={qaUpdate} onSelect={setDetail} onUpdate={onUpsert} isAdmin={true} me={adminVendor} props={props} reservas={reservas||[]} schedules={schedules||[]} onSvSchedules={onSvSchedules}/>
@@ -2423,6 +2469,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,regS
               : null)}
       </div>
       <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  regSol={regSol} onSvRegSol={onSvRegSol} reps={reps} vendors={vendors} props={props} codigos={codigos||{}} onSvCodigos={onSvCodigos} onVerComo={onVerComo} feedback={feedback} onSvFeedback={onSvFeedback} schedules={schedules} adminPin={adminPin} company={company} extCats={extCats||[]} notifPrefs={notifPrefs} canNotif={canNotif} onSvNotifPrefs={onSvNotifPrefs} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
+      {adminVendor&&<div style={{display:tab==="account"?"block":"none"}}><VendorAccount vendor={adminVendor} allVendors={vendors} allReps={reps} onSvV={onSvV}/></div>}
 
       {detail&&<DetailModal rep={detail} vendors={vendors} props={props} reservas={reservas||[]} schedules={schedules||[]} onSvSchedules={onSvSchedules} hasLinkedDmg={reps.some(function(x){return isDanos(x.categoria)&&String(x._linkedToReport||"")===String(detail.id);})} onExtract={extractDanios} onClose={function(){setDetail(null);}} onMarkPaid={function(p){markPaid(detail.id,p);setDetail(function(x){return Object.assign({},x,{paid:p});});}} onSave={function(r){onUpsert(r);setDetail(r);}} onQA={qaUpdate} onDelete={function(){setCDel(detail.id);}}/>}
       {cDel&&<Overlay><ConfirmDel onCancel={function(){setCDel(null);}} onConfirm={function(){onDelete(cDel);setCDel(null);setDetail(null);}}/></Overlay>}
@@ -2437,9 +2484,10 @@ function DashView({props,reservas,nomAjustes,onSvNomAjustes,canNom,meEmails,onSv
   return (
     <div>
       {alerts.length>0&&<div style={{background:"#EDE4E4",padding:"10px 22px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",borderBottom:"1px solid #D6C8C8"}}><span>⚠️</span><span style={{fontSize:13,fontWeight:600,color:C.red}}>{alerts.length} trabajo{alerts.length!==1?"s":""} con pago pendiente</span></div>}
-      <div style={{background:"#fff",borderBottom:"1px solid "+C.gray,padding:"0 22px",display:"flex",gap:4}}>
-        {[["ops","Dashboard Operativo"],["exec","Dashboard Ejecutivo"],["pagos","Historial de pagos"]].concat(canNom?[["planilla","Planilla"]]:[]).map(function(it){ var k=it[0],l=it[1]; return (
-          <button key={k} onClick={function(){setSub(k);}} style={{padding:"14px 16px",border:"none",borderBottom:"1.5px solid "+(sub===k?C.black:"transparent"),background:"none",fontSize:13,fontWeight:600,cursor:"pointer",color:sub===k?C.black:C.taupe,transition:"all .2s"}}>{l}</button>
+      {/* Sub-navegación estilo TabNav de mi-spacioam: subrayado peach, mayúsculas con tracking */}
+      <div style={{background:C.surface||"#fff",borderBottom:"1px solid "+C.line,padding:"0 22px",display:"flex",gap:4,overflowX:"auto"}}>
+        {[["ops","Dashboard Operativo"],["exec","Dashboard Ejecutivo"],["pagos","Historial de pagos"]].concat(canNom?[["planilla","Planilla"]]:[]).map(function(it){ var k=it[0],l=it[1]; var on=sub===k; return (
+          <button key={k} onClick={function(){setSub(k);}} onMouseEnter={function(e){if(!on)e.currentTarget.style.color=C.black;}} onMouseLeave={function(e){if(!on)e.currentTarget.style.color=C.taupe;}} style={{padding:"18px 18px",border:"none",borderBottom:"2px solid "+(on?C.peach:"transparent"),background:"none",fontSize:12.5,fontWeight:500,letterSpacing:".14em",textTransform:"uppercase",whiteSpace:"nowrap",cursor:"pointer",color:on?C.black:C.taupe,transition:"color .18s var(--sa-ease,ease), border-color .18s var(--sa-ease,ease)"}}>{l}</button>
         ); })}
       </div>
       <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} props={props} vendors={vendors} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} adelantos={adelantos} onMarkPaidBatch={onMarkPaidBatch} onSelect={onSelect} onMarkPaid={onMarkPaid} onRefresh={onRefresh} schedules={schedules||[]} onSvSchedules={onSvSchedules} onUpsert={onUpsert} onDelete={onDelete}/></div>
@@ -2989,15 +3037,15 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
       {/* Stats bar */}
       <StatsSummary
         heroLabel="A depositar"
-        heroValue={"Q"+netoPrev.toLocaleString()}
+        heroValue={epiMoney(netoPrev)}
         heroGreen={netoPrev<=0}
         enCursoCount={wk.cur.reps.length}
         enCursoMonto={wk.cur.monto}
         items={[
           {label:"Trabajos", value:wk.prev.pndCount, sub:"pendientes"},
-          {label:"Facturado", value:"Q"+Math.round(wk.prev.porCobrar).toLocaleString(), sub:"sin pagar"},
-          {label:"Cobrado", value:"Q"+Math.round(wk.prev.cob).toLocaleString(), green:true},
-          adel>0?{label:"Adelanto / sem"+(fVend!=="Todos"?"":" (todos)"), value:"−Q"+adel.toLocaleString(), peach:true, sub:"descuento auto"}:null,
+          {label:"Facturado", value:epiMoney(Math.round(wk.prev.porCobrar)), sub:"sin pagar"},
+          {label:"Cobrado", value:epiMoney(Math.round(wk.prev.cob)), green:true},
+          adel>0?{label:"Adelanto / sem"+(fVend!=="Todos"?"":" (todos)"), value:"−"+epiMoney(adel), peach:true, sub:"descuento auto"}:null,
         ]}
       />
 
@@ -3006,45 +3054,23 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10}}>
           <div>
             <span style={LBL}>Técnico</span>
-            <select value={fVend} onChange={function(e){setFVend(e.target.value);setShowAll(false);}} style={fVend!=="Todos"?IS_A:IS}>
-              <option value="Todos">Todos</option>
-              {techOpts.map(function(o){return <option key={o.value} value={o.value}>{o.label}</option>;})}
-            </select>
+            <PillFilter icon="user" value={fVend} allValue="Todos" minWidth={220} placeholder="Buscar técnico…" options={[{value:"Todos",label:"Todos"}].concat(techOpts)} onChange={function(v){setFVend(v);setShowAll(false);}}/>
           </div>
           <div>
             <span style={LBL}>Vínculo</span>
-            <select value={fVinc} onChange={function(e){setFVinc(e.target.value);setFCatV("Todas");setFVend("Todos");setShowAll(false);}} style={fVinc!=="Todos"?IS_A:IS}>
-              <option value="Todos">Todos</option>
-              {vincOpts.indexOf("interno")>=0&&<option value="interno">Internos</option>}
-              {vincOpts.indexOf("externo")>=0&&<option value="externo">Externos</option>}
-            </select>
+            <PillFilter value={fVinc} allValue="Todos" options={[{value:"Todos",label:"Todos"}].concat(vincOpts.indexOf("interno")>=0?[{value:"interno",label:"Internos"}]:[]).concat(vincOpts.indexOf("externo")>=0?[{value:"externo",label:"Externos"}]:[])} onChange={function(v){setFVinc(v);setFCatV("Todas");setFVend("Todos");setShowAll(false);}}/>
           </div>
           <div>
             <span style={LBL}>Tipo de trabajo</span>
-            <select value={fCat} onChange={function(e){setFCat(e.target.value);setShowAll(false);}} style={fCat!=="Todos"?IS_A:IS}>
-              <option value="Todos">Todos</option>
-              {catOpts.map(function(c){return <option key={c}>{c}</option>;})}
-            </select>
+            <PillFilter value={fCat} allValue="Todos" options={["Todos"].concat(catOpts)} onChange={function(v){setFCat(v);setShowAll(false);}}/>
           </div>
           <div>
             <span style={LBL}>Estado de pago</span>
-            <select value={fStatus} onChange={function(e){setFStatus(e.target.value);setShowAll(false);}} style={fStatus!=="Todos"?IS_A:IS}>
-              <option>Todos</option>
-              <option>✓ Pagado</option>
-              <option>● Pendiente</option>
-            </select>
+            <PillFilter value={fStatus} allValue="Todos" searchable={false} options={["Todos","✓ Pagado","● Pendiente"]} onChange={function(v){setFStatus(v);setShowAll(false);}}/>
           </div>
           <div>
             <span style={LBL}>Período rápido</span>
-            <select onChange={function(e){applyPreset(e.target.value);e.target.value="";}} style={IS} defaultValue="">
-              <option value="" disabled>Seleccionar…</option>
-              <option value="hoy">Hoy</option>
-              <option value="semana">Semana en curso</option>
-              <option value="semana_ant">Semana anterior</option>
-              <option value="mes">Este mes</option>
-              <option value="semanas_ant">Semanas anteriores</option>
-              <option value="todo">Todo</option>
-            </select>
+            <PeriodPill onApply={applyPreset}/>
           </div>
           <div>
             <span style={LBL}>Rango de fechas</span>
@@ -3078,40 +3104,28 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
               {catsVinc.length>0&&(
                 <div>
                   <span style={LBL}>{fVinc==="externo"?"Servicio externo":fVinc==="interno"?"Equipo interno":"Categoría del proveedor"}</span>
-                  <select value={fCatV} onChange={function(e){setFCatV(e.target.value);setShowAll(false);}} style={fCatV!=="Todas"?IS_A:IS}>
-                    <option value="Todas">Todas</option>
-                    {catsVinc.map(function(c){return <option key={c} value={c} title={c}>{c.length>30?c.slice(0,29).trim()+"…":c}</option>;})}
-                  </select>
+                  <PillFilter value={fCatV} allValue="Todas" placeholder="Buscar categoría…" options={["Todas"].concat(catsVinc)} onChange={function(v){setFCatV(v);setShowAll(false);}}/>
                 </div>
               )}
               <div>
                 <span style={LBL}>Pagador</span>
-                <select value={fPagador} onChange={function(e){setFPagador(e.target.value);setShowAll(false);}} style={fPagador!=="Todos"?IS_A:IS}>
-                  <option value="Todos">Todos</option>
-                  {pagOpts.map(function(p){return <option key={p}>{p}</option>;})}
-                </select>
+                <PillFilter value={fPagador} allValue="Todos" options={["Todos"].concat(pagOpts)} onChange={function(v){setFPagador(v);setShowAll(false);}}/>
               </div>
               <div>
                 <span style={LBL}>Zona</span>
-                <select value={fZona} onChange={function(e){setFZona(e.target.value);setFEdif("Todos");setFAptos([]);setShowAll(false);}} style={fZona!=="Todas"?IS_A:IS}>
-                  <option value="Todas">Todas</option>
-                  {zonaOpts.map(function(z){return <option key={z} value={z}>{z}</option>;})}
-                </select>
+                <PillFilter icon="pin" value={fZona} allValue="Todas" options={["Todas"].concat(zonaOpts)} onChange={function(v){setFZona(v);setFEdif("Todos");setFAptos([]);setShowAll(false);}}/>
               </div>
               <div>
                 <span style={LBL}>Edificio</span>
-                <select value={fEdif} onChange={function(e){setFEdif(e.target.value);setFAptos([]);setShowAll(false);}} style={fEdif!=="Todos"?IS_A:IS}>
-                  <option value="Todos">Todos</option>
-                  {edifOpts.map(function(b2){return <option key={b2} value={b2}>{b2}</option>;})}
-                </select>
+                <PillFilter icon="home" value={fEdif} allValue="Todos" options={["Todos"].concat(edifOpts)} onChange={function(v){setFEdif(v);setFAptos([]);setShowAll(false);}}/>
               </div>
               <div>
                 <span style={LBL}>Apartamento{fAptos.length>1?" · "+fAptos.length:""}</span>
-                <MultiAptoPicker options={aptoOpts} value={fAptos} baseStyle={IS} activeStyle={IS_A} onChange={function(v){setFAptos(v);setShowAll(false);}}/>
+                <PillFilter icon="grid" multi value={fAptos} allValue="__all__" placeholder="apartamentos" minWidth={220} options={[{value:"__all__",label:"Todos"}].concat((aptoOpts||[]).map(function(a){ return (typeof a==="string")?{value:a,label:a}:a; }))} onChange={function(v){setFAptos(v);setShowAll(false);}}/>
               </div>
               <div>
                 <span style={LBL}>Ajustes</span>
-                <button onClick={function(){setFAjOtro(!fAjOtro);setShowAll(false);}} style={Object.assign({},fAjOtro?IS_A:IS,{textAlign:"left",minHeight:34})}>{fAjOtro?"✓ Sin estandarizar":"Todos los ajustes"}</button>
+                <PillFilter value={fAjOtro?"otro":"todos"} allValue="todos" searchable={false} options={[{value:"todos",label:"Todos los ajustes"},{value:"otro",label:"Sin estandarizar"}]} onChange={function(v){setFAjOtro(v==="otro");setShowAll(false);}}/>
               </div>
             </div>
             {fAptos.length>1&&(
@@ -3372,21 +3386,11 @@ function ExecDash({reps,vendors,reviews,rvCasos,props,reservas,schedules,onSvSch
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:12,marginBottom:14}}>
           <div>
             <span style={LBL}>Propiedad</span>
-            <select value={fProp} onChange={function(e){setFProp(e.target.value);}} style={fProp!=="Todas"?ISA:IS}>
-              {pNames.map(function(n){return <option key={n}>{n}</option>;})}
-            </select>
+            <PillFilter icon="home" value={fProp} allValue="Todas" placeholder="Buscar propiedad…" minWidth={220} options={pNames} onChange={function(v){setFProp(v);}}/>
           </div>
           <div>
             <span style={LBL}>Período rápido</span>
-            <select onChange={function(e){applyPreset(e.target.value);e.target.value="";}} style={IS} defaultValue="">
-              <option value="" disabled>Seleccionar…</option>
-              <option value="hoy">Hoy</option>
-              <option value="semana">Semana en curso</option>
-              <option value="semana_ant">Semana anterior</option>
-              <option value="mes">Este mes</option>
-              <option value="semanas_ant">Semanas anteriores</option>
-              <option value="todo">Todo el historial</option>
-            </select>
+            <PeriodPill onApply={applyPreset} options={[["hoy","Hoy"],["semana","Semana en curso"],["semana_ant","Semana anterior"],["mes","Este mes"],["semanas_ant","Semanas anteriores"],["todo","Todo el historial"]]}/>
           </div>
           <div>
             <span style={LBL}>Período</span>
@@ -3404,7 +3408,7 @@ function ExecDash({reps,vendors,reviews,rvCasos,props,reservas,schedules,onSvSch
       {dSt&&<div style={{marginBottom:16,padding:"10px 14px",borderRadius:9,fontSize:13,fontWeight:600,background:dSt.ok?"#E8F2ED":"#F7E7E4",color:dSt.ok?C.green:C.red}}>{dSt.msg}</div>}
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:24}}>
-        {[{l:"Trabajos",v:fil.length},{l:"Facturado",v:"Q"+tFact.toLocaleString(),a:true},{l:"Cobrado",v:"Q"+tCobr.toLocaleString(),g:true},{l:"Pendiente",v:"Q"+tPend.toLocaleString(),w:tPend>0}].map(function(s,i){
+        {[{l:"Trabajos",v:fil.length},{l:"Facturado",v:epiMoney(tFact),a:true},{l:"Cobrado",v:epiMoney(tCobr),g:true},{l:"Pendiente",v:epiMoney(tPend),w:tPend>0}].map(function(s,i){
           return <div key={i} style={{background:"#fff",borderRadius:14,padding:"16px",border:"1px solid "+C.line}}><div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>{s.l}</div><div style={{fontSize:22,fontWeight:600,color:s.g?C.green:s.w?C.red:s.a?C.peach:C.black}}>{s.v}</div></div>;
         })}
       </div>
@@ -6472,14 +6476,20 @@ function WifiAviso({propiedad, props, vendorEmail}){
   );
 }
 
-/* Botón del encabezado, al lado de Configuración. */
+/* Punto tipo farol del estado de Sheets — idéntico al de la pantalla de login. */
+function SheetsDot({ok}){
+  return <span title={ok?"Conectado a Sheets":"Sin conexión a Sheets"} style={{width:11,height:11,borderRadius:"50%",flexShrink:0,display:"inline-block",background:ok?"#3d6b52":"#C0392B",boxShadow:"0 0 0 3px "+(ok?"#3d6b52":"#C0392B")+"22"}}/>;
+}
+/* Botón del encabezado, al lado de Configuración. Mismo círculo discreto que el
+   círculo de perfil que va justo al lado (40×40, borde fino, fondo cálido). */
 function WifiBtn({props, isMobile, vendorEmail}){
   const [open,setOpen] = useState(false);
+  var sz=isMobile?36:40;
   return (
     <>
-      <button onClick={function(){setOpen(true);}} title="Wi-Fi de las propiedades"
-        style={{display:"flex",alignItems:"center",gap:6,background:"transparent",border:"1.5px solid "+C.gray,borderRadius:"var(--sa-pill)",color:C.earth,cursor:"pointer",minHeight:44,padding:isMobile?"0 11px":"0 15px",fontSize:11.5,fontWeight:600,letterSpacing:".04em",fontFamily:"Montserrat,sans-serif"}}>
-        <Icon name="wifi" size={16} stroke={C.earth}/>{!isMobile&&"Wi-Fi"}
+      <button onClick={function(){setOpen(true);}} title="Wi-Fi de las propiedades" aria-label="Wi-Fi"
+        style={{display:"grid",placeItems:"center",width:sz,height:sz,minWidth:sz,boxSizing:"border-box",background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:"50%",color:C.earth,cursor:"pointer",padding:0,flexShrink:0}}>
+        <Icon name="wifi" size={17} stroke={C.earth}/>
       </button>
       {open&&<WifiSheet props={props} vendorEmail={vendorEmail} onClose={function(){setOpen(false);}}/>}
     </>
@@ -7232,6 +7242,7 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
 /* ═══ VENDOR APP */
 function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codigos,ausencias,onSvAusencias,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout,reviews,rvCasos,onSvRvCasos,rvIA}) {
   const [view,setView] = useState("jobs");
+  useEPIPrefs();   /* repinta al cambiar idioma/moneda desde el menú de usuario */
   const [pagTab,setPagTab] = useState("hist");
   var tot=reps.reduce(function(s,r){return s+(isDanos(r.categoria)?0:parseFloat(r.total||0));},0);
   var cob=reps.filter(function(r){return r.paid;}).reduce(function(s,r){return s+parseFloat(r.total||0);},0);
@@ -7265,6 +7276,8 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codig
         onConfig={function(){setView("account");}} configActive={view==="account"}
         onLogout={onLogout}
         role={vendorDisplay(vendor)}
+        userName={vendorDisplay(vendor)} userEmail={vendor.email} userAvatar={vendor.foto||vendor.avatar||""}
+        isAdmin={false} canAccount={true} onAccount={function(){setView("account");}}
         feedbackVendor={vendor}
         onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}
         wifiProps={props}
@@ -7337,15 +7350,15 @@ function VendorJobsView({reps, tot, cob, pnd, adelantos, pendingCorrections, onN
         return (
           <StatsSummary
             heroLabel="Neto a recibir"
-            heroValue={"Q"+Math.round(neto).toLocaleString()}
+            heroValue={epiMoney(Math.round(neto))}
             heroGreen={neto>0}
             enCursoCount={wk.cur.reps.length}
             enCursoMonto={wk.cur.monto}
             items={[
               {label:"Mis trabajos", value:wk.prev.pndCount, sub:"pendientes"},
-              {label:"Facturado", value:"Q"+Math.round(wk.prev.porCobrar).toLocaleString(), sub:"sin pagar"},
-              {label:"Cobrado", value:"Q"+Math.round(wk.prev.cob).toLocaleString(), green:true},
-              (advSem>0?{label:"Adelanto / sem", value:"−Q"+advSem.toLocaleString(), peach:true, sub:"saldo Q"+stAdv.saldo.toLocaleString()}:null),
+              {label:"Facturado", value:epiMoney(Math.round(wk.prev.porCobrar)), sub:"sin pagar"},
+              {label:"Cobrado", value:epiMoney(Math.round(wk.prev.cob)), green:true},
+              (advSem>0?{label:"Adelanto / sem", value:"−"+epiMoney(advSem), peach:true, sub:"saldo "+epiMoney(stAdv.saldo)}:null),
             ]}
           />
         );
@@ -7366,26 +7379,21 @@ function VendorJobsView({reps, tot, cob, pnd, adelantos, pendingCorrections, onN
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
           <div>
             <span style={LBL}>Categoría</span>
-            <select value={fCat} onChange={function(e){setFCat(e.target.value);setShowAll(false);}} style={fCat!=="Todos"?ISA:IS}>
-              {(function(){
+            <PillFilter value={fCat} allValue="Todos" onChange={function(v){setFCat(v);setShowAll(false);}} options={(function(){
                 var isEPIL = vendor&&vendor.tipo==="interno"&&vendor.categoria==="EPI Limpieza";
                 var isEPIM = vendor&&vendor.tipo==="interno"&&vendor.categoria==="EPI Mantenimiento";
-                var cats = isEPIL
+                return isEPIL
                   ? ["Todos","Limpieza tradicional","Limpieza profunda","Ajuste","Reporte de Daños"]
                   : isEPIM
                   ? ["Todos","Mantenimiento","Nuevo Producto","Ajuste","Reporte de Daños"]
                   : (vendor&&vendor.tipo==="externo")
                   ? ["Todos","Mantenimiento","Nuevo Producto","Ajuste"]
                   : ["Todos"].concat(CATS);
-                return cats.map(function(c){return <option key={c}>{c}</option>;});
-              })()}
-            </select>
+              })()}/>
           </div>
           <div>
             <span style={LBL}>Estado de pago</span>
-            <select value={fStatus} onChange={function(e){setFStatus(e.target.value);setShowAll(false);}} style={fStatus!=="Todos"?ISA:IS}>
-              <option>Todos</option><option>✓ Pagado</option><option>● Pendiente</option>
-            </select>
+            <PillFilter value={fStatus} allValue="Todos" searchable={false} options={["Todos","✓ Pagado","● Pendiente"]} onChange={function(v){setFStatus(v);setShowAll(false);}}/>
           </div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,alignItems:"flex-end"}}>
@@ -7584,6 +7592,37 @@ function VendorAccount({vendor,allVendors,allReps,onSvV}) {
   const [cp,   setCp]   = useState("");
   const [pwMsg,setPwMsg]= useState(null);
 
+  /* Foto de perfil — se guarda en el registro del usuario (backend vía onSvV) y
+     aparece en el menú del encabezado. Se recorta a cuadrado y se reduce a 256px. */
+  const [foto,setFoto] = useState(vendor.foto||vendor.avatar||"");
+  const [fotoMsg,setFotoMsg] = useState(null);
+  const photoRef = useRef(null);
+  function saveFoto(data){
+    setFoto(data);
+    onSvV(allVendors.map(function(v){ return v.id===vendor.id?Object.assign({},v,{foto:data}):v; }));
+    vendor.foto=data;
+    setFotoMsg({ok:true,t:data?"✓ Foto actualizada.":"✓ Foto quitada."}); setTimeout(function(){setFotoMsg(null);},3000);
+  }
+  function onPhoto(e){
+    var file=e.target.files&&e.target.files[0]; if(!file){ return; }
+    if(!/^image\//.test(file.type)){ setFotoMsg({ok:false,t:"Elige una imagen."}); e.target.value=""; return; }
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      var img=new Image();
+      img.onload=function(){
+        var S=256, cv=document.createElement("canvas"); cv.width=S; cv.height=S;
+        var ctx=cv.getContext("2d");
+        var s=Math.min(img.width,img.height), sx=(img.width-s)/2, sy=(img.height-s)/2;
+        ctx.drawImage(img,sx,sy,s,s,0,0,S,S);
+        try{ saveFoto(cv.toDataURL("image/jpeg",0.82)); }catch(_){ setFotoMsg({ok:false,t:"No se pudo procesar la imagen."}); }
+      };
+      img.onerror=function(){ setFotoMsg({ok:false,t:"No se pudo leer la imagen."}); };
+      img.src=ev.target.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value="";
+  }
+
   function saveContact() {
     if (!email.trim()) { setCtMsg({ok:false,t:"El correo no puede estar vacío."}); return; }
     /* Check email not used by another vendor */
@@ -7618,6 +7657,22 @@ function VendorAccount({vendor,allVendors,allReps,onSvV}) {
         <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:26,fontWeight:400,color:C.black}}>{vendorDisplay(vendor)}</div>
         {vendor.tipo&&<div style={{fontSize:11.5,color:C.taupe,marginTop:3}}>{vendorTipo(vendor)}</div>}
       </div>
+
+      {/* Foto de perfil */}
+      <Card title="Foto de perfil">
+        <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+          <div style={{width:72,height:72,borderRadius:"var(--sa-pill)",overflow:"hidden",border:"1px solid "+C.line,background:C.surfaceWarm,display:"grid",placeItems:"center",flexShrink:0,fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:26,color:C.earth}}>
+            {foto?<img src={foto} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>:String(vendorDisplay(vendor)||"").trim().split(/\s+/).map(function(w){return w[0]||"";}).slice(0,2).join("").toUpperCase()}
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <input ref={photoRef} type="file" accept="image/*" onChange={onPhoto} style={{display:"none"}}/>
+            <button onClick={function(){photoRef.current&&photoRef.current.click();}} style={{border:"none",cursor:"pointer",background:C.black,color:"#fff",borderRadius:"var(--sa-pill)",padding:"10px 18px",fontFamily:"Montserrat,sans-serif",fontSize:11,fontWeight:600,letterSpacing:".1em",textTransform:"uppercase"}}>{foto?"Cambiar":"Subir foto"}</button>
+            {foto&&<button onClick={function(){saveFoto("");}} style={{border:"1px solid "+C.gray,cursor:"pointer",background:"#fff",color:C.earth,borderRadius:"var(--sa-pill)",padding:"10px 16px",fontFamily:"Montserrat,sans-serif",fontSize:11,fontWeight:600,letterSpacing:".1em",textTransform:"uppercase"}}>Quitar</button>}
+          </div>
+        </div>
+        {fotoMsg&&<div style={{marginTop:12,padding:"10px 13px",borderRadius:8,fontSize:13,fontWeight:600,background:fotoMsg.ok?"#E8F2ED":"#F7E7E4",color:fotoMsg.ok?C.green:C.red}}>{fotoMsg.t}</div>}
+        <div style={{marginTop:10,fontSize:11,color:C.taupe,lineHeight:1.6,textWrap:"pretty"}}>Se guarda en tu cuenta y aparece en el círculo del encabezado. Sin foto se muestran tus iniciales.</div>
+      </Card>
 
       {/* Contact info — editable by all */}
       <Card title="Datos de contacto">
@@ -7779,6 +7834,97 @@ function Icon({name, size, stroke, width, style}) {
   );
 }
 
+/* ═══ PillFilter — filtro tipo píldora, portado del Select de mi-spacioam ═══
+   Búsqueda cuando hay muchas opciones, orden alfabético (con "Todos" fijo
+   arriba) y selección múltiple opcional. Reemplaza los <select> nativos de los
+   filtros. Opciones: string[] o {value,label,sub}[]. allValue = el valor
+   centinela ("Todos"/"Todas"/"all") que significa "sin filtrar". */
+function PillFilter({value,options,onChange,icon,minWidth,multi,searchable,placeholder,allValue,align}){
+  const [open,setOpen]=useState(false);
+  const [q,setQ]=useState("");
+  const ref=useRef(null);
+  align=align||"left";
+  useEffect(function(){
+    function h(e){ if(ref.current&&!ref.current.contains(e.target)){ setOpen(false); setQ(""); } }
+    document.addEventListener("mousedown",h);
+    return function(){ document.removeEventListener("mousedown",h); };
+  },[]);
+  var opts=(options||[]).map(function(o){ return (typeof o==="string")?{value:o,label:o}:o; });
+  var sV=allValue;
+  var sel=multi?(Array.isArray(value)?value:[]):value;
+  function isActive(v){ return multi?(v===sV?sel.length===0:sel.indexOf(v)>=0):v===value; }
+  var sentinel=opts.filter(function(o){ return o.value===sV; });
+  var rest=opts.filter(function(o){ return o.value!==sV; }).slice()
+    .sort(function(a,b){ return String(a.label).localeCompare(String(b.label),"es",{numeric:true,sensitivity:"base"}); });
+  var ordered=sentinel.concat(rest);
+  var showSearch=searchable!=null?searchable:opts.length>6;
+  var shown=q?ordered.filter(function(o){ return (String(o.label)+" "+(o.sub||"")).toLowerCase().indexOf(q.toLowerCase())>=0; }):ordered;
+  var triggerLabel;
+  if(multi){
+    triggerLabel=sel.length===0?(sentinel[0]?sentinel[0].label:(placeholder||"")):
+      sel.length===1?((opts.find(function(o){return o.value===sel[0];})||{}).label||""):
+      (sel.length+" "+(placeholder||"seleccionados"));
+  } else {
+    var cur=opts.find(function(o){return o.value===value;}); triggerLabel=cur?cur.label:(placeholder||"");
+  }
+  var activeTrigger=multi?sel.length>0:(sV!=null?value!==sV:!!value);
+  function pick(v){
+    if(!multi){ onChange(v); setOpen(false); setQ(""); return; }
+    if(v===sV){ onChange([]); return; }
+    var next=sel.indexOf(v)>=0?sel.filter(function(x){return x!==v;}):sel.concat(v);
+    onChange(next);
+  }
+  var pop={position:"absolute",top:"calc(100% + 6px)",zIndex:9500,minWidth:minWidth||200,background:"#fff",border:"1px solid "+C.gray,borderRadius:14,boxShadow:"var(--sa-shadow-md)",padding:6,maxHeight:340,display:"flex",flexDirection:"column",animation:"sa-fade .18s var(--sa-ease,ease)"};
+  pop[align]=0;
+  return (
+    <div ref={ref} style={{position:"relative"}}>
+      <button onClick={function(){setOpen(function(o){return !o;});}} style={{display:"inline-flex",alignItems:"center",gap:9,cursor:"pointer",width:"100%",boxSizing:"border-box",justifyContent:"space-between",background:activeTrigger?C.black:"#fff",border:"1px solid "+(activeTrigger?C.black:C.gray),borderRadius:"var(--sa-pill)",padding:"9px 13px",minHeight:40,fontFamily:"Montserrat,sans-serif",fontSize:12,letterSpacing:".02em",color:activeTrigger?"#fff":C.black}}>
+        <span style={{display:"inline-flex",alignItems:"center",gap:8,minWidth:0}}>
+          {icon&&<Icon name={icon} size={14} stroke={activeTrigger?"#fff":C.taupe}/>}
+          <span style={{fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{triggerLabel}</span>
+        </span>
+        <span style={{display:"inline-flex",alignItems:"center",gap:6,flexShrink:0}}>
+          {multi&&sel.length>0&&<span style={{minWidth:17,height:17,padding:"0 5px",borderRadius:"var(--sa-pill)",background:C.peach,color:"#fff",fontSize:9.5,fontWeight:700,display:"inline-flex",alignItems:"center",justifyContent:"center"}}>{sel.length}</span>}
+          <Icon name="chevronDown" size={13} stroke={activeTrigger?"#fff":C.taupe} style={{transform:open?"rotate(180deg)":"none",transition:"transform .18s"}}/>
+        </span>
+      </button>
+      {open&&(
+        <div style={pop}>
+          {showSearch&&(
+            <div style={{padding:"2px 2px 7px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,background:C.surfaceWarm,border:"1px solid "+C.gray,borderRadius:10,padding:"8px 10px"}}>
+                <Icon name="search" size={14} stroke={C.taupe}/>
+                <input autoFocus value={q} onChange={function(e){setQ(e.target.value);}} placeholder={placeholder||"Buscar…"} style={{border:"none",outline:"none",background:"transparent",width:"100%",fontFamily:"Montserrat,sans-serif",fontSize:12.5,color:C.black}}/>
+                {q&&<button onClick={function(){setQ("");}} style={{border:"none",background:"transparent",cursor:"pointer",display:"inline-flex",color:C.taupe}}><Icon name="x" size={13} stroke="currentColor"/></button>}
+              </div>
+            </div>
+          )}
+          <div style={{overflowY:"auto",minHeight:0}}>
+            {shown.map(function(o){
+              var active=isActive(o.value);
+              return (
+                <button key={String(o.value)} onClick={function(){pick(o.value);}} style={{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",border:"none",cursor:"pointer",background:active?C.surfaceWarm:"transparent",borderRadius:10,padding:"10px 11px",fontFamily:"Montserrat,sans-serif",fontSize:12.5,color:C.black}}>
+                  {multi&&o.value!==sV&&(
+                    <span style={{flexShrink:0,width:17,height:17,borderRadius:5,border:"1.5px solid "+(active?C.peach:C.gray),background:active?C.peach:"transparent",display:"inline-flex",alignItems:"center",justifyContent:"center"}}>{active&&<Icon name="check" size={12} stroke="#fff"/>}</span>
+                  )}
+                  {o.sub?(
+                    <span style={{display:"flex",flexDirection:"column",gap:2,minWidth:0}}>
+                      <span style={{fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.label}</span>
+                      <span style={{fontSize:10.5,color:C.taupe}}>{o.sub}</span>
+                    </span>
+                  ):<span style={{fontWeight:active?500:400,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.label}</span>}
+                  {active&&!multi&&<Icon name="check" size={15} stroke={C.peach} style={{marginLeft:"auto"}}/>}
+                </button>
+              );
+            })}
+            {shown.length===0&&<div style={{padding:"14px 12px",textAlign:"center",fontFamily:"Montserrat,sans-serif",fontSize:12,color:C.taupe}}>Sin resultados</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* NIcon — mismo glifo en todos los proyectos: usa el Icon del Design System
    (window.SpacioAMDesignSystem_2c08fe.Icon) y, si el bundle no cargó, cae al
    Icon local. Normaliza props: el Icon local usa stroke/width; el del DS usa
@@ -7796,6 +7942,13 @@ function NIcon(props){
   return React.createElement(Icon,props);
 }
 function fmtRangeShort(ds){ if(!ds) return ""; var p=ds.split("-"); return p[2]+"/"+p[1]; }
+/* Período rápido como píldora (mismo look que PillFilter). Aplica un preset y no
+   guarda selección persistente — como el <select> original que se reseteaba. */
+function PeriodPill({onApply, options}){
+  return <PillFilter icon="calendar" value={undefined} placeholder="Período rápido" searchable={false}
+    options={(options||PRESET_OPTS).map(function(o){return {value:o[0],label:o[1]};})}
+    onChange={function(v){ onApply(v); }}/>;
+}
 function DateRangePicker({from,to,onChange,activeStyle,baseStyle}){
   const [open,setOpen]=useState(false);
   const [month,setMonth]=useState(function(){ return from?new Date(from+"T12:00:00"):new Date(); });
@@ -7811,13 +7964,16 @@ function DateRangePicker({from,to,onChange,activeStyle,baseStyle}){
     else { onChange(from,ds); setOpen(false); }
   }
   var label = from&&to ? fmtRangeShort(from)+" – "+fmtRangeShort(to) : from ? fmtRangeShort(from)+" – …" : "Rango de fechas";
-  var btnStyle = Object.assign({}, (from||to)?(activeStyle||{}):(baseStyle||{}), {display:"flex",alignItems:"center",gap:8,minWidth:150});
+  var active=!!(from||to);
+  var btnStyle = {display:"inline-flex",alignItems:"center",gap:9,cursor:"pointer",width:"100%",boxSizing:"border-box",justifyContent:"space-between",background:active?C.black:"#fff",border:"1px solid "+(active?C.black:C.gray),borderRadius:"var(--sa-pill)",padding:"9px 13px",minHeight:40,fontFamily:"Montserrat,sans-serif",fontSize:12,letterSpacing:".02em",color:active?"#fff":C.black};
   return (
     <div ref={ref} style={{position:"relative"}}>
       <button onClick={function(){setOpen(function(p){return !p;});}} style={btnStyle}>
-        <Icon name="calendar" size={15} stroke={(from||to)?C.black:C.earth}/>
-        <span style={{flex:1,textAlign:"left",color:(from||to)?C.black:C.earth}}>{label}</span>
-        <Icon name="chevronDown" size={13} stroke={C.earth} style={{transform:open?"rotate(180deg)":"none",transition:"transform .18s"}}/>
+        <span style={{display:"inline-flex",alignItems:"center",gap:8,minWidth:0}}>
+          <Icon name="calendar" size={14} stroke={active?"#fff":C.taupe}/>
+          <span style={{fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{label}</span>
+        </span>
+        <Icon name="chevronDown" size={13} stroke={active?"#fff":C.taupe} style={{transform:open?"rotate(180deg)":"none",transition:"transform .18s"}}/>
       </button>
       {open&&(
         <div style={{position:"absolute",top:"calc(100% + 8px)",left:0,zIndex:80,background:"#fff",border:"1px solid "+C.line,borderRadius:16,boxShadow:"var(--sa-shadow-md)",padding:14,width:268}}>
@@ -7901,17 +8057,34 @@ function HeaderFeedback({vendor, onSaveFeedback, isMobile}) {
 function AusenciaHoyModal({aus, schedules, vendors, onClose, onApply}){
   const [aEmail,setAEmail] = useState("");
   var hoy=SCHED.hoyGT();
-  var afectadas=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===hoy && String(s.vendorEmail||"").toLowerCase()===String(aus.vendorEmail||"").toLowerCase() && s.estado!=="cancelada"; })
+  /* La fecha de la ausencia (para hoy o para un día documentado próximo). */
+  var dia=String(aus.fecha||"").slice(0,10)||hoy;
+  var esHoy=dia===hoy;
+  var afectadas=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===dia && String(s.vendorEmail||"").toLowerCase()===String(aus.vendorEmail||"").toLowerCase() && s.estado!=="cancelada"; })
     .sort(function(a,b){ return (a.orden||0)-(b.orden||0); });
   var opciones=schedTecnicos(vendors).filter(function(v){ return String(v.email||"").toLowerCase()!==String(aus.vendorEmail||"").toLowerCase() && v.active!==false; });
+  /* Carga de ese día por técnico: cuántas limpiezas tiene y en qué propiedades,
+     para mostrarlo en cada opción del desplegable y elegir con criterio. */
+  var cargaHoy={};
+  (schedules||[]).forEach(function(s){
+    if(String(s.fecha).slice(0,10)!==dia || s.estado==="cancelada") return;
+    var e=String(s.vendorEmail||"").toLowerCase(); if(!e) return;
+    (cargaHoy[e]||(cargaHoy[e]=[])).push(s.propiedad||"");
+  });
+  function etiquetaTecnico(v){
+    var props=cargaHoy[String(v.email||"").toLowerCase()]||[];
+    var base=vendorDisplay(v);
+    if(!props.length) return base+" — sin limpiezas ese día";
+    return base+" — "+props.length+" limpieza"+(props.length===1?"":"s")+": "+props.join(", ");
+  }
   var listo=!!aEmail;
   return (
     <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:9400,background:"rgba(62,63,63,.55)",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
       <div onClick={function(e){e.stopPropagation();}} style={{width:"100%",maxWidth:440,background:"#fff",borderRadius:28,padding:"26px 24px",boxShadow:"var(--sa-shadow-lg)",maxHeight:"88vh",overflowY:"auto"}}>
-        <div style={{fontSize:9.5,fontWeight:700,color:C.attentionText,letterSpacing:".18em",textTransform:"uppercase"}}>Ausencia de hoy</div>
-        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:24,fontWeight:400,color:C.black,marginTop:6,lineHeight:1.2}}>{aus.vendorNombre||"Un técnico"} no puede hoy</div>
+        <div style={{fontSize:9.5,fontWeight:700,color:C.attentionText,letterSpacing:".18em",textTransform:"uppercase"}}>{esHoy?"Ausencia de hoy":"Ausencia documentada"}</div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:24,fontWeight:400,color:C.black,marginTop:6,lineHeight:1.2}}>{aus.vendorNombre||"Un técnico"} no puede {esHoy?"hoy":"el "+fmtDate(dia)}</div>
         <div style={{fontSize:12.5,color:C.earth,marginTop:8,lineHeight:1.6,textWrap:"pretty"}}>
-          {aus.motivo?("Motivo: "+aus.motivo+". "):""}Tiene {afectadas.length} limpieza{afectadas.length===1?"":"s"} para hoy. Elige quién las cubre.
+          {aus.motivo?("Motivo: "+aus.motivo+". "):""}Tiene {afectadas.length} limpieza{afectadas.length===1?"":"s"} {esHoy?"para hoy":"ese día"}. Elige quién las cubre.
         </div>
         <div style={{margin:"16px 0",display:"flex",flexDirection:"column",gap:7}}>
           {afectadas.map(function(sc,i){
@@ -7930,7 +8103,7 @@ function AusenciaHoyModal({aus, schedules, vendors, onClose, onApply}){
         <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:7}}>¿Quién las cubre hoy?</div>
         <select value={aEmail} onChange={function(e){setAEmail(e.target.value);}} style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:14,padding:"12px 13px",fontSize:13,fontFamily:"Montserrat,sans-serif",background:"#fff",outline:"none",minHeight:46}}>
           <option value="">Selecciona un técnico…</option>
-          {opciones.map(function(v){ return <option key={v.email} value={String(v.email).toLowerCase()}>{vendorDisplay(v)}</option>; })}
+          {opciones.map(function(v){ return <option key={v.email} value={String(v.email).toLowerCase()}>{etiquetaTecnico(v)}</option>; })}
         </select>
         <div style={{display:"flex",gap:9,marginTop:18,flexWrap:"wrap"}}>
           <button disabled={!listo} onClick={function(){ onApply(aus, aEmail, afectadas); }} style={{flex:1,minWidth:160,padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:listo?C.black:C.gray,color:listo?"#fff":C.taupe,fontSize:12.5,fontWeight:700,cursor:listo?"pointer":"not-allowed",fontFamily:"Montserrat,sans-serif"}}>Asignar y avisar</button>
@@ -8172,22 +8345,85 @@ function NotiToast({item, onOpen, onClose}){
   function tStart(e){ startY.current=e.touches&&e.touches[0]?e.touches[0].clientY:null; dragging.current=true; }
   function tMove(e){ if(startY.current==null) return; var y=e.touches&&e.touches[0]?e.touches[0].clientY:null; if(y==null) return; setDy(Math.min(0,y-startY.current)); }
   function tEnd(){ if(startY.current==null) return; var v=dy; startY.current=null; dragging.current=false; if(v<-36){ setShow(false); setDy(0); setTimeout(onClose,300); } else { setDy(0); } }
-  return (
+  /* Vidrio esmerilado estilo iOS 26 (Liquid Glass), portado de mi-spacioam:
+     panel translúcido claro + rim especular + textura de ruido; ícono en tile
+     peach con el sparkle de marca. */
+  var GLASS="data:image/svg+xml;utf8,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="180" height="180"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="100%" height="100%" filter="url(#n)" opacity="0.55"/></svg>');
+  var node=(
     <div onClick={function(){ if(dy) return; onOpen&&onOpen(); setShow(false); setTimeout(onClose,200); }}
       onTouchStart={tStart} onTouchMove={tMove} onTouchEnd={tEnd}
-      style={{position:"fixed",top:"max(12px,env(safe-area-inset-top))",left:"50%",width:"calc(100% - 24px)",maxWidth:400,zIndex:400,cursor:"pointer",touchAction:"pan-x",transform:"translateX(-50%) translateY("+(show?dy+"px":"-150%")+")",opacity:show?1:0,transition:dragging.current?"opacity .3s":"transform .4s cubic-bezier(0.22,0.61,0.36,1),opacity .3s cubic-bezier(0.22,0.61,0.36,1)"}}>
-      <div style={{display:"flex",alignItems:"flex-start",gap:12,borderRadius:22,padding:"13px 16px",background:"rgba(58,58,60,.52)",backdropFilter:"blur(40px) saturate(180%) brightness(1.08)",WebkitBackdropFilter:"blur(40px) saturate(180%) brightness(1.08)",transform:"translateZ(0)",willChange:"backdrop-filter",border:"1px solid "+W+".14)",boxShadow:"0 18px 50px rgba(0,0,0,.35),inset 0 1px 0 "+W+".45),inset 0 0 0 1px "+W+".07)"}}>
-        <div style={{flexShrink:0,width:30,height:30,borderRadius:9,background:C.peach,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="alert" size={17} stroke="#fff"/></div>
+      style={{position:"fixed",top:"max(12px,env(safe-area-inset-top))",left:"50%",width:"calc(100% - 24px)",maxWidth:400,zIndex:9600,cursor:"pointer",touchAction:"pan-x",borderRadius:22,overflow:"hidden",isolation:"isolate",background:"linear-gradient(135deg,rgba(255,255,255,.18),rgba(248,247,245,.08))",backdropFilter:"blur(14px) saturate(210%)",WebkitBackdropFilter:"blur(14px) saturate(210%)",border:"1px solid rgba(255,255,255,.45)",boxShadow:"0 22px 55px rgba(62,63,63,.22),inset 0 1px 0 rgba(255,255,255,.7),inset 0 0 0 1px rgba(255,255,255,.15)",willChange:"transform",transform:"translateX(-50%) translateY("+(show?dy+"px":"-150%")+")",opacity:show?1:0,transition:dragging.current?"opacity .3s":"transform .4s cubic-bezier(0.22,0.61,0.36,1),opacity .3s cubic-bezier(0.22,0.61,0.36,1)"}}>
+      <div style={{position:"absolute",inset:0,backgroundImage:"url(\""+GLASS+"\")",backgroundSize:"160px 160px",opacity:.12,mixBlendMode:"soft-light",pointerEvents:"none"}}/>
+      <div style={{position:"absolute",top:0,left:0,right:0,height:"55%",background:"linear-gradient(180deg,rgba(255,255,255,.22),rgba(255,255,255,0))",pointerEvents:"none"}}/>
+      <div style={{position:"relative",display:"flex",alignItems:"flex-start",gap:12,padding:"13px 16px"}}>
+        <div style={{flexShrink:0,width:38,height:38,borderRadius:11,background:"linear-gradient(150deg,#F2926F,#E9826A 55%,#DE6F55)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 4px 12px rgba(233,130,106,.35),inset 0 1px 0 rgba(255,255,255,.5),inset 0 -1px 2px rgba(140,60,45,.3)"}}>{(function(){var ns=(typeof window!=="undefined")&&window.SpacioAMDesignSystem_2c08fe;if(ns&&ns.Sparkle)return React.createElement(ns.Sparkle,{size:20,color:"#fff"});return React.createElement("svg",{width:20,height:20,viewBox:"0 0 24 24",fill:"#fff","aria-hidden":"true"},React.createElement("path",{d:"M12 1.6c.5 4.9 3.9 8.3 8.8 8.4-4.9.5-8.3 3.9-8.8 8.8-.5-4.9-3.9-8.3-8.8-8.8 4.9-.1 8.3-3.5 8.8-8.4z"}));})()}</div>
         <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:9,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",color:W+".6)",marginBottom:2}}>Spacio AM · ahora</div>
-          <div style={{fontSize:13.5,color:W+".98)",lineHeight:1.35,textWrap:"pretty"}}>{item.texto}</div>
-          {item.contexto&&<div style={{fontSize:11.5,color:W+".68)",marginTop:2,lineHeight:1.4}}>{item.contexto}</div>}
+          <div style={{fontSize:9,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",color:"var(--fg-muted,#6F6867)",marginBottom:2}}>Spacio AM · {epiT("ahora","now")}</div>
+          <div style={{fontSize:13.5,color:"var(--ink,#3E3F3F)",lineHeight:1.35,textWrap:"pretty",fontWeight:600}}>{item.texto}</div>
+          {item.contexto&&<div style={{fontSize:11.5,color:"var(--fg-muted,#6F6867)",marginTop:2,lineHeight:1.4}}>{item.contexto}</div>}
         </div>
       </div>
     </div>
   );
+  return (window.ReactDOM&&window.ReactDOM.createPortal)?window.ReactDOM.createPortal(node,document.body):node;
 }
-function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, configActive, role, sheetsOk, adminLabel, feedbackVendor, onSaveFeedback, wifiProps, wifiVendor}) {
+/* ═══ Menú de usuario — círculo de perfil en la esquina superior derecha ═══
+   Portado del header de mi-spacioam. Reúne "Mi cuenta", "Configuración" (solo
+   admin) y "Cerrar sesión"; el círculo es su único lugar. Sin foto → iniciales.
+   El símbolo de Wi-Fi queda fuera, como su propio botón del header. */
+function UserMenu({userName, userEmail, userAvatar, isAdmin, canAccount, onAccount, onSetup, onLogout, compact}){
+  const [open,setOpen]=useState(false);
+  const ref=useRef(null);
+  var prefs=useEPIPrefs();
+  useEffect(function(){
+    function h(e){ if(ref.current&&!ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown",h);
+    return function(){ document.removeEventListener("mousedown",h); };
+  },[]);
+  var item={display:"flex",alignItems:"center",gap:11,width:"100%",border:"none",background:"transparent",cursor:"pointer",textAlign:"left",padding:"13px 15px",fontFamily:"Montserrat,sans-serif",fontSize:12.5,letterSpacing:".04em",color:C.black};
+  var sz=compact?36:40;
+  /* Control Segmented (dos píldoras) para las preferencias del menú. */
+  function PrefSeg(props){
+    return (
+      <span style={{display:"inline-flex",padding:3,background:C.surfaceWarm,borderRadius:"var(--sa-pill)",gap:2}}>
+        {props.options.map(function(o){ var on=o[0]===props.value; return (
+          <button key={o[0]} onClick={function(){ props.onChange(o[0]); }} style={{border:"none",cursor:"pointer",padding:"6px 13px",borderRadius:"var(--sa-pill)",fontFamily:"Montserrat,sans-serif",fontSize:10.5,fontWeight:600,letterSpacing:".12em",textTransform:"uppercase",background:on?C.black:"transparent",color:on?"#fff":C.taupe,transition:"all .18s"}}>{o[1]}</button>
+        ); })}
+      </span>
+    );
+  }
+  function PrefRow(props){
+    return (
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+        <span style={{fontFamily:"Montserrat,sans-serif",fontSize:10.5,letterSpacing:".2em",textTransform:"uppercase",color:C.taupe}}>{props.label}</span>
+        {props.children}
+      </div>
+    );
+  }
+  return (
+    <div ref={ref} style={{position:"relative",flexShrink:0}}>
+      <button onClick={function(){setOpen(function(o){return !o;});}} aria-label="Cuenta" title={userName||"Cuenta"} style={{width:sz,height:sz,minWidth:sz,boxSizing:"border-box",borderRadius:"50%",overflow:"hidden",border:"1px solid "+C.line,background:C.surfaceWarm,cursor:"pointer",padding:0,display:"grid",placeItems:"center",color:C.earth,lineHeight:1}}>
+        {userAvatar?<img src={userAvatar} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>:<Icon name="user" size={compact?18:19} stroke={C.earth}/>}
+      </button>
+      {open&&(
+        <div style={{position:"absolute",top:"calc(100% + 8px)",right:0,zIndex:9500,minWidth:248,background:"#fff",border:"1px solid "+C.line,borderRadius:16,boxShadow:"var(--sa-shadow-md)",overflow:"hidden",animation:"sa-fade .18s var(--sa-ease,ease)"}}>
+          <div style={{padding:"13px 15px",borderBottom:"1px solid "+C.line}}>
+            <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:18,color:C.black,lineHeight:1.15}}>{userName||"Cuenta"}</div>
+            {userEmail&&<div style={{fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".05em",color:C.taupe,marginTop:3,wordBreak:"break-all"}}>{userEmail}</div>}
+          </div>
+          {canAccount&&<button style={item} onClick={function(){setOpen(false);onAccount&&onAccount();}} onMouseEnter={function(e){e.currentTarget.style.background=C.surfaceWarm;}} onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}><Icon name="user" size={16} stroke={C.earth}/>{epiT("Mi cuenta","My account")}</button>}
+          {isAdmin&&onSetup&&<button style={item} onClick={function(){setOpen(false);onSetup&&onSetup();}} onMouseEnter={function(e){e.currentTarget.style.background=C.surfaceWarm;}} onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}><Icon name="grid" size={16} stroke={C.earth}/>{epiT("Configuración","Settings")}</button>}
+          <div style={{padding:"14px 15px",display:"flex",flexDirection:"column",gap:12,borderTop:"1px solid "+C.line,borderBottom:"1px solid "+C.line}}>
+            <PrefRow label={epiT("Moneda","Currency")}><PrefSeg value={prefs.currency} onChange={function(v){ EPIPrefs.set({currency:v}); }} options={[["GTQ","GTQ"],["USD","USD"]]}/></PrefRow>
+            <PrefRow label={epiT("Idioma","Language")}><PrefSeg value={prefs.lang} onChange={function(v){ EPIPrefs.set({lang:v}); }} options={[["es","ES"],["en","EN"]]}/></PrefRow>
+          </div>
+          <button style={item} onClick={function(){setOpen(false);onLogout&&onLogout();}} onMouseEnter={function(e){e.currentTarget.style.background=C.surfaceWarm;}} onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}><Icon name="logout" size={16} stroke={C.earth}/>{epiT("Cerrar sesión","Log out")}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, configActive, role, sheetsOk, adminLabel, feedbackVendor, onSaveFeedback, wifiProps, wifiVendor, userName, userEmail, userAvatar, isAdmin, canAccount, onAccount, onSetup}) {
   var sc = useScreen();
   var isMobile = sc.mobile;
   const [notiOpen,setNotiOpen] = useState(false);
@@ -8242,16 +8478,11 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
   return (
     <>
       {/* Top bar */}
-      <header style={{background:"#fff",height:isMobile?54:62,display:"flex",alignItems:"center",justifyContent:"space-between",gap:isMobile?8:12,padding:isMobile?"0 16px":"0 24px",position:"sticky",top:0,zIndex:50,borderBottom:"1px solid "+C.line}}>
+      <header style={{background:"rgba(250,250,250,0.82)",backdropFilter:"blur(20px) saturate(120%)",WebkitBackdropFilter:"blur(20px) saturate(120%)",height:isMobile?54:62,display:"flex",alignItems:"center",justifyContent:"space-between",gap:isMobile?8:12,padding:isMobile?"0 16px":"0 24px",position:"sticky",top:0,zIndex:50,borderBottom:"1px solid "+C.line}}>
         {/* Logo */}
         <div style={{display:"flex",alignItems:"center",minWidth:0,gap:isMobile?8:12}}>
-          <img src={LOGO_STAMP} alt="Spacio AM" style={{width:isMobile?38:44,height:isMobile?38:44,objectFit:"contain",display:"block",flexShrink:0}}/>
+          <img src="logo-wordmark.png?v=1" alt="Spacio AM" style={{height:isMobile?26:32,width:"auto",objectFit:"contain",display:"block",flexShrink:0}}/>
           {IS_CLAUDE_SANDBOX&&<span style={{fontSize:9,fontWeight:700,background:"#F0EDE8",color:"#938B8A",padding:"2px 6px",borderRadius:4,letterSpacing:".08em",display:isMobile?"none":"block"}}>LOCAL</span>}
-          
-          {!isMobile&&<div style={{width:1,height:20,background:C.line,margin:"0 6px"}}/>}
-          {!isMobile&&<span style={{fontSize:11,color:C.taupe,letterSpacing:".06em",minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{adminLabel||role}</span>}
-          {sheetsOk===false&&!compacto&&<span style={{fontSize:9,fontWeight:700,background:"#F7E7E4",color:C.red,padding:"2px 6px",borderRadius:4,letterSpacing:".06em"}}>SIN SHEETS</span>}
-          {sheetsOk===true&&!compacto&&<span style={{fontSize:9,fontWeight:700,background:"#E8F2ED",color:C.green,padding:"2px 6px",borderRadius:4,letterSpacing:".06em"}}>● SHEETS</span>}
           {/* Antes iban tres píldoras de alerta sueltas; ahora un solo triángulo
               con el total abre el centro de notificaciones. Solo aparece si hay
               algo pendiente. */}
@@ -8269,18 +8500,20 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
 
         {/* Desktop nav */}
         {!isMobile&&(
-          <nav style={{display:"flex",flexShrink:0,background:C.surfaceWarm,borderRadius:"var(--sa-pill)",padding:3,gap:2,border:"1px solid "+C.line}}>
+          <nav style={{display:"flex",alignItems:"center",flexShrink:0,boxSizing:"border-box",height:40,background:C.surfaceWarm,borderRadius:"var(--sa-pill)",padding:"0 3px",gap:2,border:"1px solid "+C.line}}>
             {navItems.map(function(it){ var k=it[0],l=it[1],ic=it[2]; return (
-              <button key={k} title={l} onClick={function(){setTab(k);}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:compacto?0:7,padding:compacto?"0 12px":"0 13px",borderRadius:"var(--sa-pill)",minHeight:44,border:"none",fontSize:11.5,fontWeight:600,letterSpacing:".04em",cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,transition:"all .2s"}}><Icon name={ic} size={compacto?17:15} stroke={tab===k?"#fff":C.taupe}/>{!compacto&&l}</button>
+              <button key={k} title={l} onClick={function(){setTab(k);}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:compacto?0:7,padding:compacto?"0 12px":"0 13px",borderRadius:"var(--sa-pill)",height:32,minHeight:32,border:"none",fontSize:11.5,fontWeight:600,letterSpacing:".04em",cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,transition:"all .2s"}}><Icon name={ic} size={compacto?17:15} stroke={tab===k?"#fff":C.taupe}/>{!compacto&&l}</button>
             ); })}
           </nav>
         )}
 
-        {/* Configuración + Salir */}
-        <div style={{display:"flex",alignItems:"center",flexShrink:0,gap:isMobile?4:8}}>
-          <WifiBtn props={wifiProps||[]} isMobile={compacto} vendorEmail={wifiVendor||""}/>
-          {onConfig&&<button onClick={onConfig} title="Configuración" style={{display:"flex",alignItems:"center",gap:6,background:configActive?C.black:"transparent",border:"1.5px solid "+(configActive?C.black:C.gray),borderRadius:"var(--sa-pill)",color:configActive?"#fff":C.earth,cursor:"pointer",minHeight:44,padding:compacto?"0 11px":"0 15px",fontSize:11.5,fontWeight:600,letterSpacing:".04em"}}><Icon name="settings" size={16} stroke={configActive?"#fff":C.earth}/>{!compacto&&"Configuración"}</button>}
-          <button onClick={onLogout} style={{background:"none",border:"none",color:C.earth,fontSize:isMobile?12:11.5,cursor:"pointer",fontWeight:500,letterSpacing:".04em",padding:"8px 4px"}}>Salir</button>
+        {/* Estado de Sheets (mismo farol del login) pegado al Wi-Fi + menú de usuario */}
+        <div style={{display:"flex",alignItems:"center",flexShrink:0,gap:isMobile?8:10}}>
+          <span style={{display:"inline-flex",alignItems:"center",gap:isMobile?7:9}}>
+            {sheetsOk!=null&&<SheetsDot ok={sheetsOk}/>}
+            <WifiBtn props={wifiProps||[]} isMobile={isMobile} vendorEmail={wifiVendor||""}/>
+          </span>
+          <UserMenu userName={userName||adminLabel||role} userEmail={userEmail} userAvatar={userAvatar} isAdmin={isAdmin} canAccount={canAccount} onAccount={onAccount} onSetup={onSetup} onLogout={onLogout} compact={isMobile}/>
         </div>
       </header>
 
@@ -10275,9 +10508,12 @@ function DiaDoblePanel({schedules, reps, vendors, onUpsert, hoy, onAviso, onLog}
   const [fd,setFd]           = useState("");
   const [sel,setSel]         = useState({});
 
+  /* Un ajuste que YA es "día doble" (segunda limpieza del mismo día) no se puede
+     doblar otra vez: sería un doble día doble. Se excluye de los doblables. */
+  function esYaDiaDoble(r){ return String(r.categoria||"")==="Ajuste" && /d[ií]a doble|segunda limpieza/i.test(ajusteTrabajoDe(r)||""); }
   var repsDia = React.useMemo(function(){
     if(!fd) return [];
-    return (reps||[]).filter(function(r){ return DOBLE_CATS.indexOf(String(r.categoria||""))>=0 && String(r.fecha||"").slice(0,10)===fd; })
+    return (reps||[]).filter(function(r){ return DOBLE_CATS.indexOf(String(r.categoria||""))>=0 && String(r.fecha||"").slice(0,10)===fd && !esYaDiaDoble(r); })
       .sort(function(a,b){ return String(a.propiedad||"").localeCompare(String(b.propiedad||""),"es",{numeric:true}); });
   },[reps,fd]);
   var schedDia = React.useMemo(function(){
@@ -10482,7 +10718,7 @@ function DiaDoblePanel({schedules, reps, vendors, onUpsert, hoy, onAviso, onLog}
   );
 }
 
-function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, schedErr, onUpsert}) {
+function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, schedErr, onUpsert, onReasignar}) {
   /* Abre en HOY: la ruta que el equipo está corriendo ahora mismo es la que el
      administrador necesita ver al entrar, no la de mañana. */
   const [dia,      setDia]      = useState(0);      /* 0 = hoy, 1 = mañana, … */
@@ -10508,6 +10744,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   const [accion,   setAccion]   = useState(null);   /* limpieza con sus acciones abiertas */
   const [asigSel,  setAsigSel]  = useState({});     /* técnico elegido para cada checkout pendiente */
   const [cancelar, setCancelar] = useState(null);   /* limpieza que el admin está cancelando */
+  const [docAbierto,setDocAbierto]= useState(false); /* bloque "ausencias documentadas" — minimizado por defecto */
 
   /* Si el administrador toca un día que ya salió por correo, el equipo tiene una
      versión vieja. Se marca para ofrecer el reenvío — nunca se manda solo. */
@@ -11161,35 +11398,47 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
       {/* Ausencias documentadas — ya no se autorizan, solo quedan registradas.
           El técnico con ausencia ese día no recibe ruta (el motor lo excluye). */}
       {(function(){
-        var docs=(ausencias||[]).filter(function(a){ return a && a.estado!=="rechazada" && String(a.fecha||"")>=SCHED.shift(hoy,-45); })
-          .sort(function(a,b){ return String(b.fecha).localeCompare(String(a.fecha)); });
+        /* Ayer, hoy y cualquier día posterior a hoy. */
+        var ayer=SCHED.shift(hoy,-1);
+        var docs=(ausencias||[]).filter(function(a){ var f=String(a.fecha||"").slice(0,10); return a && a.estado!=="rechazada" && f>=ayer; })
+          .sort(function(a,b){ return String(a.fecha).localeCompare(String(b.fecha)); });
         if(!docs.length) return null;
-        var EST={por_asignar:["Por reasignar hoy",C.attentionText],aplicada:["Reasignada",C.green],aprobada:["Reasignada",C.green]};
+        var EST={por_asignar:["Por reasignar",C.attentionText],aplicada:["Reasignada",C.green],aprobada:["Reasignada",C.green]};
+        function afectDe(a){ return (schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===String(a.fecha).slice(0,10) && String(s.vendorEmail||"").toLowerCase()===String(a.vendorEmail||"").toLowerCase() && s.estado!=="cancelada"; }).length; }
         return (
           <div style={CARD}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,flexWrap:"wrap"}}>
+            <button onClick={function(){setDocAbierto(function(o){return !o;});}} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,flexWrap:"wrap",width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
               <div style={{minWidth:0}}>
                 <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Ausencias documentadas</div>
-                <div style={{fontSize:11,color:C.taupe,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>Ya no se autorizan: quedan registradas y el equipo se reajusta solo. Quien tiene una ausencia ese día no recibe ruta.</div>
+                <div style={{fontSize:11,color:C.taupe,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>Ayer, hoy y en adelante. Toca una que no esté reasignada para elegir quién la cubre.</div>
               </div>
-              <span style={{fontSize:15,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums",flexShrink:0}}>{docs.length}</span>
-            </div>
-            <div style={{display:"flex",flexDirection:"column",gap:7,marginTop:11}}>
-              {docs.slice(0,12).map(function(a){
-                var e=EST[a.estado]||["Registrada",C.earth];
-                var esFut=String(a.fecha).slice(0,10)>=hoy;
-                return (
-                  <div key={a.id} style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",flexWrap:"wrap",background:C.surfaceWarm,borderRadius:9,padding:"9px 12px"}}>
-                    <div style={{minWidth:0}}>
-                      <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{a.vendorNombre||a.vendorEmail}</div>
-                      <div style={{fontSize:11,color:C.earth,marginTop:2,lineHeight:1.5,textWrap:"pretty"}}>{schedDiaNombre(a.fecha)} {fmtDate(a.fecha)}{a.motivo?" · "+a.motivo:""}</div>
+              <span style={{display:"flex",alignItems:"center",gap:9,flexShrink:0}}>
+                <span style={{fontSize:15,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>{docs.length}</span>
+                <span style={{fontSize:11,color:C.taupe}}>{docAbierto?"▴":"▾"}</span>
+              </span>
+            </button>
+            {docAbierto&&(
+              <div style={{display:"flex",flexDirection:"column",gap:7,marginTop:11}}>
+                {docs.map(function(a){
+                  var e=EST[a.estado]||["Registrada",C.earth];
+                  var yaReasignada=a.estado==="aplicada"||a.estado==="aprobada";
+                  var afect=afectDe(a);
+                  var puede=!yaReasignada && afect>0 && !!onReasignar;
+                  return (
+                    <div key={a.id} onClick={puede?function(){onReasignar(a);}:undefined} role={puede?"button":undefined} style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",flexWrap:"wrap",background:C.surfaceWarm,borderRadius:9,padding:"9px 12px",cursor:puede?"pointer":"default",border:puede?"1px solid "+C.line:"1px solid transparent"}}>
+                      <div style={{minWidth:0}}>
+                        <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{a.vendorNombre||a.vendorEmail}</div>
+                        <div style={{fontSize:11,color:C.earth,marginTop:2,lineHeight:1.5,textWrap:"pretty"}}>{schedDiaNombre(a.fecha)} {fmtDate(a.fecha)}{a.motivo?" · "+a.motivo:""}{!yaReasignada&&afect>0?" · "+afect+" limpieza"+(afect===1?"":"s")+" a reasignar":""}</div>
+                      </div>
+                      <span style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,marginTop:2}}>
+                        <span style={{fontSize:9,fontWeight:700,color:e[1],letterSpacing:".08em",textTransform:"uppercase",whiteSpace:"nowrap"}}>{yaReasignada?e[0]:"Por reasignar"}</span>
+                        {puede&&<span style={{fontSize:12,color:C.taupe}}>→</span>}
+                      </span>
                     </div>
-                    <span style={{fontSize:9,fontWeight:700,color:e[1],letterSpacing:".08em",textTransform:"uppercase",whiteSpace:"nowrap",marginTop:2}}>{esFut&&(a.estado==="pendiente")?"Registrada":e[0]}</span>
-                  </div>
-                );
-              })}
-              {docs.length>12&&<div style={{fontSize:10.5,color:C.taupe,textAlign:"center"}}>y {docs.length-12} más</div>}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
       })()}
@@ -11291,14 +11540,15 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
         </div>
       )}
 
-      {/* Selector de día — ayer · hoy · mañana, y luego “Ir a” (por defecto pasado mañana) */}
+      {/* Selector de día — ayer · hoy · mañana, y luego “Ir a” (por defecto pasado mañana).
+          En móvil el grupo de días llena la fila y “Ir a” baja a una fila propia. */}
       <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-        <div style={{display:"flex",gap:6,flex:1,minWidth:0}}>
+        <div style={{display:"flex",gap:6,flex:"1 1 260px",minWidth:0}}>
           {[-1,0,1].map(function(n){
             var fx=SCHED.shift(hoy,n), sel=dia===n;
             var cnt=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===fx; }).length;
             return (
-              <button key={n} onClick={function(){setDia(n);}} style={{flexShrink:0,padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer"}}>
+              <button key={n} onClick={function(){setDia(n);}} style={{flex:1,minWidth:0,padding:"0 8px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap"}}>
                 {n===-1?"Ayer":n===0?"Hoy":"Mañana"}
                 {cnt>0&&<span style={{marginLeft:6,opacity:.65,fontVariantNumeric:"tabular-nums"}}>{cnt}</span>}
               </button>
@@ -11306,9 +11556,9 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           })}
         </div>
         {/* Ir a un día específico — por defecto pasado mañana */}
-        <label style={{display:"flex",alignItems:"center",gap:7,flexShrink:0}}>
-          <span style={{fontSize:9.5,fontWeight:700,color:dia>1?C.black:C.earth,letterSpacing:".1em",textTransform:"uppercase"}}>Ir a</span>
-          <input type="date" value={dia>1?fecha:SCHED.shift(hoy,2)} onChange={function(e){ if(e.target.value) setDia(SCHED.dias(hoy,e.target.value)); }} style={{fontSize:12,padding:"9px 11px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(dia>1?C.black:C.gray),fontFamily:"Montserrat,sans-serif",color:C.black,background:"#fff"}}/>
+        <label style={{display:"flex",alignItems:"center",gap:7,flex:"1 1 200px",minWidth:0}}>
+          <span style={{fontSize:9.5,fontWeight:700,color:dia>1?C.black:C.earth,letterSpacing:".1em",textTransform:"uppercase",flexShrink:0}}>Ir a</span>
+          <input type="date" value={dia>1?fecha:SCHED.shift(hoy,2)} onChange={function(e){ if(e.target.value) setDia(SCHED.dias(hoy,e.target.value)); }} style={{flex:1,minWidth:0,boxSizing:"border-box",fontSize:12,padding:"9px 11px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(dia>1?C.black:C.gray),fontFamily:"Montserrat,sans-serif",color:C.black,background:"#fff"}}/>
         </label>
       </div>
 
@@ -12279,9 +12529,7 @@ function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos
       )}
 
       {/* Vendor filter */}
-      <select value={selVend} onChange={function(e){setSelVend(e.target.value);}} style={IS}>
-        {techOptsQA.map(function(o){return <option key={o.value} value={o.value}>{o.label}</option>;})}
-      </select>
+      <PillFilter icon="user" value={selVend} allValue="Todos" placeholder="Buscar técnico…" minWidth={220} options={techOptsQA} onChange={function(v){setSelVend(v);}}/>
 
       {/* List */}
       {filtered.length===0&&<div style={{textAlign:"center",padding:"32px",color:C.taupe,fontSize:13}}>Sin limpiezas en esta categoría.</div>}
@@ -13858,10 +14106,7 @@ function pg_persist(list, opts){
   }
   return true;
 }
-function pgMoney(n){
-  var v=Math.round((n||0)*100)/100, d=(v*100)%100===0?0:2;
-  return "Q"+v.toLocaleString("es-GT",{minimumFractionDigits:d,maximumFractionDigits:2});
-}
+function pgMoney(n){ return epiMoney(n); }
 /* Igual que pgMoney pero sin el símbolo (para etiquetas que ya lo llevan). */
 function advQ(n){ return pgMoney(n).slice(1); }
 function pgFolio(list){
@@ -16158,7 +16403,7 @@ function StatsSummary({heroLabel, heroValue, heroGreen, enCursoCount, enCursoMon
           {enCursoMonto>0&&(
             <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",paddingRight:12,borderRight:"1px solid "+C.line}}>
               <span style={{fontSize:8.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:2}}>En curso</span>
-              <span style={{fontSize:15,fontWeight:700,color:C.black}}>Q{Math.round(enCursoMonto).toLocaleString()}</span>
+              <span style={{fontSize:15,fontWeight:700,color:C.black}}>{epiMoney(Math.round(enCursoMonto))}</span>
               <span style={{fontSize:9.5,color:C.earth}}>{enCursoCount} trab. · aún no pagable</span>
             </div>
           )}

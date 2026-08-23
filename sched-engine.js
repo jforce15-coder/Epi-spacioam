@@ -599,7 +599,7 @@
         var zc = zonaKey(cnd.zona), nn = [], sc = 0;
         if (tr.pref.indexOf(zc) >= 0) { sc += 14; nn.push("zona de preferencia"); }
         if (cnd.entradaHoy) sc += 12;
-        sc -= travelMin(tr.base, cnd) * 0.5;
+        sc -= travelMin(tr.base, cnd) * 1.1;
         if (tr.rot.total >= 5 && zc) {
           var shZ = (tr.rot.porZona[zc] || 0) / tr.rot.total;
           if (shZ > 0.45) { sc -= Math.min(26, (shZ - 0.45) * 70); nn.push("rotación de zona"); }
@@ -739,16 +739,23 @@
       if (!z || t.zonas.indexOf(z) < 0) continue;
 
       /* Agrupación geográfica de la ruta del día: juntar paradas es lo que ahorra
-         traslado, así que pesa más que la preferencia. */
-      if (!primera && prev.edificio && lim.edificio && norm(prev.edificio) === norm(lim.edificio)) { s += 40; notas.push("mismo edificio"); }
-      else if (!primera && zonaKey(prev.zona) === z && z) { s += 26; notas.push("misma zona"); }
+         traslado — es la prioridad. Mismo edificio es el ideal; misma zona, lo
+         siguiente. Los bonos son fuertes para que el rating y la rotación no
+         manden a nadie a cruzar la ciudad por una limpieza suelta. */
+      if (!primera && prev.edificio && lim.edificio && norm(prev.edificio) === norm(lim.edificio)) { s += 70; notas.push("mismo edificio"); }
+      else if (!primera && zonaKey(prev.zona) === z && z) { s += 46; notas.push("misma zona"); }
+      else if (!primera) {
+        /* Sacar al técnico de la zona donde ya está trabajando cuesta: se penaliza
+           según lo lejos que quede, para no romper una ruta compacta. */
+        s -= 22; notas.push("fuera de su ruta de hoy");
+      }
 
       /* La preferencia da prioridad DENTRO de sus zonas, sin volverse jaula: el
          bono es moderado para que la rotación pueda ganarle. */
       if (t.pref.indexOf(z) >= 0) { s += 14; notas.push("zona de preferencia"); }
       else { s += 6; notas.push("zona asignada"); }
 
-      s -= viaje * 0.5;
+      s -= viaje * 1.1;
 
       /* Rating de las últimas 5 semanas. */
       s += t.rating * ctx.pesoRating * 34;
