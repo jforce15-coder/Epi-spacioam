@@ -107,6 +107,7 @@
     step("recharts",function(){return !!window.Recharts;}),
     step("babel",function(){return !!window.Babel;}),
     plain(DS),
+    plain("sa-auth-client.js?v=1"),
     plain("sched-engine.js?v=20260801rondas")
   ],function(){
     if(!window.React||!window.ReactDOM){ fatal("No cargaron las librer\u00edas (React)."); return; }

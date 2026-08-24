@@ -2144,17 +2144,88 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
   const [adminErr, setAdminErr] = useState("");
   const [showAdmin,setShowAdmin]= useState(false);
   const [lang,     setLang]     = useState("es");
+  const [busy,     setBusy]     = useState(false);
+  /* Primer ingreso vía Control de usuarios: define contraseña inicial. */
+  const [initEmail,setInitEmail]= useState("");
+  const [np1,      setNp1]      = useState("");
+  const [np2,      setNp2]      = useState("");
   const L = function(es,en){ return lang==="es"?es:en; };
 
-  function loginUser() {
+  /* Ubica el registro completo del técnico (agenda, zonas, etc.) por correo. */
+  function matchVendor(mail){
+    var m=String(mail||"").toLowerCase().trim();
+    return (vendors||[]).find(function(x){ var em=String(x.email||"").toLowerCase(); return em===m || em.split("@")[0]===m || (x.prevEmails||[]).some(function(o){return String(o||"").toLowerCase()===m;}); });
+  }
+  /* Cierra sesión con perfil de Control de usuarios ya resuelto. */
+  function finalizeSA(profile, mail){
+    var epiRole = (global_SAAuth().roleFor(profile,"epi")||"").toString().toLowerCase();
+    if(!epiRole){ setErr(L("No tienes acceso a la app EPI.","You don't have access to the EPI app.")); return; }
+    var v = matchVendor((profile&&profile.email)||mail);
+    var isAdmin = epiRole==="admin"||epiRole==="administrador"||epiRole==="principal"||epiRole==="secundario"||(v&&v.isAdmin);
+    if(v){
+      if(isAdmin) v=Object.assign({},v,{isAdmin:true});
+      onLogin({role:isAdmin?"admin":"vendor",vendor:v,profile:profile,saEmail:(profile&&profile.email)||mail});
+    } else if(isAdmin){
+      onLogin({role:"admin",profile:profile,saEmail:(profile&&profile.email)||mail});
+    } else {
+      setErr(L("Tu usuario no está en la lista del equipo EPI. Avisa al administrador.","Your user isn't in the EPI team list. Contact the admin."));
+    }
+  }
+  function global_SAAuth(){ return (typeof window!=="undefined" && window.SAAuth) ? window.SAAuth : null; }
+  /* Respaldo local (sin conexión al Control de usuarios): valida contra la hoja. */
+  function loginLocal(){
     var input = email.toLowerCase().trim();
-    var v = vendors.find(function(x){
-      var em = x.email.toLowerCase();
+    var v = (vendors||[]).find(function(x){
+      var em = String(x.email||"").toLowerCase();
       var user = em.split("@")[0];
       return (em===input||user===input) && x.password===pass && x.active;
     });
-    if (v) onLogin({role:v.isAdmin?"admin":"vendor",vendor:v});
-    else setErr(L("Correo o contraseña incorrectos.","Wrong email or password."));
+    if (v) { onLogin({role:v.isAdmin?"admin":"vendor",vendor:v}); return true; }
+    return false;
+  }
+
+  function loginUser() {
+    if(busy) return;
+    setErr("");
+    var SA=global_SAAuth();
+    if(!SA){ if(!loginLocal()) setErr(L("Correo o contraseña incorrectos.","Wrong email or password.")); return; }
+    setBusy(true);
+    SA.login(email.trim(), pass).then(function(res){
+      res=res||{};
+      /* El backend pide definir la contraseña inicial. */
+      if(res.needsInitialPassword||res.initial||res.mustSetPassword||res.code==="INITIAL"||res.reason==="initial"){
+        setInitEmail(email.trim()); setBusy(false); return;
+      }
+      if(res.ok){
+        var profile=res.profile||res.user||res.data||res;
+        finalizeSA(profile, email.trim()); setBusy(false); return;
+      }
+      /* Falló el servicio: intenta respaldo local antes de dar error. */
+      setBusy(false);
+      if(!loginLocal()) setErr((res.error&&res.message)||L("Correo o contraseña incorrectos.","Wrong email or password."));
+    }).catch(function(){
+      setBusy(false);
+      if(!loginLocal()) setErr(L("No se pudo conectar. Revisa tu internet e intenta de nuevo.","Couldn't connect. Check your internet and try again."));
+    });
+  }
+  /* Guarda la contraseña inicial en el Control de usuarios y entra. */
+  function submitInitial(){
+    if(busy) return;
+    setErr("");
+    if((np1||"").length<4){ setErr(L("La contraseña debe tener al menos 4 caracteres.","Password must be at least 4 characters.")); return; }
+    if(np1!==np2){ setErr(L("Las contraseñas no coinciden.","Passwords don't match.")); return; }
+    var SA=global_SAAuth(); if(!SA){ setErr(L("Servicio no disponible.","Service unavailable.")); return; }
+    setBusy(true);
+    SA.setInitialPassword(initEmail, np1).then(function(res){
+      res=res||{};
+      if(!res.ok){ setBusy(false); setErr((res.error&&res.message)||L("No se pudo guardar la contraseña.","Couldn't save the password.")); return; }
+      /* Ya con contraseña, entra directo. */
+      SA.login(initEmail, np1).then(function(r2){
+        r2=r2||{}; setBusy(false);
+        if(r2.ok){ var profile=r2.profile||r2.user||r2.data||r2; setInitEmail(""); setNp1(""); setNp2(""); finalizeSA(profile, initEmail); }
+        else setErr((r2.error&&r2.message)||L("Contraseña guardada. Intenta iniciar sesión.","Password saved. Try signing in."));
+      }).catch(function(){ setBusy(false); setInitEmail(""); setErr(L("Contraseña guardada. Intenta iniciar sesión.","Password saved. Try signing in.")); });
+    }).catch(function(){ setBusy(false); setErr(L("No se pudo conectar.","Couldn't connect.")); });
   }
   function loginAdmin() {
     if(adminPin2===adminPin) onLogin({role:"admin"});
@@ -2193,7 +2264,20 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
       <main style={{display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",padding:"48px 24px"}}>
         <div style={{width:"100%",maxWidth:380}}>
           <div style={{display:"flex",justifyContent:"flex-start",marginBottom:30}}><img src={LOGO_WORDMARK} alt="Spacio AM" style={{height:72,width:"auto",display:"block"}}/></div>
-          {!showAdmin?(
+          {initEmail?(
+            <>
+              <div style={{fontFamily:"Montserrat,sans-serif",fontSize:11,fontWeight:500,letterSpacing:".32em",textTransform:"uppercase",color:C.earth,marginBottom:14}}>{L("Primer ingreso","First sign-in")}</div>
+              <h1 style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontWeight:400,fontSize:34,letterSpacing:"-.01em",lineHeight:1.1,color:C.black,margin:0}}>{L("Crea tu contraseña","Create your password")}</h1>
+              <p style={{fontFamily:"Montserrat,sans-serif",fontSize:13.5,letterSpacing:".04em",lineHeight:1.7,color:C.earth,margin:"12px 0 30px"}}>{L("Es tu primer ingreso con ","This is your first sign-in with ")}<b style={{color:C.black}}>{initEmail}</b>{L(". Elige una contraseña para continuar.",". Choose a password to continue.")}</p>
+              <div style={{display:"flex",flexDirection:"column",gap:18}}>
+                <LoginField label={L("Nueva contraseña","New password")} type="password" value={np1} onChange={function(v){setNp1(v);setErr("");}} ph="••••••••" err={!!err} onEnter={submitInitial} autoFocus/>
+                <LoginField label={L("Confirma la contraseña","Confirm password")} type="password" value={np2} onChange={function(v){setNp2(v);setErr("");}} ph="••••••••" err={!!err} onEnter={submitInitial}/>
+                {err&&<div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.red,marginTop:-4}}>⚠ {err}</div>}
+                <LoginBtn onClick={submitInitial} dis={busy||!np1||!np2}>{busy?L("Guardando…","Saving…"):L("Crear y entrar","Create and enter")}</LoginBtn>
+                <button onClick={function(){setInitEmail("");setNp1("");setNp2("");setErr("");}} style={{background:"none",border:"none",color:C.earth,fontSize:12,cursor:"pointer",letterSpacing:".04em"}}>← {L("Volver","Back")}</button>
+              </div>
+            </>
+          ):!showAdmin?(
             <>
               <div style={{fontFamily:"Montserrat,sans-serif",fontSize:11,fontWeight:500,letterSpacing:".32em",textTransform:"uppercase",color:C.earth,marginBottom:14}}>{L("Portal EPI","EPI portal")}</div>
               <h1 style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontWeight:400,fontSize:38,letterSpacing:"-.01em",lineHeight:1.08,color:C.black,margin:0}}>{L("Bienvenido de vuelta.","Welcome back.")}</h1>
@@ -2203,7 +2287,7 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
                 <LoginField label={L("Contraseña","Password")} type="password" value={pass} onChange={function(v){setPass(v);setErr("");}} ph={L("tu contraseña","your password")} err={!!err} onEnter={loginUser}/>
                 {err&&<div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.red,marginTop:-4}}>⚠ {err}</div>}
                 <div style={{fontFamily:"Montserrat,sans-serif",fontSize:11.5,letterSpacing:".04em",color:C.earth,marginTop:2}}>{L("¿Olvidaste tu contraseña?","Forgot your password?")}</div>
-                <LoginBtn onClick={loginUser} dis={!email||!pass}>{L("Entrar","Enter")}</LoginBtn>
+                <LoginBtn onClick={loginUser} dis={busy||!email||!pass}>{busy?L("Entrando…","Signing in…"):L("Entrar","Enter")}</LoginBtn>
               </div>
             </>
           ):(
@@ -7846,9 +7930,11 @@ function VendorAccount({vendor,allVendors,allReps,onSvV}) {
   const [foto,setFoto] = useState(vendor.foto||vendor.avatar||"");
   const [fotoMsg,setFotoMsg] = useState(null);
   const photoRef = useRef(null);
+  function saMirror(fn,a,b){ try{ if(typeof window!=="undefined"&&window.SAAuth){ var m=(vendor.email||vendor.notifEmail||""); if(m) window.SAAuth[fn](m,a,b); } }catch(_){} }
   function saveFoto(data){
     setFoto(data);
     onSvV(allVendors.map(function(v){ return v.id===vendor.id?Object.assign({},v,{foto:data}):v; }));
+    saMirror("setPhoto", data||"");
     vendor.foto=data;
     setFotoMsg({ok:true,t:data?"✓ Foto actualizada.":"✓ Foto quitada."}); setTimeout(function(){setFotoMsg(null);},3000);
   }
@@ -7886,6 +7972,7 @@ function VendorAccount({vendor,allVendors,allReps,onSvV}) {
       return Object.assign({},v,{phone:phone.trim(),email:ne,prevEmails:prev});
     }));
     vendor.phone=phone.trim(); vendor.email=email.trim();
+    saMirror("setEmail", email.trim());
     setCtMsg({ok:true,t:"✓ Datos de contacto actualizados."}); setTimeout(function(){setCtMsg(null);},3000);
   }
 
@@ -7894,7 +7981,9 @@ function VendorAccount({vendor,allVendors,allReps,onSvV}) {
     if(np.length<6) { setPwMsg({ok:false,t:"Mínimo 6 caracteres."}); return; }
     if(np!==cp) { setPwMsg({ok:false,t:"Las contraseñas no coinciden."}); return; }
     onSvV(allVendors.map(function(v){if(v.id===vendor.id){var u=Object.assign({},v);u.password=np;return u;}return v;}));
-    vendor.password=np; setCur(""); setNp(""); setCp("");
+    vendor.password=np;
+    saMirror("setPassword", cur, np);
+    setCur(""); setNp(""); setCp("");
     setPwMsg({ok:true,t:"✓ Contraseña actualizada."}); setTimeout(function(){setPwMsg(null);},3000);
   }
 
