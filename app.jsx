@@ -2610,6 +2610,17 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,swap
       });
     }catch(_){}
   })();
+  /* d) Trabajos con pago pendiente — antes era una barra fija; ahora vive en el
+        centro de notificaciones. Una sola tarjeta con el total. */
+  (function(){
+    var n=(alerts||[]).length; if(!n) return;
+    var maxTs=0; (alerts||[]).forEach(function(r){ var f=String((r&&r.fecha)||"").slice(0,10); var t=f?new Date(f+"T12:00:00").getTime():0; if(t>maxTs) maxTs=t; });
+    notis.push({ id:"pagos-pend", tipo:"alerta", subcat:"Pagos",
+      texto: n+" trabajo"+(n!==1?"s":"")+" con pago pendiente",
+      contexto: "Toca para revisarlos",
+      ts: maxTs||Date.now(),
+      abrir: function(){ setTab("dash"); } });
+  })();
   /* Extraer daños embebidos en un reporte de limpieza → reporte de daños independiente */
   function extractDanios(r) {
     var nid=Date.now();
@@ -2685,7 +2696,7 @@ function DashView({props,reservas,nomAjustes,onSvNomAjustes,canNom,meEmails,onSv
   const [sub,setSub] = useState("ops");
   return (
     <div>
-      {alerts.length>0&&<div style={{background:"#EDE4E4",padding:"10px 22px",display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",borderBottom:"1px solid #D6C8C8"}}><span>⚠️</span><span style={{fontSize:13,fontWeight:600,color:C.red}}>{alerts.length} trabajo{alerts.length!==1?"s":""} con pago pendiente</span></div>}
+      {/* La alerta de pagos pendientes se movió al centro de notificaciones (item "pagos-pend"). */}
       {/* Sub-navegación estilo TabNav de mi-spacioam: subrayado peach, mayúsculas con tracking */}
       <div style={{background:C.surface||"#fff",borderBottom:"1px solid "+C.line,padding:"0 22px",display:"flex",gap:4,overflowX:"auto"}}>
         {[["ops","Dashboard Operativo"],["exec","Dashboard Ejecutivo"],["pagos","Historial de pagos"]].concat(canNom?[["planilla","Planilla"]]:[]).map(function(it){ var k=it[0],l=it[1]; var on=sub===k; return (
