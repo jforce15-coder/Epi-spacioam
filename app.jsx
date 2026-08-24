@@ -8426,8 +8426,17 @@ function TipChrome({mobile, active, tab, navSet, children}){
     </div>
   );
 }
-function TipDot({on, children, label}){
-  return <span aria-label={label} style={{position:"relative",width:30,height:30,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",background:on?"#FCEDE8":"transparent",boxShadow:on?"0 0 0 2px "+C.peach:"none"}}>{children}</span>;
+function TipDot({on, children, label, ring}){
+  /* Para objetos IRREGULARES (el notibell con su badge, íconos): el resalte es
+     un círculo real centrado, de diámetro fijo, con aire entre el objeto y el
+     borde — no un óvalo pegado al contenido. */
+  var d=ring||46;
+  return (
+    <span aria-label={label} style={{position:"relative",width:30,height:30,display:"inline-flex",alignItems:"center",justifyContent:"center"}}>
+      {on&&<span style={{position:"absolute",top:"50%",left:"50%",width:d,height:d,marginTop:-d/2,marginLeft:-d/2,borderRadius:"50%",boxShadow:"0 0 0 2px "+C.peach,background:"rgba(233,130,106,.10)",pointerEvents:"none"}}/>}
+      <span style={{position:"relative",display:"inline-flex",alignItems:"center",justifyContent:"center"}}>{children}</span>
+    </span>
+  );
 }
 function TipRing({children, note, pill, radius}){
   /* Envuelve el control objetivo con un anillo peach de la MISMA forma que lo
@@ -9020,7 +9029,8 @@ function UserMenu({userName, userEmail, userAvatar, isAdmin, canAccount, onAccou
     return function(){ document.removeEventListener("mousedown",h); };
   },[]);
   var item={display:"flex",alignItems:"center",gap:11,width:"100%",border:"none",background:"transparent",cursor:"pointer",textAlign:"left",padding:"13px 15px",fontFamily:"Montserrat,sans-serif",fontSize:12.5,letterSpacing:".04em",color:C.black};
-  var sz=compact?36:40;
+  var sz=compact?38:38;
+  var initials=String(userName||"").trim().split(/\s+/).map(function(w){return w[0]||"";}).slice(0,2).join("").toUpperCase();
   /* Control Segmented (dos píldoras) para las preferencias del menú. */
   function PrefSeg(props){
     return (
@@ -9041,8 +9051,8 @@ function UserMenu({userName, userEmail, userAvatar, isAdmin, canAccount, onAccou
   }
   return (
     <div ref={ref} style={{position:"relative",flexShrink:0}}>
-      <button onClick={function(){setOpen(function(o){return !o;});}} aria-label="Cuenta" title={userName||"Cuenta"} style={{width:sz,height:sz,minWidth:sz,boxSizing:"border-box",borderRadius:"50%",overflow:"hidden",border:"1px solid "+C.line,background:C.surfaceWarm,cursor:"pointer",padding:0,display:"grid",placeItems:"center",color:C.earth,lineHeight:1}}>
-        {userAvatar?<img src={userAvatar} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>:<Icon name="user" size={compact?18:19} stroke={C.earth}/>}
+      <button onClick={function(){setOpen(function(o){return !o;});}} aria-label="Cuenta" title={userName||"Cuenta"} style={{width:sz,height:sz,minWidth:sz,boxSizing:"border-box",borderRadius:"50%",overflow:"hidden",border:"1px solid "+C.line,background:C.beige,cursor:"pointer",padding:0,display:"grid",placeItems:"center",color:C.black,fontFamily:"Montserrat,sans-serif",fontSize:12,fontWeight:600,letterSpacing:".04em",lineHeight:1}}>
+        {userAvatar?<img src={userAvatar} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>:(initials||<Icon name="user" size={19} stroke={C.earth}/>)}
       </button>
       {open&&(
         <div style={{position:"absolute",top:"calc(100% + 8px)",right:0,zIndex:9500,minWidth:248,background:"#fff",border:"1px solid "+C.line,borderRadius:16,boxShadow:"var(--sa-shadow-md)",overflow:"hidden",animation:"sa-fade .18s var(--sa-ease,ease)"}}>
@@ -9083,10 +9093,15 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
      cada sesión: por eso al entrar salían todas otra vez. */
   const [toasts,setToasts] = useState([]);
   var seenRef = React.useRef(null);
+  /* La primera push no salta al instante: espera 10s tras cargar la página. */
+  var readyRef = React.useRef(false);
+  var [pushReady,setPushReady] = useState(false);
+  React.useEffect(function(){ var id=setTimeout(function(){ readyRef.current=true; setPushReady(true); }, 10000); return function(){ clearTimeout(id); }; },[]);
   function _loadSeen(){ try{ return JSON.parse(localStorage.getItem("epi:notiSeen")||"null"); }catch(_){ return null; } }
   function _saveSeen(o){ try{ localStorage.setItem("epi:notiSeen", JSON.stringify(o)); }catch(_){} }
   var visSig = notisVis.map(notiKey).join("|");
   React.useEffect(function(){
+    if(!pushReady) return;
     if(seenRef.current==null) seenRef.current=_loadSeen();
     var keys=notisVis.map(notiKey);
     /* Primer uso jamás (sin registro): memoriza en silencio, no floodea. */
@@ -9102,7 +9117,7 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
       seenRef.current=u; _saveSeen(u);
       setToasts(function(p){ return p.concat(toShow).slice(-2); });
     }
-  },[visSig]);
+  },[visSig,pushReady]);
   /* El badge muestra lo de los últimos 7 días; si ya no hay nada reciente,
      muestra el número de todas las anteriores. */
   var _nsp = notiSplit(notisVis);
@@ -9117,20 +9132,23 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
   return (
     <>
       {/* Top bar */}
-      <header style={{background:"rgba(250,250,250,0.82)",backdropFilter:"blur(20px) saturate(120%)",WebkitBackdropFilter:"blur(20px) saturate(120%)",height:isMobile?54:62,display:"flex",alignItems:"center",justifyContent:"space-between",gap:isMobile?8:12,padding:isMobile?"0 16px":"0 24px",position:"sticky",top:0,zIndex:50,borderBottom:"1px solid "+C.line}}>
+      <header style={{background:"rgba(250,250,250,0.78)",backdropFilter:"blur(20px) saturate(120%)",WebkitBackdropFilter:"blur(20px) saturate(120%)",height:isMobile?58:66,display:"flex",alignItems:"center",justifyContent:"space-between",gap:isMobile?8:12,padding:isMobile?"0 16px":"0 24px",position:"sticky",top:0,zIndex:50,borderBottom:"1px solid "+C.line}}>
         {/* Logo */}
-        <div style={{display:"flex",alignItems:"center",minWidth:0,gap:isMobile?8:12}}>
-          <img src={LOGO_WORDMARK} alt="Spacio AM" style={{height:isMobile?26:32,width:"auto",objectFit:"contain",display:"block",flexShrink:0}}/>
+        <div style={{display:"flex",alignItems:"center",minWidth:0,gap:isMobile?10:14}}>
+          <img src={LOGO_WORDMARK} alt="Spacio AM" style={{height:isMobile?30:38,width:"auto",objectFit:"contain",display:"block",flexShrink:0}}/>
           {IS_CLAUDE_SANDBOX&&<span style={{fontSize:9,fontWeight:700,background:"#F0EDE8",color:"#938B8A",padding:"2px 6px",borderRadius:4,letterSpacing:".08em",display:isMobile?"none":"block"}}>LOCAL</span>}
           {/* Antes iban tres píldoras de alerta sueltas; ahora un solo triángulo
               con el total abre el centro de notificaciones. Solo aparece si hay
-              algo pendiente. */}
+              algo pendiente. Le precede un filete divisor, como en mi-spacioam. */}
           {notiTotal>0&&(
-            <button onClick={function(e){e.stopPropagation();setNotiOpen(true);}} title={notiTotal+" pendiente"+(notiTotal===1?"":"s")} aria-label={"Notificaciones ("+notiTotal+")"}
-              style={{position:"relative",display:"inline-flex",alignItems:"center",justifyContent:"center",width:40,height:40,borderRadius:"var(--sa-pill)",border:"none",background:"transparent",cursor:"pointer",flexShrink:0,padding:0}}>
-              <NIcon name="alert" size={23} width={1.75} stroke="var(--color-info,#3B6691)"/>
-              <span style={{position:"absolute",top:-1,right:-1,minWidth:18,height:18,boxSizing:"border-box",padding:"0 5px",borderRadius:"var(--sa-pill)",background:C.peach,color:"#fff",fontSize:10.5,fontWeight:700,fontVariantNumeric:"tabular-nums",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 1px 3px rgba(0,0,0,.28)"}}>{notiTotal>99?"99+":notiTotal}</span>
-            </button>
+            <React.Fragment>
+              <span aria-hidden="true" style={{width:1,height:26,background:C.gray,display:"inline-block",flexShrink:0}}/>
+              <button onClick={function(e){e.stopPropagation();setNotiOpen(true);}} title={notiTotal+" pendiente"+(notiTotal===1?"":"s")} aria-label={"Notificaciones ("+notiTotal+")"}
+                style={{position:"relative",display:"inline-flex",alignItems:"center",justifyContent:"center",width:40,height:40,borderRadius:"var(--sa-pill)",border:"none",background:"transparent",cursor:"pointer",flexShrink:0,padding:0}}>
+                <NIcon name="alert" size={23} width={1.75} stroke="var(--color-info,#3B6691)"/>
+                <span style={{position:"absolute",top:-1,right:-1,minWidth:18,height:18,boxSizing:"border-box",padding:"0 5px",borderRadius:"var(--sa-pill)",background:C.peach,color:"#fff",fontFamily:"Montserrat,sans-serif",fontSize:10.5,fontWeight:700,fontVariantNumeric:"tabular-nums",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 1px 3px rgba(0,0,0,.28)"}}>{notiTotal>99?"99+":notiTotal}</span>
+              </button>
+            </React.Fragment>
           )}
         </div>
 
