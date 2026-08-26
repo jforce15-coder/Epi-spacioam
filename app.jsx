@@ -2591,6 +2591,11 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,swap
     var pend=(ausencias||[]).filter(function(a){ return a && (a.estado||"pendiente")==="pendiente"; });
     if(!pend.length) return;
     var hoy=SCHED.hoyGT();
+    /* Guarda anti-borrado: si todavía no cargó la programación (arreglo vacío) y
+       hay ausencias futuras por reasignar, NO procesar — reasignar sobre vacío y
+       guardar borraría las rutas del servidor (mismo riesgo que la planilla). */
+    var hayFuturasPend=pend.some(function(a){ return String(a.fecha||"").slice(0,10) > hoy; });
+    if(hayFuturasPend && !(schedules&&schedules.length)) return;
     var tecsAll=schedTecnicos(vendors);
     var ratings=schedRatings(reviews, reps, rvCasos);
     var sched=(schedules||[]).slice();
@@ -2624,7 +2629,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,swap
       setAus(a.id,{estado:"aplicada",resueltaEn:hoy,resueltaAuto:true,sinCubrir:(r.sinAsignar||[]).length});
       huboFuturo=true;
     });
-    if(huboFuturo) onSvSchedules&&onSvSchedules(sched);
+    if(huboFuturo && sched.length) onSvSchedules&&onSvSchedules(sched);
     onSvAusencias&&onSvAusencias(ausNext);
     /* Avisos: una vez por técnico+fecha, solo su ruta nueva. */
     var vistos={};
