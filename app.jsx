@@ -757,6 +757,34 @@ var PROF_PHOTO_KEYS = [
   ["fotosGavetas","Gavetas y utensilios"],
   ["fotosDetrasElect","Detrás de electrodomésticos"],
 ];
+/* ─── CONFIG DE FORMULARIOS DE LIMPIEZA (#4) ───────────────────────────────
+   El admin decide, por cada foto: si es obligatoria, si es solo cámara (no
+   permite galería) y si permite subir archivo. FORM_CFG (global, sincronizado)
+   guarda solo los cambios respecto al default. El % mínimo de fotos permitido
+   se calcula solo: obligatorias / total. */
+var FORM_CFG = {};
+/* Preguntas configurables por formulario. Las de habitaciones/baños son
+   dinámicas (una por cuarto), representadas por una fila-tipo. */
+var FORM_QUESTIONS = {
+  "Limpieza tradicional": [{key:"hab_general",label:"Habitación — foto general",dyn:true}]
+    .concat([{key:"bano_ducha",label:"Baño — ducha",dyn:true},{key:"bano_inodoro",label:"Baño — inodoro",dyn:true}])
+    .concat(TRAD_SINGLE_PHOTOS.map(function(p){return {key:p[0],label:p[1]};})),
+  "Limpieza profunda": PROF_PHOTO_KEYS.map(function(p){return {key:p[0],label:p[1]};})
+};
+/* Default por foto: obligatoria, permite subir y también cámara (no solo cámara). */
+var FORM_Q_DEFAULT = {req:true, cam:false, upl:true};
+function formQCfg(formId, key){
+  var f=(FORM_CFG&&FORM_CFG[formId])||{}; var o=f[key]||{};
+  return {req: o.req!=null?!!o.req:FORM_Q_DEFAULT.req,
+          cam: o.cam!=null?!!o.cam:FORM_Q_DEFAULT.cam,
+          upl: o.upl!=null?!!o.upl:FORM_Q_DEFAULT.upl};
+}
+/* % mínimo permitido = fotos obligatorias / total de fotos del formulario. */
+function formMinPct(formId){
+  var qs=FORM_QUESTIONS[formId]||[]; if(!qs.length) return 0;
+  var req=qs.filter(function(q){ return formQCfg(formId,q.key).req; }).length;
+  return Math.round(req/qs.length*100);
+}
 function photoFilled(v){
   function one(x){ return !!(x&&typeof x==="string"&&(x.indexOf("http")===0||x.indexOf("data:")===0)); }
   if(Array.isArray(v)) return v.some(one);
@@ -1060,10 +1088,26 @@ function notifyEmail(to, subject, body) {
 function notifyTemplate(to, type, data) {
   var list = (Array.isArray(to)?to:[to]).filter(Boolean);
   if (!list.length) return;
-  apiCall("notify",{to:list, type:type, data:data||{}}).catch(function(e){
+  apiCall("notify",{to:list, type:type, data:data||{}}).then(function(){
+    epiLogCorreo({type:type, to:list, ok:true});
+  }).catch(function(e){
     console.warn("Notificación no enviada (actualiza el Apps Script con el módulo de correos):", e&&e.message);
+    epiLogCorreo({type:type, to:list, ok:false, error:(e&&e.message)||"Sin conexión"});
   });
 }
+/* Bitácora de correos enviados (últimos 200), en localStorage. Registra éxito y
+   fallo para que el admin pueda revisar y filtrar los que tuvieron problema. */
+function epiLogCorreo(entry){
+  try{
+    var raw=localStorage.getItem("epi:mailLog"); var log=raw?JSON.parse(raw):[];
+    if(!Array.isArray(log)) log=[];
+    log.unshift({ts:Date.now(), type:entry.type, to:(entry.to||[]).join(", "), ok:!!entry.ok, error:entry.error||""});
+    if(log.length>200) log=log.slice(0,200);
+    localStorage.setItem("epi:mailLog", JSON.stringify(log));
+    try{ window.dispatchEvent(new Event("epi:mailLog")); }catch(_){}
+  }catch(_){}
+}
+function epiReadMailLog(){ try{ var raw=localStorage.getItem("epi:mailLog"); var l=raw?JSON.parse(raw):[]; return Array.isArray(l)?l:[]; }catch(_){ return []; } }
 /* Nombre para saludar en los correos, resolviendo el correo del reporte al técnico. */
 function vendorNameByEmail(vendors, email){
   var e=(email||"").toLowerCase().trim();
@@ -1095,6 +1139,40 @@ var NOTIF_META = [
   {id:"comprobantePago",    label:"Comprobante de pago",          desc:"Se generó el comprobante semanal"},
   {id:"mantenimientoProgramado", label:"Mantenimiento programado", desc:"Se le asignó a un técnico la reparación de un daño"}
 ];
+/* ─── CATÁLOGO DE CORREOS — referencia para el admin: todos los correos que
+   la app puede enviar, con su clasificación y a qué perfil llegan. Sirve para
+   validar cobertura (qué falta / qué sobra). `dedicado`=tiene diseño propio;
+   los demás usan la plantilla base de marca. roles: tecnico·supervisor·
+   adminPrincipal·adminSecundario. */
+var CORREOS_CAT = [
+  {id:"programacion",           cat:"Programación",     roles:["tecnico"], dedicado:true, disparo:"Se publica la ruta del día"},
+  {id:"programacionCambio",     cat:"Programación",     roles:["tecnico"], dedicado:true, disparo:"Cambia la ruta ya publicada"},
+  {id:"limpiezaCancelada",      cat:"Programación",     roles:["tecnico"], dedicado:true, disparo:"Se cancela una limpieza de la ruta"},
+  {id:"mantenimientoProgramado",cat:"Programación",     roles:["tecnico"], dedicado:true, disparo:"Se asigna un mantenimiento"},
+  {id:"ausencia",               cat:"Programación",     roles:["adminPrincipal","adminSecundario"], dedicado:true, disparo:"Un técnico reporta ausencia"},
+  {id:"limpiezaAprobada",       cat:"Calidad",          roles:["tecnico"], dedicado:true, disparo:"QA aprueba una limpieza"},
+  {id:"correccionInmediata",    cat:"Calidad",          roles:["tecnico"], dedicado:true, disparo:"QA marca corrección urgente"},
+  {id:"correccionFutura",       cat:"Calidad",          roles:["tecnico"], dedicado:true, disparo:"QA deja observación futura"},
+  {id:"listaSupervision",       cat:"Calidad",          roles:["supervisor"], dedicado:true, disparo:"Termina una limpieza por revisar"},
+  {id:"correccionAtendida",     cat:"Calidad",          roles:["supervisor","adminPrincipal","adminSecundario"], dedicado:true, disparo:"El técnico confirma que corrigió"},
+  {id:"ratingRevision",         cat:"Calidad",          roles:["adminPrincipal","adminSecundario","supervisor"], dedicado:true, disparo:"Un técnico pide revisar una calificación"},
+  {id:"danoUrgente",            cat:"Daños",            roles:["adminPrincipal","adminSecundario"], dedicado:true, disparo:"Se clasifica un daño como urgente"},
+  {id:"solicitudAdelanto",      cat:"Adelantos y pagos",roles:["adminPrincipal","adminSecundario"], dedicado:true, disparo:"Un técnico solicita un adelanto"},
+  {id:"adelantoFirma",          cat:"Adelantos y pagos",roles:["tecnico"], dedicado:true, disparo:"El admin inicia un adelanto"},
+  {id:"adelantoDepositado",     cat:"Adelantos y pagos",roles:["tecnico"], dedicado:true, disparo:"Se deposita/activa el adelanto"},
+  {id:"comprobantePago",        cat:"Adelantos y pagos",roles:["tecnico"], dedicado:true, disparo:"Se genera el comprobante semanal"},
+  {id:"intercambioSolicitud",   cat:"Intercambios",     roles:["tecnico"], dedicado:true, disparo:"Un técnico propone ceder su ruta"},
+  {id:"intercambioRespuesta",   cat:"Intercambios",     roles:["tecnico"], dedicado:true, disparo:"El otro técnico acepta y responde"},
+  {id:"intercambioAceptado",    cat:"Intercambios",     roles:["tecnico"], dedicado:true, disparo:"El intercambio queda confirmado"},
+  {id:"intercambioRechazado",   cat:"Intercambios",     roles:["tecnico"], dedicado:true, disparo:"El intercambio se rechaza"},
+  {id:"codigosSecundario",      cat:"Códigos de acceso",roles:["adminSecundario"], dedicado:true, disparo:"5:00 p. m. — códigos de mañana pendientes"},
+  {id:"codigosPrimario",        cat:"Códigos de acceso",roles:["adminPrincipal"], dedicado:true, disparo:"8:00 p. m. — siguen pendientes (escalón)"},
+  {id:"codigosRecordatorio",    cat:"Códigos de acceso",roles:["adminPrincipal","adminSecundario"], dedicado:true, disparo:"9:00 a. m. — recordatorio de hoy"}
+];
+var CORREOS_ROLES = [["tecnico","Técnico"],["supervisor","Supervisor"],["adminPrincipal","Admin principal"],["adminSecundario","Admin secundario"]];
+function correoLabel(id){ var m=NOTIF_META.find(function(x){return x.id===id;}); if(m) return m.label;
+  var map={programacion:"Programación del día",programacionCambio:"Cambio de programación",limpiezaCancelada:"Limpieza cancelada",ausencia:"Ausencia reportada",intercambioSolicitud:"Intercambio · solicitud",intercambioRespuesta:"Intercambio · respuesta",intercambioAceptado:"Intercambio · aceptado",intercambioRechazado:"Intercambio · rechazado",codigosSecundario:"Códigos · aviso 5 p. m.",codigosPrimario:"Códigos · escalón 8 p. m.",codigosRecordatorio:"Códigos · recordatorio 9 a. m."};
+  return map[id]||id; }
 var NOTIF_DEFAULTS = {
   limpiezaAprobada:{tecnico:1}, correccionInmediata:{tecnico:1}, correccionFutura:{tecnico:1},
   listaSupervision:{supervisores:1}, correccionAtendida:{supervisores:1,adminPrincipal:1,adminSecundarios:1},
@@ -1208,13 +1286,14 @@ function ls_loadAll(){
     reservas: ls_get("c:resv")||null,
     ausencias: ls_get("c:aus")||null,
     swaps: ls_get("c:swaps")||null,
+    formcfg: ls_get("c:formcfg")||null,
     codigos: ls_get("c:cod")||null,
   };
   return {reports:reps.sort(function(a,b){return (b.createdAt||b.id)-(a.createdAt||a.id);}), ...cfg};
 }
 function ls_saveReport(rep){ls_set("m:"+rep.id,rep);}
 function ls_deleteReport(id){ls_del("m:"+id);}
-function ls_saveConfig(key,value){var km={vendors:"c:v",props:"c:p",adminpin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus",swaps:"c:swaps"};ls_set(km[key]||key,value);}
+function ls_saveConfig(key,value){var km={vendors:"c:v",props:"c:p",adminpin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus",swaps:"c:swaps",formcfg:"c:formcfg"};ls_set(km[key]||key,value);}
 
 /* Rescate de arreglos JSON dañados. Si una celda de Config quedó con JSON válido
    seguido de basura (p.ej. una restauración que dejó '...]" por "[...]'), extrae el
@@ -1317,6 +1396,7 @@ async function loadAllData() {
       reservas: d.reservas || [],
       ausencias: d.ausencias || [],
       swaps: d.swaps || [],
+      formcfg: d.formcfg || {},
     };
   }
   /* Carga SECUENCIAL (no Promise.all): el Apps Script ocasionalmente mezcla las
@@ -1365,6 +1445,7 @@ async function loadAllData() {
     reservas: Array.isArray(cfg.reservas) ? cfg.reservas : [],
     ausencias: Array.isArray(cfg.ausencias) ? cfg.ausencias : [],
     swaps: Array.isArray(cfg.swaps) ? cfg.swaps : [],
+    formcfg: (cfg.formcfg && typeof cfg.formcfg==="object") ? cfg.formcfg : {},
   };
 }
 
@@ -1541,7 +1622,7 @@ async function deleteReportById(id) {
 
 async function saveConfigItem(key, value) {
   if(IS_CLAUDE_SANDBOX){
-    var ls_km={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus",swaps:"c:swaps"};
+    var ls_km={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus",swaps:"c:swaps",formcfg:"c:formcfg"};
     ls_set(ls_km[key]||key,value);
     return;
   }
@@ -1566,7 +1647,7 @@ async function saveConfigItem(key, value) {
   } catch(e) {
     console.error("saveConfig failed for key "+key+":", e.message);
     /* Fallback to localStorage so data isn't lost */
-    var ls_km2={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus",swaps:"c:swaps"};
+    var ls_km2={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus",swaps:"c:swaps",formcfg:"c:formcfg"};
     ls_set(ls_km2[key]||key,value);
   }
 }
@@ -1685,9 +1766,11 @@ function App() {
   const [reservas, setReservas] = useState([]);
   const [ausencias, setAusencias] = useState([]);
   const [swaps, setSwaps] = useState([]);
+  const [formCfg, setFormCfg] = useState({});
   async function svReservas(v){ setReservas(v); saveConfigItem("reservas", v); }
   async function svAusencias(v){ setAusencias(v); saveConfigItem("ausencias", v); }
   async function svSwaps(v){ setSwaps(v); saveConfigItem("swaps", v); }
+  async function svFormCfg(v){ setFormCfg(v); FORM_CFG=v||{}; saveConfigItem("formcfg", v); }
   const [notifPrefs, setNotifPrefs] = useState({});
   /* Reviews de huéspedes (calificación de limpieza importada de las plataformas) */
   const [reviews, setReviews] = useState([]);
@@ -1783,6 +1866,7 @@ function App() {
       setReservas(Array.isArray(d.reservas)?d.reservas:[]);
       setAusencias(Array.isArray(d.ausencias)?d.ausencias:[]);
       setSwaps(Array.isArray(d.swaps)?d.swaps:[]);
+      setFormCfg((d.formcfg&&typeof d.formcfg==="object")?d.formcfg:{}); FORM_CFG=(d.formcfg&&typeof d.formcfg==="object")?d.formcfg:{};
       setNotifPrefs(d.notifprefs||{}); NOTIF_PREFS=d.notifprefs||{};
       setSheetsOk(!IS_CLAUDE_SANDBOX);
       setReady(true); setSyncing(false);
@@ -1946,6 +2030,7 @@ function App() {
       if(d.extcats)   setExtCats(d.extcats);
       if(d.schedules) setSchedules(d.schedules);
       if(Array.isArray(d.swaps)) setSwaps(d.swaps);
+      if(d.formcfg&&typeof d.formcfg==="object"){ setFormCfg(d.formcfg); FORM_CFG=d.formcfg; }
       if(d.codigos)   setCodigos(d.codigos);
       if(d.hospurlday)  setHospUrlDay(d.hospurlday||"");
       if(d.hospurlweek) setHospUrlWeek(d.hospurlweek||"");
@@ -1989,7 +2074,7 @@ function App() {
       <style>{".vercomo-wrap header{top:40px !important}"}</style>
       <div className="vercomo-wrap" style={{paddingTop:40}}>
         {vcV.isAdmin
-          ? <AdminApp pagosReady={pagosReady} reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={vcV} swaps={swaps} onSvSwaps={svSwaps} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={function(){setVerComo(null);}} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>
+          ? <AdminApp pagosReady={pagosReady} reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} formCfg={formCfg} onSvFormCfg={svFormCfg} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={vcV} swaps={swaps} onSvSwaps={svSwaps} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={function(){setVerComo(null);}} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>
           : <VendorApp vendor={vcV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,vcV);})} props={props} company={company} schedules={vcSched} codigos={codigos} ausencias={ausencias} onSvAusencias={svAusencias} swaps={swaps} onSvSwaps={svSwaps} allSchedules={schedules} onSvSchedules={svSchedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={function(){setVerComo(null);}} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>}
       </div>
     </>);
@@ -2009,7 +2094,7 @@ function App() {
     try{ if(localStorage.getItem("epi_onboard_done_"+freshV.id)) needsOnb=false; }catch(_){}
     inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={misSchedules} codigos={codigos} ausencias={ausencias} onSvAusencias={svAusencias} swaps={swaps} onSvSwaps={svSwaps} allSchedules={schedules} onSvSchedules={svSchedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
   } else {
-    inner = <AdminApp pagosReady={pagosReady} reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} swaps={swaps} onSvSwaps={svSwaps} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
+    inner = <AdminApp pagosReady={pagosReady} reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} formCfg={formCfg} onSvFormCfg={svFormCfg} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} swaps={swaps} onSvSwaps={svSwaps} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
   }
   return <ErrorBoundary>{inner}</ErrorBoundary>;
 }
@@ -2310,6 +2395,96 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
 }
 
 /* ═══ NOTIFICACIONES — quién recibe cada tipo de correo (solo admin principal) */
+/* Catálogo de correos: referencia filtrable por perfil y clasificada por tipo. */
+function CorreosCatalogo(){
+  const [rol,setRol] = useState("todos");
+  var cats=[]; var byCat={};
+  CORREOS_CAT.forEach(function(c){ if(rol!=="todos" && c.roles.indexOf(rol)<0) return; if(!byCat[c.cat]){byCat[c.cat]=[];cats.push(c.cat);} byCat[c.cat].push(c); });
+  var total=CORREOS_CAT.filter(function(c){ return rol==="todos"||c.roles.indexOf(rol)>=0; }).length;
+  function roleTag(r){ var m=CORREOS_ROLES.find(function(x){return x[0]===r;}); return m?m[1]:r; }
+  return (
+    <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:18,padding:"18px 20px",marginBottom:24,boxShadow:"var(--sa-shadow-sm)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:9.5,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",color:C.earth,display:"flex",alignItems:"center",gap:7}}><span style={{width:6,height:6,borderRadius:"50%",background:C.peach}}/>Catálogo de correos</div>
+          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:21,color:C.black,marginTop:5,lineHeight:1.2}}>Todo lo que la app envía</div>
+          <div style={{fontSize:12,color:C.earth,marginTop:5,lineHeight:1.6,maxWidth:520,textWrap:"pretty"}}>Revisa qué correos existen y a qué perfil llegan, para validar si falta o sobra alguno. {total} tipos {rol!=="todos"?"para este perfil":"en total"}.</div>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:7,flexWrap:"wrap",margin:"14px 0 4px"}}>
+        {[["todos","Todos"]].concat(CORREOS_ROLES).map(function(r){
+          var on=rol===r[0];
+          return <button key={r[0]} onClick={function(){setRol(r[0]);}} style={{padding:"7px 14px",minHeight:38,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",color:on?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{r[1]}</button>;
+        })}
+      </div>
+      {cats.map(function(cat){
+        return (
+          <div key={cat} style={{marginTop:16}}>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase",marginBottom:8}}>{cat}</div>
+            <div style={{display:"flex",flexDirection:"column",gap:7}}>
+              {byCat[cat].map(function(c){
+                return (
+                  <div key={c.id} style={{background:C.surfaceWarm,borderRadius:11,padding:"11px 13px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline",flexWrap:"wrap"}}>
+                      <span style={{fontSize:13,fontWeight:600,color:C.black,minWidth:0}}>{correoLabel(c.id)}</span>
+                      <span style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                        {c.roles.map(function(r){ return <span key={r} style={{fontSize:8.5,fontWeight:700,letterSpacing:".06em",textTransform:"uppercase",padding:"2px 8px",borderRadius:"var(--sa-pill)",background:"#fff",border:"1px solid "+C.line,color:C.earth}}>{roleTag(r)}</span>; })}
+                      </span>
+                    </div>
+                    <div style={{fontSize:11,color:C.earth,marginTop:4,lineHeight:1.5}}>{c.disparo}{!c.dedicado?" · plantilla base":""}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+/* Bitácora de correos enviados — al final de Notificaciones, con filtro de fallos. */
+function CorreosLog(){
+  const [,force] = useState(0);
+  const [soloProb,setSoloProb] = useState(false);
+  useEffect(function(){ var h=function(){ force(function(n){return n+1;}); }; window.addEventListener("epi:mailLog",h); return function(){ window.removeEventListener("epi:mailLog",h); }; },[]);
+  var log=epiReadMailLog();
+  var fallos=log.filter(function(e){return !e.ok;}).length;
+  var lista=soloProb?log.filter(function(e){return !e.ok;}):log;
+  function cuando(ts){ var d=new Date(ts); return d.toLocaleDateString("es-GT",{day:"numeric",month:"short"})+" · "+d.toLocaleTimeString("es-GT",{hour:"2-digit",minute:"2-digit"}); }
+  return (
+    <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:18,padding:"18px 20px",marginTop:24,boxShadow:"var(--sa-shadow-sm)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:9.5,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",color:C.earth,display:"flex",alignItems:"center",gap:7}}><span style={{width:6,height:6,borderRadius:"50%",background:fallos?C.attention:C.green}}/>Bitácora de envíos</div>
+          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:21,color:C.black,marginTop:5,lineHeight:1.2}}>Correos enviados</div>
+          <div style={{fontSize:12,color:C.earth,marginTop:5,lineHeight:1.6,textWrap:"pretty"}}>{log.length} en este dispositivo{fallos>0?" · "+fallos+" con problema":" · todos entregados"}.</div>
+        </div>
+        <button onClick={function(){setSoloProb(function(v){return !v;});}} disabled={!fallos} style={{padding:"8px 14px",minHeight:38,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(soloProb?C.attentionText:C.gray),background:soloProb?C.attentionTint:"#fff",color:fallos?(soloProb?C.attentionText:C.earth):C.gray,fontSize:11.5,fontWeight:600,cursor:fallos?"pointer":"not-allowed",fontFamily:"Montserrat,sans-serif",flexShrink:0}}>{soloProb?"Ver todos":"Solo con problema"}</button>
+      </div>
+      {lista.length===0
+        ? <div style={{marginTop:14,padding:"22px 16px",textAlign:"center",color:C.earth,fontSize:12.5,background:C.surfaceWarm,borderRadius:12,lineHeight:1.6}}>{soloProb?"Ningún correo con problema. Todo entregado.":"Aún no se ha enviado ningún correo desde este dispositivo."}</div>
+        : <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:14,maxHeight:340,overflowY:"auto"}}>
+            {lista.map(function(e,i){
+              return (
+                <div key={i} style={{display:"flex",alignItems:"flex-start",gap:10,background:e.ok?C.surfaceWarm:C.attentionTint,border:"1px solid "+(e.ok?"transparent":C.attention),borderRadius:10,padding:"10px 12px"}}>
+                  <span style={{width:8,height:8,borderRadius:"50%",background:e.ok?C.green:C.attention,flexShrink:0,marginTop:5}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{correoLabel(e.type)}</div>
+                    <div style={{fontSize:10.5,color:C.earth,marginTop:2,wordBreak:"break-word"}}>{e.to||"—"}</div>
+                    {!e.ok&&e.error&&<div style={{fontSize:10.5,color:C.attentionText,fontWeight:600,marginTop:2}}>Problema: {e.error}</div>}
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0}}>
+                    <div style={{fontSize:9,fontWeight:700,letterSpacing:".06em",textTransform:"uppercase",color:e.ok?C.green:C.attentionText}}>{e.ok?"Enviado":"Falló"}</div>
+                    <div style={{fontSize:9.5,color:C.taupe,marginTop:2}}>{cuando(e.ts)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>}
+      <div style={{fontSize:10.5,color:C.taupe,marginTop:12,lineHeight:1.6,textWrap:"pretty"}}>El envío real y su entrega los hace el servidor de correos; esta bitácora registra lo despachado desde la app (últimos 200).</div>
+    </div>
+  );
+}
 function NotifCfg({prefs, vendors, onSave, readOnly}){
   var cols=[["tecnico","Técnico"],["supervisores","Supervisores"],["adminPrincipal","Admin principal"],["adminSecundarios","Admin secundarios"]];
   function prefOf(id){ return (prefs&&prefs[id])?prefs[id]:(NOTIF_DEFAULTS[id]||{}); }
@@ -2344,6 +2519,8 @@ function NotifCfg({prefs, vendors, onSave, readOnly}){
         <span style={{fontSize:11.5,color:C.earth,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:"var(--sa-pill)",padding:"6px 13px"}}>Supervisores: <b style={{color:C.black}}>{supCount}</b></span>
       </div>
       {readOnly&&<div style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"12px 15px",fontSize:12.5,color:C.earth,lineHeight:1.6,marginBottom:20}}>Solo el administrador principal ({prinName}) puede modificar esta configuración. La estás viendo en modo lectura.</div>}
+      <CorreosCatalogo/>
+      <div style={{fontSize:9.5,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",color:C.earth,marginBottom:12}}>Quién recibe cada correo</div>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         {NOTIF_META.map(function(m){
           var pf=prefOf(m.id);
@@ -2364,12 +2541,13 @@ function NotifCfg({prefs, vendors, onSave, readOnly}){
           );
         })}
       </div>
+      <CorreosLog/>
     </div>
   );
 }
 
 /* ═══ ADMIN */
-function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,swaps,onSvSwaps,regSol,onSvRegSol,nomAjustes,onSvNomAjustes,reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,vendors,props,adminPin,company,extCats,schedules,codigos,onSvCodigos,schedErr,onVerComo,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
+function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,swaps,onSvSwaps,formCfg,onSvFormCfg,regSol,onSvRegSol,nomAjustes,onSvNomAjustes,reviews,onSvReviews,rvCasos,onSvRvCasos,rvIA,onSvRvIA,reps,vendors,props,adminPin,company,extCats,schedules,codigos,onSvCodigos,schedErr,onVerComo,hospUrlDay,hospUrlWeek,feedback,adelantos,onSvAdelantos,pagos,onSvPagos,syncing,syncMsg,sheetsOk,retryQ,setRetryQ,setReps,adminVendor,onUpsert,onDelete,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback,onRefresh,onLogout,notifPrefs,onSvNotifPrefs}) {
   const [tab,    setTab]    = useState("dash");
   useEPIPrefs();   /* repinta al cambiar idioma/moneda desde el menú de usuario */
   const [detail, setDetail] = useState(null);
@@ -2681,7 +2859,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,swap
               ? <AdvanceRequest vendor={adminVendor} reps={(reps||[]).filter(function(r){return repMatchesVendor(r,adminVendor);})} adelantos={(adelantos||[]).filter(function(a){return vendorEmailSet(adminVendor).map(function(e){return String(e).toLowerCase();}).indexOf(String(a.vendorEmail||"").toLowerCase())>=0;})} onSvAdelantos={onSvAdelantos}/>
               : null)}
       </div>
-      <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  regSol={regSol} onSvRegSol={onSvRegSol} reps={reps} vendors={vendors} props={props} codigos={codigos||{}} onSvCodigos={onSvCodigos} onVerComo={onVerComo} feedback={feedback} onSvFeedback={onSvFeedback} schedules={schedules} adminPin={adminPin} company={company} extCats={extCats||[]} notifPrefs={notifPrefs} canNotif={canNotif} onSvNotifPrefs={onSvNotifPrefs} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
+      <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  regSol={regSol} onSvRegSol={onSvRegSol} reps={reps} vendors={vendors} props={props} codigos={codigos||{}} onSvCodigos={onSvCodigos} onVerComo={onVerComo} feedback={feedback} onSvFeedback={onSvFeedback} schedules={schedules} adminPin={adminPin} company={company} extCats={extCats||[]} notifPrefs={notifPrefs} canNotif={canNotif} onSvNotifPrefs={onSvNotifPrefs} formCfg={formCfg} onSvFormCfg={onSvFormCfg} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
       {adminVendor&&<div style={{display:tab==="account"?"block":"none"}}><VendorAccount vendor={adminVendor} allVendors={vendors} allReps={reps} onSvV={onSvV}/></div>}
 
       {detail&&<DetailModal rep={detail} vendors={vendors} props={props} reservas={reservas||[]} schedules={schedules||[]} onSvSchedules={onSvSchedules} hasLinkedDmg={reps.some(function(x){return isDanos(x.categoria)&&String(x._linkedToReport||"")===String(detail.id);})} onExtract={extractDanios} onClose={function(){setDetail(null);}} onMarkPaid={function(p){markPaid(detail.id,p);setDetail(function(x){return Object.assign({},x,{paid:p});});}} onSave={function(r){onUpsert(r);setDetail(r);}} onQA={qaUpdate} onDelete={function(){setCDel(detail.id);}}/>}
@@ -3590,6 +3768,80 @@ function FotosLimpiezaAnalisis({reps, vendors, props}){
   );
 }
 
+/* ─── Análisis de hora de llenado (Dashboard Ejecutivo) ───────────────────
+   ¿A qué hora se llenan los formularios y cuántas horas después de las 11:00
+   (inicio oficial de la ruta)? Separado por orden en la ruta, porque la 2ª y
+   3ª limpieza no pueden empezar a las 11. Filtrable por técnico. */
+function LlenadoAnalisis({reps, vendors}){
+  const [fTec,setFTec] = useState("__all");
+  var tecs=schedTecnicos(vendors||[]);
+  var selV = fTec==="__all"?null:tecs.find(function(v){return String(v.email||"").toLowerCase()===fTec;});
+  var res = React.useMemo(function(){
+    var base=(reps||[]).filter(function(r){ return isCleaning(r.categoria) && r.createdAt; });
+    if(selV) base=base.filter(function(r){ return repMatchesVendor(r, selV); });
+    var buckets=[["<11","antes 11"],["11-13","11–13"],["13-15","13–15"],["15-17","15–17"],["17-19","17–19"],["19+","después 19"]];
+    var bcount={}; buckets.forEach(function(b){bcount[b[0]]=0;});
+    var porOrden={}; var n=0, sumH=0;
+    base.forEach(function(r){
+      var f=fillHourGT(r); if(!f) return; n++;
+      var d=f.dec; var key = d<11?"<11":d<13?"11-13":d<15?"13-15":d<17?"15-17":d<19?"17-19":"19+";
+      bcount[key]++;
+      var h=horasDesdeRuta(r); var o=ordenEnRuta(r, reps).orden; var ok=o>=3?"3+":String(o);
+      if(h!=null){ (porOrden[ok]||(porOrden[ok]={s:0,n:0})); porOrden[ok].s+=h; porOrden[ok].n++; if(o===1){ sumH+=h; } }
+    });
+    var prom1 = null; if(porOrden["1"]&&porOrden["1"].n) prom1=porOrden["1"].s/porOrden["1"].n;
+    return {buckets:buckets, bcount:bcount, porOrden:porOrden, n:n, prom1:prom1};
+  },[reps, fTec, vendors]);
+  var maxB=Math.max(1,Math.max.apply(null,res.buckets.map(function(b){return res.bcount[b[0]];})));
+  var ordenLabels={"1":"1ª de la ruta","2":"2ª de la ruta","3+":"3ª o más"};
+  return (
+    <div style={{background:"#fff",borderRadius:18,border:"1px solid "+C.gray,padding:"20px 22px",boxShadow:"var(--sa-shadow-sm)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:14,flexWrap:"wrap"}}>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",display:"flex",alignItems:"center",gap:7}}><span style={{width:6,height:6,borderRadius:"50%",background:C.peach}}/>Hora de llenado</div>
+          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:22,color:C.black,marginTop:5,lineHeight:1.2}}>¿Cuándo llenan el formulario?</div>
+        </div>
+        <select value={fTec} onChange={function(e){setFTec(e.target.value);}} style={{border:"1.5px solid "+C.gray,borderRadius:"var(--sa-pill)",padding:"9px 14px",fontSize:12,fontFamily:"Montserrat,sans-serif",background:"#fff",outline:"none",maxWidth:"100%",fontWeight:600,color:C.black}}>
+          <option value="__all">Todo el equipo</option>
+          {tecs.map(function(v){ return <option key={v.email} value={String(v.email||"").toLowerCase()}>{vendorDisplay(v)}</option>; })}
+        </select>
+      </div>
+      {res.n===0
+        ? <div style={{marginTop:18,padding:"28px 16px",textAlign:"center",color:C.earth,fontSize:13,background:C.surfaceWarm,borderRadius:12,lineHeight:1.6}}>Sin formularios con hora registrada {selV?"de "+vendorDisplay(selV):""} todavía.</div>
+        : <>
+            <div style={{display:"flex",alignItems:"flex-end",gap:8,marginTop:18,height:110}}>
+              {res.buckets.map(function(b){
+                var c=res.bcount[b[0]]; var hh=Math.round(c/maxB*88);
+                return (
+                  <div key={b[0]} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
+                    <span style={{fontSize:11,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>{c||""}</span>
+                    <div style={{width:"100%",height:Math.max(3,hh),borderRadius:"6px 6px 0 0",background:b[0]==="<11"?C.sand:C.peach}}/>
+                    <span style={{fontSize:9.5,color:C.taupe,textAlign:"center",lineHeight:1.2}}>{b[1]}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{marginTop:18,borderTop:"1px solid "+C.line,paddingTop:14}}>
+              <div style={{fontSize:10.5,fontWeight:700,color:C.earth,letterSpacing:".12em",textTransform:"uppercase",marginBottom:8}}>Horas después de iniciar la ruta (11:00)</div>
+              <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                {["1","2","3+"].map(function(k){
+                  var o=res.porOrden[k]; if(!o||!o.n) return null;
+                  return (
+                    <div key={k} style={{flex:"1 1 120px",background:C.surfaceWarm,borderRadius:12,padding:"12px 14px"}}>
+                      <div style={{fontSize:10,color:C.taupe,marginBottom:3}}>{ordenLabels[k]}</div>
+                      <div style={{fontSize:20,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>{fmtHorasDesde(o.s/o.n)}</div>
+                      <div style={{fontSize:10,color:C.taupe,marginTop:2}}>{o.n} limpieza{o.n===1?"":"s"}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{fontSize:11,color:C.earth,marginTop:10,lineHeight:1.6,textWrap:"pretty"}}>La 1ª limpieza es la referencia real de puntualidad; la 2ª y 3ª arrancan más tarde porque la ruta es secuencial.</div>
+            </div>
+          </>}
+    </div>
+  );
+}
+
 /* ─── Executive Dashboard */
 function ExecDash({reps,vendors,reviews,rvCasos,props,reservas,schedules,onSvSchedules,onUpsert}) {
   const [fProp,  setFProp]   = useState("Todas");
@@ -3715,6 +3967,9 @@ function ExecDash({reps,vendors,reviews,rvCasos,props,reservas,schedules,onSvSch
 
       {/* ── Análisis de fotos de limpieza (Pareto por técnico o equipo) ── */}
       <FotosLimpiezaAnalisis reps={reps} vendors={vendors} props={props}/>
+
+      {/* ── Hora de llenado del formulario vs inicio de ruta (11:00) ── */}
+      <LlenadoAnalisis reps={reps} vendors={vendors}/>
 
       {/* ── Análisis de limpiezas profundas y de daños ── */}
       <ProfundasAnalisis reps={reps} props={props} vendors={vendors} schedules={schedules} onSvSchedules={onSvSchedules}/>
@@ -4557,42 +4812,32 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
   });
   function missingPhotoList(){
     var m=[];
-    Array.from({length:cuartos}).forEach(function(_,i){if(!form.fotosHabitaciones[i])m.push("Cuarto "+(i+1));});
-    Array.from({length:banos}).forEach(function(_,i){var b=form.fotosBanos[i]||{};if(!b.ducha)m.push("Baño "+(i+1)+" — ducha");if(!b.inodoro)m.push("Baño "+(i+1)+" — inodoro");});
-    if(!form.fotosCocinaGeneral)m.push("Cocina — general");
-    if(!form.fotosMicroondas)m.push("Cocina — microondas");
-    if(!form.fotosCafetera)m.push("Cocina — cafetera");
-    if(!form.fotosEcofiltro)m.push("Cocina — ecofiltro");
-    if(!form.fotosLavatrastos)m.push("Cocina — lavaplatos");
-    if(!form.fotosRefrigerador)m.push("Cocina — refrigerador");
-    if(!form.fotosInsumosLimpieza)m.push("Cocina — insumos de limpieza");
-    if(!form.fotosSalaGeneral)m.push("Sala — general");
-    if(!form.fotosComedorGeneral)m.push("Comedor — general");
-    if(!form.fotosPrimeraImpresion)m.push("Detalles — primera impresión");
-    if(!form.fotosPisoComun)m.push("Detalles — piso de área común");
-    if(!form.fotosTrapeadores)m.push("Detalles — trapeadores y trapos");
-    if(!form.fotosTarjetas)m.push("Detalles — tarjetas de acceso");
-    if(!form.fotosCloset)m.push("Detalles — blancos en clóset");
+    function rq(k){ return formQCfg("Limpieza tradicional",k).req; }
+    if(rq("hab_general")) Array.from({length:cuartos}).forEach(function(_,i){if(!form.fotosHabitaciones[i])m.push("Cuarto "+(i+1));});
+    Array.from({length:banos}).forEach(function(_,i){var b=form.fotosBanos[i]||{};if(rq("bano_ducha")&&!b.ducha)m.push("Baño "+(i+1)+" — ducha");if(rq("bano_inodoro")&&!b.inodoro)m.push("Baño "+(i+1)+" — inodoro");});
+    TRAD_SINGLE_PHOTOS.forEach(function(p){ if(rq(p[0])&&!form[p[0]]) m.push(p[1]); });
     return m;
   }
 
   function buildPendientes(){
     var out=[];
-    Array.from({length:cuartos}).forEach(function(_,i){
+    function tReq(k){ return formQCfg("Limpieza tradicional",k).req; }
+    function tCam(k){ var c=formQCfg("Limpieza tradicional",k); return c.cam||!c.upl; }
+    if(tReq("hab_general")) Array.from({length:cuartos}).forEach(function(_,i){
       if(!form.fotosHabitaciones[i]) out.push({id:"hab"+i,label:"Habitaciones — cuarto "+(i+1)+" (foto general)",
-        node:<SinglePhotoUp foto={form.fotosHabitaciones[i]||null} accent={C.earth} onAdd={function(f){compress(f).then(function(d){var arr=[...form.fotosHabitaciones];arr[i]=d;sf("fotosHabitaciones",arr);});}} onDel={function(){var arr=[...form.fotosHabitaciones];arr[i]=null;sf("fotosHabitaciones",arr);}}/>});
+        node:<SinglePhotoUp foto={form.fotosHabitaciones[i]||null} accent={C.earth} cameraOnly={tCam("hab_general")} onAdd={function(f){compress(f).then(function(d){var arr=[...form.fotosHabitaciones];arr[i]=d;sf("fotosHabitaciones",arr);});}} onDel={function(){var arr=[...form.fotosHabitaciones];arr[i]=null;sf("fotosHabitaciones",arr);}}/>});
     });
     Array.from({length:banos}).forEach(function(_,i){
       var b=form.fotosBanos[i]||{};
       function updB(field,val){var arr=[...form.fotosBanos];arr[i]=Object.assign({},form.fotosBanos[i]||{},{[field]:val});sf("fotosBanos",arr);}
-      if(!b.ducha) out.push({id:"banoD"+i,label:"Baño "+(i+1)+" — ducha",
-        node:<SinglePhotoUp foto={(form.fotosBanos[i]||{}).ducha||null} accent="#3B6691" onAdd={function(f){compress(f).then(function(d){updB("ducha",d);});}} onDel={function(){updB("ducha",null);}}/>});
-      if(!b.inodoro) out.push({id:"banoI"+i,label:"Baño "+(i+1)+" — inodoro",
-        node:<SinglePhotoUp foto={(form.fotosBanos[i]||{}).inodoro||null} accent="#3B6691" onAdd={function(f){compress(f).then(function(d){updB("inodoro",d);});}} onDel={function(){updB("inodoro",null);}}/>});
+      if(tReq("bano_ducha")&&!b.ducha) out.push({id:"banoD"+i,label:"Baño "+(i+1)+" — ducha",
+        node:<SinglePhotoUp foto={(form.fotosBanos[i]||{}).ducha||null} accent="#3B6691" cameraOnly={tCam("bano_ducha")} onAdd={function(f){compress(f).then(function(d){updB("ducha",d);});}} onDel={function(){updB("ducha",null);}}/>});
+      if(tReq("bano_inodoro")&&!b.inodoro) out.push({id:"banoI"+i,label:"Baño "+(i+1)+" — inodoro",
+        node:<SinglePhotoUp foto={(form.fotosBanos[i]||{}).inodoro||null} accent="#3B6691" cameraOnly={tCam("bano_inodoro")} onAdd={function(f){compress(f).then(function(d){updB("inodoro",d);});}} onDel={function(){updB("inodoro",null);}}/>});
     });
     TRAD_SINGLE_PHOTOS.forEach(function(p){
-      if(!form[p[0]]) out.push({id:p[0],label:p[1],
-        node:<SinglePhotoUp foto={form[p[0]]||null} accent={C.earth} onAdd={function(f){compress(f).then(function(d){sf(p[0],d);});}} onDel={function(){sf(p[0],null);}}/>});
+      if(tReq(p[0])&&!form[p[0]]) out.push({id:p[0],label:p[1],
+        node:<SinglePhotoUp foto={form[p[0]]||null} accent={C.earth} cameraOnly={tCam(p[0])} onAdd={function(f){compress(f).then(function(d){sf(p[0],d);});}} onDel={function(){sf(p[0],null);}}/>});
     });
     form.inventario.forEach(function(it,idx){
       if(!it.countAlways) return;
@@ -5114,9 +5359,13 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
   function prev(){if(step>0)setStep(function(s){return s-1;});}
   var propObj=props.find(function(p){return p.name===form.propiedad;})||{};
   var banos=propObj.banos||1;
-  /* Fotos obligatorias — 1 por espacio */
-  var okDuchaP  = !!(form.fotosRegadera||form.fotosDucha);
-  var okCocinaP = !!(form.fotosEstufa||form.fotosFregadero||form.fotosMicroondas2||form.fotosPlatos);
+  /* Fotos obligatorias — 1 por espacio, según la configuración del admin. */
+  function pReq(k){ return formQCfg("Limpieza profunda",k).req; }
+  function pCam(k){ var c=formQCfg("Limpieza profunda",k); return c.cam||!c.upl; }
+  var duchaReq  = pReq("fotosRegadera")||pReq("fotosDucha");
+  var cocinaReq = pReq("fotosEstufa")||pReq("fotosFregadero")||pReq("fotosMicroondas2")||pReq("fotosPlatos");
+  var okDuchaP  = !duchaReq  || !!(form.fotosRegadera||form.fotosDucha);
+  var okCocinaP = !cocinaReq || !!(form.fotosEstufa||form.fotosFregadero||form.fotosMicroondas2||form.fotosPlatos);
   var invPendP  = form.inventario.filter(function(it){
     if(!it.countAlways) return false;
     if(it.cantidad===""||it.cantidad===null||it.cantidad===undefined||isNaN(parseInt(it.cantidad))) return true;
@@ -5207,8 +5456,8 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
           <WizStep title="Regadera, Ducha y Drenajes" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext={okDuchaP} color="#3d6b52">
             {!okDuchaP&&<PhotoReqWarn msg="Sube al menos 1 foto (regadera o ducha) — es obligatoria para continuar."/>}
             <div style={{display:"flex",flexDirection:"column",gap:16}}>
-              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Regadera — Ojitos (que no estén tapados)</div><SinglePhotoUp foto={form.fotosRegadera} accent="#3d6b52" onAdd={function(f){compress(f).then(function(d){sf("fotosRegadera",d);});}} onDel={function(){sf("fotosRegadera",null);}}/></div>
-              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Ducha / Mampara (vidrio o cortina)</div><SinglePhotoUp foto={form.fotosDucha} accent="#3d6b52" onAdd={function(f){compress(f).then(function(d){sf("fotosDucha",d);});}} onDel={function(){sf("fotosDucha",null);}}/></div>
+              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Regadera — Ojitos (que no estén tapados)</div><SinglePhotoUp foto={form.fotosRegadera} accent="#3d6b52" cameraOnly={pCam("fotosRegadera")} onAdd={function(f){compress(f).then(function(d){sf("fotosRegadera",d);});}} onDel={function(){sf("fotosRegadera",null);}}/></div>
+              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Ducha / Mampara (vidrio o cortina)</div><SinglePhotoUp foto={form.fotosDucha} accent="#3d6b52" cameraOnly={pCam("fotosDucha")} onAdd={function(f){compress(f).then(function(d){sf("fotosDucha",d);});}} onDel={function(){sf("fotosDucha",null);}}/></div>
               <div>
                 <div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Drenajes — 1 foto por baño</div>
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -5231,7 +5480,7 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
           <WizStep title="Cocina profunda" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext={okCocinaP} color="#3d6b52">
             {!okCocinaP&&<PhotoReqWarn msg="Sube al menos 1 foto de la cocina profunda — es obligatoria para continuar."/>}
             <div style={{display:"flex",flexDirection:"column",gap:14}}>
-              {[["fotosEstufa","Estufa limpia"],["fotosFregadero","Fregadero limpio"],["fotosMicroondas2","Interior del microondas"],["fotosPlatos","Platos, vasos y cubiertos ordenados"]].map(function(item){var key=item[0];var lbl=item[1];return <div key={key}><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>{lbl}</div><SinglePhotoUp foto={form[key]} accent="#3d6b52" onAdd={function(f){compress(f).then(function(d){sf(key,d);});}} onDel={function(){sf(key,null);}}/></div>;})}
+              {[["fotosEstufa","Estufa limpia"],["fotosFregadero","Fregadero limpio"],["fotosMicroondas2","Interior del microondas"],["fotosPlatos","Platos, vasos y cubiertos ordenados"]].map(function(item){var key=item[0];var lbl=item[1];return <div key={key}><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>{lbl}</div><SinglePhotoUp foto={form[key]} accent="#3d6b52" cameraOnly={pCam(key)} onAdd={function(f){compress(f).then(function(d){sf(key,d);});}} onDel={function(){sf(key,null);}}/></div>;})}
             </div>
           </WizStep>
         )}
@@ -5240,7 +5489,7 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
           <WizStep title="Gavetas y detrás de electrodomésticos" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext color="#3d6b52">
             <div style={{display:"flex",flexDirection:"column",gap:16}}>
               <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Organización de gavetas / utensilios (1-2 ejemplos)</div><MultiPhotoUp label="Gavetas" photos={form.fotosGavetas} max={3} accent="#3d6b52" onAdd={function(files){var c=[...form.fotosGavetas];Promise.all(Array.from(files).slice(0,3-c.length).map(compress)).then(function(ds){sf("fotosGavetas",c.concat(ds).slice(0,3));});}} onDel={function(i){sf("fotosGavetas",form.fotosGavetas.filter(function(_,j){return j!==i;}));}}/></div>
-              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Detrás de electrodomésticos (si se movieron)</div><SinglePhotoUp foto={form.fotosDetrasElect} accent="#3d6b52" onAdd={function(f){compress(f).then(function(d){sf("fotosDetrasElect",d);});}} onDel={function(){sf("fotosDetrasElect",null);}}/></div>
+              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Detrás de electrodomésticos (si se movieron)</div><SinglePhotoUp foto={form.fotosDetrasElect} accent="#3d6b52" cameraOnly={pCam("fotosDetrasElect")} onAdd={function(f){compress(f).then(function(d){sf("fotosDetrasElect",d);});}} onDel={function(){sf("fotosDetrasElect",null);}}/></div>
             </div>
           </WizStep>
         )}
@@ -5550,7 +5799,65 @@ function OrphanEmailLinker({reps, vendors, onSvV}) {
 }
 
 /* ─── Config */
-function CfgView({regSol,onSvRegSol,canNotif:_cn,reps,vendors,props,adminPin,company,extCats,schedules,codigos,onSvCodigos,onVerComo,hospUrlDay,hospUrlWeek,feedback,notifPrefs,canNotif,onSvNotifPrefs,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback}) {
+function FormulariosCfg({formCfg, onSave}){
+  var cfg=formCfg||{};
+  function qc(formId,key){ var f=cfg[formId]||{}, o=f[key]||{}; return {req:o.req!=null?!!o.req:true, cam:o.cam!=null?!!o.cam:false, upl:o.upl!=null?!!o.upl:true}; }
+  function setFlag(formId,key,flag,val){
+    var next=Object.assign({},cfg); var f=Object.assign({},next[formId]||{}); var o=Object.assign({},f[key]||{});
+    o[flag]=val;
+    /* Al menos una vía de captura: si apagas subir, forzamos solo cámara; si apagas cámara sin subir, reactiva subir. */
+    if(flag==="upl"&&!val){ o.cam=true; } if(flag==="cam"&&val){ /* solo cámara permitido aun sin galería */ }
+    if(o.upl===false&&o.cam===false){ o.upl=true; }
+    f[key]=o; next[formId]=f; onSave&&onSave(next);
+  }
+  function minPct(formId){ var qs=FORM_QUESTIONS[formId]||[]; if(!qs.length) return 0; var req=qs.filter(function(q){return qc(formId,q.key).req;}).length; return Math.round(req/qs.length*100); }
+  var forms=["Limpieza tradicional","Limpieza profunda"];
+  function Box({on,onClick,label}){
+    return (
+      <button onClick={onClick} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 10px",minHeight:38,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(on?C.peach:C.gray),background:on?"#FCEDE8":"#fff",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+        <span style={{width:16,height:16,borderRadius:5,flexShrink:0,border:"1.5px solid "+(on?C.peach:C.gray),background:on?C.peach:"#fff",display:"inline-flex",alignItems:"center",justifyContent:"center"}}>{on&&<Icon name="check" size={11} stroke="#fff"/>}</span>
+        <span style={{fontSize:11,fontWeight:600,color:on?"#B4553C":C.earth}}>{label}</span>
+      </button>
+    );
+  }
+  return (
+    <div style={{maxWidth:640,margin:"0 auto"}}>
+      <div style={{fontSize:13,color:C.earth,lineHeight:1.7,marginBottom:18,textWrap:"pretty"}}>Para cada foto del formulario de limpieza define si es <b style={{color:C.black}}>obligatoria</b>, si permite <b style={{color:C.black}}>subir</b> desde galería y si es <b style={{color:C.black}}>solo cámara</b>. El <b style={{color:C.black}}>% mínimo de fotos</b> se calcula solo con las obligatorias.</div>
+      {forms.map(function(formId){
+        var qs=FORM_QUESTIONS[formId]||[]; var pct=minPct(formId); var reqN=qs.filter(function(q){return qc(formId,q.key).req;}).length;
+        return (
+          <div key={formId} style={{background:"#fff",border:"1px solid "+C.line,borderRadius:16,padding:"16px 18px",marginBottom:18,boxShadow:"var(--sa-shadow-xs)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,flexWrap:"wrap",marginBottom:6}}>
+              <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:20,color:C.black}}>{formId}</div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:22,fontWeight:600,color:C.peach,fontVariantNumeric:"tabular-nums",lineHeight:1}}>{pct}%</div>
+                <div style={{fontSize:9.5,color:C.taupe,letterSpacing:".08em",textTransform:"uppercase"}}>mínimo de fotos</div>
+              </div>
+            </div>
+            <div style={{fontSize:11,color:C.earth,marginBottom:12}}>{reqN} de {qs.length} fotos obligatorias · el mínimo se recalcula al cambiar las casillas.</div>
+            <div style={{display:"flex",flexDirection:"column",gap:9}}>
+              {qs.map(function(q){
+                var c=qc(formId,q.key);
+                return (
+                  <div key={q.key} style={{background:C.surfaceWarm,borderRadius:11,padding:"11px 13px"}}>
+                    <div style={{fontSize:13,fontWeight:600,color:C.black,marginBottom:8}}>{q.label}{q.dyn?<span style={{fontSize:9.5,fontWeight:700,color:C.taupe,marginLeft:7,letterSpacing:".06em",textTransform:"uppercase"}}>c/u</span>:null}</div>
+                    <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                      <Box on={c.req} label="Obligatoria" onClick={function(){setFlag(formId,q.key,"req",!c.req);}}/>
+                      <Box on={c.cam} label="Solo cámara" onClick={function(){setFlag(formId,q.key,"cam",!c.cam);}}/>
+                      <Box on={c.upl} label="Permite subir" onClick={function(){setFlag(formId,q.key,"upl",!c.upl);}}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+      <div style={{fontSize:11.5,color:C.earth,lineHeight:1.7,background:C.surfaceWarm,borderRadius:10,padding:"12px 14px",textWrap:"pretty"}}>“Solo cámara” obliga a tomar la foto en el momento (sin galería). Si apagas “permite subir”, la foto queda como solo cámara automáticamente. Los cambios se guardan solos y aplican al próximo formulario.</div>
+    </div>
+  );
+}
+function CfgView({regSol,onSvRegSol,canNotif:_cn,reps,vendors,props,adminPin,company,extCats,schedules,codigos,onSvCodigos,onVerComo,hospUrlDay,hospUrlWeek,feedback,notifPrefs,canNotif,onSvNotifPrefs,formCfg,onSvFormCfg,onSvV,onSvP,onSvPin,onSvCo,onSvExtCats,onSvSchedules,onSvHospUrlDay,onSvHospUrlWeek,onSvFeedback}) {
   const [tab,setTab] = useState("vendors");
   /* Los ajustes sensibles son del administrador principal. Un administrador
      secundario entra solo para enviar los enlaces de registro. */
@@ -5570,13 +5877,14 @@ function CfgView({regSol,onSvRegSol,canNotif:_cn,reps,vendors,props,adminPin,com
     <div style={{maxWidth:640,margin:"0 auto",padding:"28px 18px 60px",fontFamily:"Montserrat,sans-serif"}}>
       <div style={{marginBottom:20}}><div style={{fontSize:9.5,fontWeight:600,color:C.earth,letterSpacing:".28em",textTransform:"uppercase",marginBottom:8}}>Configuración</div><div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:28,fontWeight:400,color:C.black}}>Ajustes del sistema</div></div>
       <div style={{display:"flex",background:"#fff",borderRadius:10,padding:4,gap:3,marginBottom:18,border:"1px solid "+C.gray,flexWrap:"wrap"}}>
-        {[["vendors","Equipo"],["props","Propiedades"],["codigos","Códigos"]].concat(canNotif?[["notif","Notificaciones"]]:[]).concat([["feedback","Sugerencias"],["company","Empresa"],["security","Seguridad"]]).map(function(it){ var k=it[0],l=it[1]; return <button key={k} onClick={function(){setTab(k);}} style={{flex:1,minWidth:90,padding:"9px 6px",borderRadius:8,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,fontSize:12,letterSpacing:".06em",transition:"all .2s"}}>{l}</button>; })}
+        {[["vendors","Equipo"],["props","Propiedades"],["codigos","Códigos"],["forms","Formularios"]].concat(canNotif?[["notif","Notificaciones"]]:[]).concat([["feedback","Sugerencias"],["company","Empresa"],["security","Seguridad"]]).map(function(it){ var k=it[0],l=it[1]; return <button key={k} onClick={function(){setTab(k);}} style={{flex:1,minWidth:90,padding:"9px 6px",borderRadius:8,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,fontSize:12,letterSpacing:".06em",transition:"all .2s"}}>{l}</button>; })}
       </div>
       <div style={{display:tab==="vendors"  ?"block":"none"}}>{onVerComo&&<VerComoCfg vendors={vendors} onVerComo={onVerComo}/>}<RegistroCfg regSol={regSol||[]} onSvRegSol={onSvRegSol} vendors={vendors} onSaveVendors={onSvV} puedeAprobar={true}/><VendorsCfg  vendors={vendors} extCats={extCats||[]} onSave={onSvV} onSaveExtCats={onSvExtCats} props={props||[]} reps={reps||[]}/><OrphanEmailLinker reps={reps} vendors={vendors} onSvV={onSvV}/></div>
       {canNotif&&<div style={{display:tab==="notif"?"block":"none"}}><NotifCfg prefs={notifPrefs} vendors={vendors} onSave={onSvNotifPrefs} readOnly={false}/></div>}
       <div style={{display:tab==="feedback"?"block":"none"}}><FeedbackCfg feedback={feedback||[]} onSave={onSvFeedback}/></div>
       <div style={{display:tab==="props"   ?"block":"none"}}><PropsCfg    props={props}     onSave={onSvP}/></div>
       <div style={{display:tab==="codigos" ?"block":"none"}}><CodigosCfg props={props||[]} codigos={codigos||{}} onSave={onSvCodigos}/></div>
+      <div style={{display:tab==="forms"   ?"block":"none"}}><FormulariosCfg formCfg={formCfg||{}} onSave={onSvFormCfg}/></div>
       <div style={{display:tab==="company" ?"block":"none"}}><CompanyCfg  company={company} onSave={onSvCo}/></div>
       <div style={{display:tab==="security"?"block":"none"}}><SecurityCfg adminPin={adminPin} onSave={onSvPin}/></div>
     </div>
@@ -7581,6 +7889,89 @@ function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,
   );
 }
 
+/* ═══ AVISO DE CORREOS REBOTADOS (#) ══════════════════════════════════════
+   Si a un usuario le rebotan correos de forma consecutiva (tomando como
+   referencia los más recientes), al iniciar sesión ve un pop-up forzado que
+   NO se puede cerrar hasta responder: confirmar el correo o cambiarlo. */
+function bounceCountFor(email){
+  var em=String(email||"").toLowerCase().trim(); if(!em) return 0;
+  var log=epiReadMailLog();  /* ya viene del más reciente al más antiguo */
+  var mine=log.filter(function(e){ return String(e.to||"").toLowerCase().indexOf(em)>=0; });
+  if(!mine.length) return 0;
+  /* El más reciente llegó → todo bien, ignorar por completo. */
+  if(mine[0].ok) return 0;
+  var n=0; for(var i=0;i<mine.length;i++){ if(mine[i].ok) break; n++; }
+  return n;
+}
+function BounceGate({vendor, allVendors, onSvV}){
+  const [mode,setMode] = useState("ask");   /* ask | edit | done */
+  const [nuevo,setNuevo] = useState("");
+  const [err,setErr] = useState("");
+  const [ack,setAck] = useState(false);
+  var em=String(vendor&&vendor.email||"").toLowerCase().trim();
+  var fallos=bounceCountFor(em);
+  var ackKey="epi_bounce_ack_"+em+"_"+fallos;
+  useEffect(function(){ try{ if(localStorage.getItem(ackKey)==="1") setAck(true); }catch(_){} },[ackKey]);
+  if(fallos<2 || ack) return null;
+  function confirmar(){ try{ localStorage.setItem(ackKey,"1"); }catch(_){} setAck(true); }
+  function guardar(){
+    var ne=nuevo.trim(); setErr("");
+    if(!ne||ne.indexOf("@")<1){ setErr("Escribe un correo válido."); return; }
+    var conflict=(allVendors||[]).find(function(v){return v.id!==vendor.id&&String(v.email||"").toLowerCase()===ne.toLowerCase();});
+    if(conflict){ setErr("Ese correo ya está en uso por otro usuario."); return; }
+    onSvV&&onSvV((allVendors||[]).map(function(v){
+      if(v.id!==vendor.id) return v;
+      var prev=(v.prevEmails||[]).slice();
+      if(v.email&&String(v.email).toLowerCase()!==ne.toLowerCase()&&prev.indexOf(v.email)<0) prev.push(v.email);
+      return Object.assign({},v,{email:ne,prevEmails:prev});
+    }));
+    vendor.email=ne;
+    try{ if(window.SAAuth) window.SAAuth.setEmail(em, ne); }catch(_){}
+    try{ localStorage.setItem("epi_bounce_ack_"+ne.toLowerCase()+"_"+fallos,"1"); }catch(_){}
+    setMode("done");
+  }
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:9850,background:"rgba(62,63,63,.6)",backdropFilter:"blur(5px)",WebkitBackdropFilter:"blur(5px)",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"Montserrat,sans-serif"}}>
+      <div style={{width:"100%",maxWidth:440,background:C.surface,borderRadius:28,padding:"26px 24px",boxShadow:"var(--sa-shadow-lg)",maxHeight:"92vh",overflowY:"auto"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{width:8,height:8,borderRadius:"50%",background:C.attention,flexShrink:0}}/>
+          <span style={{fontSize:9.5,fontWeight:700,color:C.attentionText,letterSpacing:".18em",textTransform:"uppercase"}}>Correos sin recibir</span>
+        </div>
+        {mode==="done"
+          ? <>
+              <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,color:C.black,marginTop:8,lineHeight:1.25}}>Correo actualizado</div>
+              <div style={{fontSize:13,color:C.earth,marginTop:10,lineHeight:1.7,textWrap:"pretty"}}>Guardamos <b style={{color:C.black}}>{vendor.email}</b>. A partir de ahora te llegarán ahí.</div>
+              <button onClick={confirmar} style={{width:"100%",marginTop:18,padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Continuar</button>
+            </>
+          : mode==="edit"
+          ? <>
+              <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,color:C.black,marginTop:8,lineHeight:1.25}}>Cambia tu correo</div>
+              <div style={{fontSize:13,color:C.earth,marginTop:10,lineHeight:1.7,textWrap:"pretty"}}>Escribe el correo correcto donde quieres recibir los avisos.</div>
+              <input value={nuevo} onChange={function(e){setNuevo(e.target.value);setErr("");}} placeholder="tucorreo@ejemplo.com" inputMode="email" autoFocus
+                style={{width:"100%",boxSizing:"border-box",marginTop:14,border:"1.5px solid "+(err?C.red:C.gray),borderRadius:12,padding:"12px 14px",fontSize:14,fontFamily:"Montserrat,sans-serif",outline:"none",minHeight:48}}/>
+              {err&&<div style={{fontSize:12,color:C.red,marginTop:7,fontWeight:600}}>{err}</div>}
+              <div style={{display:"flex",gap:9,flexWrap:"wrap",marginTop:16}}>
+                <button onClick={guardar} style={{flex:1,minWidth:150,padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Guardar correo</button>
+                <button onClick={function(){setMode("ask");}} style={{padding:"13px 18px",minHeight:48,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:C.surface,color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Atrás</button>
+              </div>
+            </>
+          : <>
+              <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,color:C.black,marginTop:8,lineHeight:1.25}}>Te hemos estado enviando correos importantes y no los has estado recibiendo</div>
+              <div style={{fontSize:13,color:C.earth,marginTop:10,lineHeight:1.7,textWrap:"pretty"}}>Hay <b style={{color:C.attentionText}}>{fallos} correo{fallos===1?"":"s"}</b> que no pudiste ver. Confirmemos que tu correo esté bien escrito.</div>
+              <div style={{margin:"16px 0",background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"13px 15px"}}>
+                <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:4}}>Tu correo actual</div>
+                <div style={{fontSize:15,fontWeight:600,color:C.black,wordBreak:"break-word"}}>{vendor.email||"—"}</div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:9}}>
+                <button onClick={confirmar} style={{width:"100%",padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:C.surface,color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>El correo es correcto</button>
+                <button onClick={function(){setNuevo("");setMode("edit");}} style={{width:"100%",padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Ese no es mi correo, deseo cambiarlo</button>
+              </div>
+            </>}
+      </div>
+    </div>
+  );
+}
+
 /* ═══ VENDOR APP */
 function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codigos,ausencias,onSvAusencias,swaps,onSvSwaps,allSchedules,onSvSchedules,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout,reviews,rvCasos,onSvRvCasos,rvIA}) {
   const [view,setView] = useState("jobs");
@@ -7627,6 +8018,7 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codig
       />
       <SwapLightbox vendor={vendor} allVendors={allVendors} swaps={swaps||[]} onSvSwaps={onSvSwaps} allSchedules={allSchedules||[]} onSvSchedules={onSvSchedules}/>
       <TutorialSystem enabled={true} role="vendor"/>
+      <BounceGate vendor={vendor} allVendors={allVendors} onSvV={onSvV}/>
       <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} adelantos={adelantos} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}} onGoAccount={function(){setView("account");}} vendor={vendor} allVendors={allVendors} reviews={reviews} allReps={allReps} rvCasos={rvCasos} rvIA={rvIA} onGoCalidad={vendor.tipo==="interno"?function(){setView("hist");}:null}/></div>
       <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={allVendors||[]} props={props} company={company} defaultVendor={vendor.email} myReps={reps} allReps={allReps||[]} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
       <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} codigos={codigos||{}} ausencias={ausencias||[]} onSvAusencias={onSvAusencias} reps={reps} allVendors={allVendors||[]} swaps={swaps||[]} onSvSwaps={onSvSwaps} allSchedules={allSchedules||[]} onSvSchedules={onSvSchedules}/></div>
@@ -10357,6 +10749,29 @@ function codigosPendientes(schedules, codigos, fecha){
   return pend;
 }
 
+/* Caja de código estilo píldora con confirmación visual de guardado. El guardado
+   es automático; el flash "Guardado ✓" le da tranquilidad al usuario. */
+function CodeInput({value, onSave, width, disabled}){
+  const [val,setVal] = useState(value==null?"":String(value));
+  const [saved,setSaved] = useState(false);
+  const tRef = useRef(null);
+  useEffect(function(){ setVal(value==null?"":String(value)); },[value]);
+  useEffect(function(){ return function(){ if(tRef.current) clearTimeout(tRef.current); }; },[]);
+  function change(e){
+    var v=e.target.value; setVal(v);
+    onSave&&onSave(v);
+    setSaved(true); if(tRef.current) clearTimeout(tRef.current);
+    tRef.current=setTimeout(function(){ setSaved(false); }, 1600);
+  }
+  var has=!!String(val).trim();
+  return (
+    <div style={{position:"relative",width:width||118,flexShrink:0}}>
+      <input value={val} onClick={function(e){e.stopPropagation();}} onChange={change} placeholder="—" inputMode="numeric" disabled={disabled}
+        style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+(saved?C.green:(has?C.black:C.gray)),borderRadius:"var(--sa-pill)",padding:"9px 13px",fontSize:15,fontWeight:700,letterSpacing:".12em",textAlign:"center",fontFamily:"Montserrat,sans-serif",outline:"none",background:has?C.surfaceWarm:"#fff",color:C.black,minHeight:44,fontVariantNumeric:"tabular-nums",transition:"border-color .18s"}}/>
+      {saved&&<span style={{position:"absolute",top:"100%",left:0,right:0,marginTop:3,textAlign:"center",fontSize:9.5,fontWeight:700,letterSpacing:".06em",color:C.green,textTransform:"uppercase"}}>Guardado ✓</span>}
+    </div>
+  );
+}
 /* Bloque de códigos dentro de la Programación: se llenan aquí, no en Configuración.
    Guarda al instante (a prueba de recargas) porque crear cada código obliga a salir
    del navegador. Muestra la validez de 2 semanas como referencia visual. */
@@ -10407,8 +10822,7 @@ function CodigosProgramacionBlock({fecha, schedules, props, codigos, onSvCodigos
                       <div style={{fontSize:12.5,fontWeight:600,color:C.black,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{n}</div>
                       <div style={{fontSize:10,color:C.taupe,marginTop:2}}>{none?"No usa código":perm?"Código permanente":"Válido "+quincenaRango(refDate)}</div>
                     </div>
-                    {!none&&<input value={val} onChange={function(e){ if(perm) onSvCodigos&&onSvCodigos(withCodeMode(codigos,n,"permanent",e.target.value)); else setCode(n,e.target.value); }} placeholder="—" inputMode="numeric"
-                      style={{width:110,boxSizing:"border-box",border:"1.5px solid "+(val?C.black:C.gray),borderRadius:9,padding:"9px 11px",fontSize:15,fontWeight:700,letterSpacing:".1em",textAlign:"center",fontFamily:"Montserrat,sans-serif",outline:"none",background:val?C.surfaceWarm:"#fff",color:C.black,minHeight:44,fontVariantNumeric:"tabular-nums"}}/>}
+                    {!none&&<CodeInput value={val} width={110} onSave={function(v){ if(perm) onSvCodigos&&onSvCodigos(withCodeMode(codigos,n,"permanent",v)); else setCode(n,v); }}/>}
                   </div>
                   <div style={{display:"flex",gap:8,marginTop:9,flexWrap:"wrap"}}>
                     <button onClick={function(){ setMode(n, perm?"temp":"permanent"); }} style={{padding:"6px 11px",minHeight:38,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(perm?C.peach:C.gray),background:perm?"#FCEDE8":"#fff",color:perm?"#B4553C":C.earth,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{perm?"✓ Permanente":"Marcar permanente"}</button>
@@ -10523,8 +10937,7 @@ function CodigosCfg({props, codigos, onSave}){
                 <div style={{fontSize:12.5,fontWeight:600,color:C.black,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
                 {p.cuartos&&<div style={{fontSize:10.5,color:C.taupe,marginTop:2}}>{p.cuartos} hab</div>}
               </div>
-              <input value={val} onChange={function(e){setCodigo(p.name,e.target.value);}} placeholder="—" inputMode="numeric"
-                style={{width:118,boxSizing:"border-box",border:"1.5px solid "+(val?C.black:C.gray),borderRadius:9,padding:"9px 11px",fontSize:15,fontWeight:700,letterSpacing:".1em",textAlign:"center",fontFamily:"Montserrat,sans-serif",outline:"none",background:val?C.surfaceWarm:"#fff",color:C.black,minHeight:44,fontVariantNumeric:"tabular-nums"}}/>
+              <CodeInput value={val} width={118} onSave={function(v){setCodigo(p.name,v);}}/>
             </div>
           );
         })}
@@ -11167,7 +11580,7 @@ function cierreDe(s, ix, hoy){
   if(lista.length){
     var mio=lista.filter(function(r){ return String(r.reportadoPor||"").toLowerCase()===String(s.vendorEmail||"").toLowerCase(); })[0];
     var r=mio||lista[0];
-    return {estado:"hecha", rep:r, porOtro:!mio, ajuste:String(r.categoria)==="Ajuste", hora:cierreHora(r)};
+    return {estado:"hecha", rep:r, porOtro:!mio, ajuste:String(r.categoria)==="Ajuste", hora:cierreHora(r), horas:horasDesdeRuta(r)};
   }
   if(f>hoy) return {estado:"futura"};
   if(f<hoy) return {estado:"faltante"};
@@ -11178,6 +11591,36 @@ function cierreHora(r){
   var d=new Date(ms); var gt=new Date(d.getTime()+(d.getTimezoneOffset()-360)*60000);
   var h=gt.getHours(), m=gt.getMinutes();
   return ((h%12)||12)+":"+(m<10?"0":"")+m+" "+(h<12?"am":"pm");
+}
+/* ─── HORA DE LLENADO (#6) — la ruta inicia oficialmente a las 11:00 del día.
+   Con 2+ limpiezas, las siguientes no pueden empezar a las 11, así que además
+   de las horas desde las 11 guardamos el ORDEN de la limpieza en la ruta del
+   técnico ese día (1ª, 2ª, …), que es lo que hace justa la comparación. */
+function fillHourGT(r){
+  var ms=parseInt(r&&r.createdAt,10); if(!ms) return null;
+  var d=new Date(ms); var gt=new Date(d.getTime()+(d.getTimezoneOffset()-360)*60000);
+  return {ms:ms, h:gt.getHours(), m:gt.getMinutes(), dec:gt.getHours()+gt.getMinutes()/60};
+}
+/* Horas transcurridas entre las 11:00 GT del día de la limpieza y su llenado. */
+function horasDesdeRuta(r){
+  var f=fillHourGT(r); if(!f) return null;
+  var day=String(r.fecha||"").slice(0,10); if(!day) return null;
+  var base=new Date(day+"T11:00:00-06:00").getTime();
+  return (f.ms-base)/3600000;
+}
+/* Orden (1-based) de esta limpieza dentro de la ruta del técnico ese día. */
+function ordenEnRuta(r, allReps){
+  var day=String(r.fecha||"").slice(0,10), em=String(r.reportadoPor||"").toLowerCase();
+  var mismos=(allReps||[]).filter(function(x){ return isCleaning(x.categoria) && String(x.fecha).slice(0,10)===day && String(x.reportadoPor||"").toLowerCase()===em && x.createdAt; })
+    .sort(function(a,b){ return (a.createdAt||0)-(b.createdAt||0); });
+  var i=mismos.findIndex(function(x){ return String(x.id)===String(r.id); });
+  return {orden:i>=0?i+1:1, total:mismos.length||1};
+}
+function fmtHorasDesde(h){
+  if(h==null) return "—";
+  if(h<0) return "antes de las 11:00";
+  var hh=Math.floor(h), mm=Math.round((h-hh)*60); if(mm===60){hh++;mm=0;}
+  return (hh>0?hh+"h ":"")+(mm>0?mm+"m":(hh>0?"":"0m"));
 }
 
 /* ═══ DIAGNÓSTICO DE UNA PROGRAMACIÓN ═══════════════════════════════════════
@@ -12831,7 +13274,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                               {SCHED.esProfunda(f.s.tipo)&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"2px 7px",borderRadius:"var(--sa-pill)"}}>Profunda</span>}
                               {f.s.entradaHoy&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#B4553C"}}>Entrada</span>}
                               {cancelada&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.attentionText}}>Cancelada{f.cz.paga?" · media tarifa":""}</span>}
-                              {!cancelada&&farolActivo&&f.cz.estado==="hecha"&&<span style={{fontSize:9.5,color:C.green,fontWeight:600}}>✓ {f.cz.ajuste?"ajuste":"formulario"}{f.cz.hora?" "+f.cz.hora:""}</span>}
+                              {!cancelada&&farolActivo&&f.cz.estado==="hecha"&&<span style={{fontSize:9.5,color:C.green,fontWeight:600}}>✓ {f.cz.ajuste?"ajuste":"formulario"}{f.cz.hora?" "+f.cz.hora:""}{f.cz.horas!=null?" · "+fmtHorasDesde(f.cz.horas)+" tras iniciar":""}</span>}
                             </div>
                           </div>
                           {farolActivo
@@ -12846,7 +13289,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                             if(cfg.mode==="none") return <span style={{fontSize:10.5,color:C.taupe,textAlign:"right"}}>sin código</span>;
                             var perm=cfg.mode==="permanent";
                             var cval = perm ? String(cfg.permCode||"") : ((codigos[quincenaInfo(fecha).key]||{})[normalize(f.apto)]||"");
-                            return <input value={cval} onClick={function(e){e.stopPropagation();}} onChange={function(e){ e.stopPropagation(); var v=e.target.value; if(perm) onSvCodigos&&onSvCodigos(withCodeMode(codigos,f.apto,"permanent",v)); else onSvCodigos&&onSvCodigos(withCodigoQuincena(codigos,f.apto,fecha,v)); }} placeholder="—" inputMode="numeric" title={perm?"Código permanente":"Válido "+quincenaRango(fecha)} style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+(cval?C.black:C.gray),borderRadius:8,padding:"6px 6px",fontSize:13,fontWeight:700,letterSpacing:".06em",textAlign:"center",fontFamily:"Montserrat,sans-serif",outline:"none",background:cval?C.surfaceWarm:"#fff",color:C.black,fontVariantNumeric:"tabular-nums",minWidth:0}}/>;
+                            return <CodeInput value={cval} width={"100%"} onSave={function(v){ if(perm) onSvCodigos&&onSvCodigos(withCodeMode(codigos,f.apto,"permanent",v)); else onSvCodigos&&onSvCodigos(withCodigoQuincena(codigos,f.apto,fecha,v)); }}/>;
                           })()}
                         </div>
                         {/* Las mismas acciones que en la vista por técnico: mover, cancelar, quitar. */}
@@ -12939,7 +13382,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                                         </div>
                                         <div style={{fontSize:10.5,color:C.earth,marginTop:2}}>
                                           {quien.join(" · ")}
-                                          {farolActivo&&cz.estado==="hecha"?" · ✓ "+(cz.ajuste?"ajuste":"formulario")+(cz.hora?" "+cz.hora:""):""}
+                                          {farolActivo&&cz.estado==="hecha"?" · ✓ "+(cz.ajuste?"ajuste":"formulario")+(cz.hora?" "+cz.hora:"")+(cz.horas!=null?" · "+fmtHorasDesde(cz.horas)+" tras iniciar":""):""}
                                         </div>
                                       </div>
                                     </div>
