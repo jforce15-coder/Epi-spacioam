@@ -1429,7 +1429,7 @@ async function loadAllData() {
     /* Faltaba: la programación del servidor nunca llegaba al app. Por eso la ruta
        que el motor mandó por correo a las 6pm no aparecía a la mañana siguiente, y
        cada dispositivo mostraba solo lo que él mismo había generado en memoria. */
-    schedules: Array.isArray(cfg.schedules) ? cfg.schedules : [],
+    schedules: salvageArray(cfg.schedules) || [],
     codigos: (cfg.codigos && typeof cfg.codigos==="object") ? cfg.codigos : {},
     feedback: Array.isArray(cfg.feedback) ? cfg.feedback : [],
     hospurlday:  cfg.hospurlday  || "",
