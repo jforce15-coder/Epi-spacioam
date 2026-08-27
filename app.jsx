@@ -1094,6 +1094,16 @@ function VideoDanio({video, onSet}){
   );
 }
 
+/* Una clave de foto puede venir como lista (limpieza profunda) o como una sola
+   foto (tradicional): el mismo campo cambia de forma entre formularios, y un
+   borrador viejo puede traer la forma que no toca. Todo lo que entra a una
+   galería se normaliza aquí. */
+function fotoLista(v){
+  if(Array.isArray(v)) return v.filter(function(x){ return x&&typeof x==="string"; });
+  return (v&&typeof v==="string") ? [v] : [];
+}
+function fotoUna(v){ return Array.isArray(v) ? (fotoLista(v)[0]||null) : (v||null); }
+
 function compress(file) {
   return new Promise(function(res) {
     var fr = new FileReader();
@@ -5855,6 +5865,7 @@ function DaniosSection({form,sf}) {
 
 function SinglePhotoUp({foto,accent,onAdd,onDel,cameraOnly,label}) {
   var ref=useRef(null);
+  foto=fotoUna(foto);   /* el mismo campo puede venir como lista desde otro formulario */
   return (
     <div>
       {foto
@@ -5875,6 +5886,10 @@ function SinglePhotoUp({foto,accent,onAdd,onDel,cameraOnly,label}) {
 
 function MultiPhotoUp({label,photos,max,accent,onAdd,onDel}) {
   var ref=useRef(null);
+  /* Hay claves (platos, vasos) que en la limpieza tradicional son UNA foto y en la
+     profunda son varias. Un borrador guardado con el otro formato no debe tumbar
+     el formulario: lo que llegue se normaliza a lista. */
+  photos=fotoLista(photos);
   return (
     <div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -19111,6 +19126,7 @@ function ChipBtn({active,onClick,children,color}) {
 }
 function PicUp({label,max,photos,accent,onAdd,onDel}) {
   var ref=useRef(null);
+  photos=fotoLista(photos);
   return (
     <div>
       <div style={{fontSize:10.5,fontWeight:700,color:accent,letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>Fotos {label} <span style={{color:C.earth,fontWeight:400,textTransform:"none",letterSpacing:0,fontSize:10}}>máx. {max}</span></div>
