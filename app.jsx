@@ -195,6 +195,23 @@ function vendorDisplay(v) {
   return v.name||v.email||"—";
 }
 
+/* En una lista de «¿quién lo repara?» el nombre comercial solo no basta: hay que
+   saber a QUIÉN se le asigna. Este rótulo lleva empresa, persona y categoría, y
+   nunca se queda en solo «externo». */
+function vendorPersona(v){
+  if(!v) return "—";
+  if(v.primerNombre) return [v.primerNombre,v.primerApellido].filter(Boolean).join(" ");
+  return v.name||v.email||"—";
+}
+function mantLabel(v){
+  if(!v) return "—";
+  var persona=vendorPersona(v);
+  var emp=v.empresa?String(v.empresa).trim():"";
+  var cat=v.categoria?String(v.categoria).trim():"";
+  var base = emp ? (normalize(emp)===normalize(persona) ? emp : emp+" — "+persona) : persona;
+  return base + (cat?" · "+cat:"") + (v.tipo==="externo"?" · externo":"");
+}
+
 /* ─── Identidad de usuario
    Un técnico puede haber cambiado de correo. Sus reportes antiguos guardan el correo
    viejo en `reportadoPor`; los nuevos guardan además `vendorId`. Estas funciones
@@ -7738,7 +7755,7 @@ function ProgramarMantenimiento({rep, vendors, props, reservas, schedules, onSvS
         <span style={LBL}>Técnico</span>
         <select value={tec} onChange={function(e){setTec(e.target.value);}} style={IN}>
           <option value="">Elegir…</option>
-          {mants.map(function(v){ return <option key={v.id} value={String(v.email||"").toLowerCase()}>{vendorDisplay(v)}{v.tipo==="externo"?" · externo":""}</option>; })}
+          {mantOptGroups(mants)}
         </select>
         {mants.length===0&&<div style={{fontSize:11,color:C.red,marginTop:6,lineHeight:1.6}}>No hay técnicos de mantenimiento registrados. Agrégalos en Configuración › Equipo.</div>}
       </div>
@@ -9218,23 +9235,36 @@ function AusenciaHoyModal({aus, schedules, vendors, onClose, onApply}){
    Cada tarjeta usa una captura real del web app (móvil o escritorio según el
    dispositivo) en public/tips/<id>-<mobile|desktop>.png; si aún no existe, se
    muestra un marcador de posición con el nombre de la pantalla. */
-var TIPS_VERSION = "v2";
+var TIPS_VERSION = "v3";
 /* roles: quién lo ve. cat: "nuevo" (forzado la 1ª vez) o "mas" (solo en el hub "?"). */
 var TUTORIALES = [
-  // ── Técnicos ──
-  {id:"ausencia", type:"Programación", roles:["vendor"], cat:"nuevo", title:"Avisar una ausencia", lines:["En la pestaña Programa, baja al bloque «Avisar que no podrás trabajar».","Elige el día y el motivo, y envía. Tu ruta se reasigna sola y avisamos al equipo."]},
+  // ── Lo más nuevo · técnicos ──
+  {id:"correccion", type:"Calidad", roles:["vendor"], cat:"nuevo", title:"Responder una solicitud de corrección", lines:["Cuando el supervisor te deja una corrección, al entrar al app te sale sola. Ahora los puntos vienen en lista, uno por uno.","Si la abres dentro de la primera hora, corriges de una vez: toma de 1 a 3 fotos de lo que arreglaste y toca «Corrección realizada».","Si ya pasó más de una hora no tienes que regresar: solo toca «He leído y lo pondré en práctica».","El aviso vuelve cada vez que entres al app hasta que contestes."]},
+  {id:"noentendi", type:"Calidad", roles:["vendor"], cat:"nuevo", title:"Cuando no entiendes la corrección", lines:["En la misma solicitud, abajo, toca «No entendí, favor aclarar».","Escribe qué parte no te quedó clara — es opcional, pero ayuda — y envía.","Le llega de vuelta a quien hizo la revisión. Mientras te aclara, no te volvemos a insistir; la respuesta te aparece en Calidad."]},
+  {id:"fotoscamara", type:"Reportes", roles:["vendor"], cat:"nuevo", title:"Las fotos ahora se toman con la cámara", lines:["Al tocar un espacio de foto se abre la cámara directo, no la galería.","La foto es del trabajo de hoy: por eso ya no se sube una imagen guardada de antes.","Se comprime sola antes de enviarse, así que no gasta tus datos ni se tarda."]},
+  {id:"visitas", type:"Programación", roles:["vendor","admin"], cat:"nuevo", title:"Programar un día de visita", lines:["Si tienes la facultad de visitas, en tu menú aparece la pestaña Visitas.","Escoge primero el día. Solo te mostramos los daños de apartamentos donde ese día sale el huésped o el apartamento está libre — los que sí puedes resolver.","Marca los casos que vas a atender y toca «Programar la visita». Se agregan a tu agenda de ese día.","Al terminar cada caso, márcalo como «Resuelto» desde «Tus visitas programadas»."]},
   {id:"intercambio", type:"Programación", roles:["vendor"], cat:"nuevo", title:"Intercambiar una ruta", lines:["En Programa, toca «Intercambiar tareas con otro técnico».","Elige el día, las limpiezas que cedes y un técnico de tu misma zona. Él acepta o rechaza; te avisamos con el resultado."]},
-  {id:"revision", type:"Calidad", roles:["vendor"], cat:"nuevo", title:"Pedir revisión de una reseña", lines:["En la pestaña Calidad, abre la calificación con la que no estás de acuerdo.","Toca «Pedir revisión», cuéntanos por qué y envía. El administrador la revisa."]},
-  {id:"dano", type:"Reportes", roles:["vendor"], cat:"nuevo", title:"Reportar un daño", lines:["Toca «Nuevo reporte» y elige la categoría Daño.","Describe qué pasó, agrega fotos y envía. Un daño urgente llega de inmediato al administrador."]},
-  {id:"wifi", type:"Conectividad", roles:["vendor"], cat:"nuevo", title:"Conectarte al Wi-Fi", lines:["En la barra superior, a la derecha, toca el ícono de Wi-Fi.","Elige la propiedad y copia la red y la contraseña."]},
-  {id:"notiscenter", type:"Notificaciones", roles:["vendor","admin"], cat:"nuevo", title:"El nuevo centro de notificaciones", lines:["El triángulo con número, arriba a la izquierda junto al logo, abre tus avisos.","Ahí se agrupan tareas, calificaciones y recordatorios, aunque ya no sean push."]},
+  {id:"visorfotos", type:"Reportes", roles:["vendor","admin"], cat:"nuevo", title:"Ver una foto en grande", lines:["Toca cualquier foto de un reporte y se abre en grande dentro del app.","Antes se abría en una pestaña nueva y te sacaba de la plataforma; ya no pasa.","Con las flechas pasas a la siguiente foto del reporte, y cierras con la ✕ o la tecla Esc."]},
+
+  // ── Lo más nuevo · administración ──
+  {id:"aclaracion", type:"Calidad", roles:["admin"], cat:"nuevo", title:"Aclarar una corrección al técnico", lines:["Cuando un técnico no entiende una corrección, en Calidad › Limpiezas aparece arriba el bloque «Esperan tu aclaración».","Ves su pregunta y el comentario que tú escribiste. Responde ahí mismo y envía.","Al enviarla, el reloj de la corrección arranca de nuevo: si la abre dentro de la hora, todavía se le pide corregir en el momento."]},
+  {id:"mergedanos", type:"Calidad", roles:["admin"], cat:"nuevo", title:"Unificar daños repetidos", lines:["En Calidad › Daños, marca dos o más reportes del mismo apartamento que sean el mismo problema.","En la barra negra de arriba toca «Unificar en un reporte».","Quedan en el reporte más antiguo, con todas las fotos y todas las anotaciones de los demás.","Si te equivocaste, el botón «Separar» los devuelve a la lista por su cuenta."]},
+  {id:"mantdanos", type:"Calidad", roles:["admin"], cat:"nuevo", title:"Programar el mantenimiento de un daño", lines:["Marca los daños de un mismo apartamento y toca «Programar mantenimiento».","En «¿Quién lo repara?» la lista viene agrupada: primero el equipo interno y después cada servicio externo bajo su categoría, con el nombre de la empresa y de la persona.","Te sugerimos las próximas salidas de huésped de esa propiedad: reparar el día que sale alguien es lo que menos estorba.","Al confirmar, el trabajo entra a la agenda y el daño queda marcado como programado."]},
+  {id:"fotosperiodo", type:"Dashboard", roles:["admin"], cat:"nuevo", title:"Fotos de limpieza por período", lines:["En el Dashboard Ejecutivo, abre «¿Están subiendo las fotos?».","Ahora puedes ver el último mes, 2 o 3 meses, todo el historial, o un rango de fechas exacto.","El porcentaje de todo el historial esconde el mes que va mal: revisa el último mes para ver cómo va el equipo hoy."]},
+
+  // ── Técnicos ──
+  {id:"ausencia", type:"Programación", roles:["vendor"], cat:"mas", title:"Avisar una ausencia", lines:["En la pestaña Programa, baja al bloque «Avisar que no podrás trabajar».","Elige el día y el motivo, y envía. Tu ruta se reasigna sola y avisamos al equipo."]},
+  {id:"revision", type:"Calidad", roles:["vendor"], cat:"mas", title:"Pedir revisión de una reseña", lines:["En la pestaña Calidad, abre la calificación con la que no estás de acuerdo.","Toca «Pedir revisión», cuéntanos por qué y envía. El administrador la revisa."]},
+  {id:"dano", type:"Reportes", roles:["vendor"], cat:"mas", title:"Reportar un daño", lines:["Toca «Nuevo reporte» y elige la categoría Daño.","Describe qué pasó, agrega fotos y envía. Un daño urgente llega de inmediato al administrador."]},
+  {id:"wifi", type:"Conectividad", roles:["vendor"], cat:"mas", title:"Conectarte al Wi-Fi", lines:["En la barra superior, a la derecha, toca el ícono de Wi-Fi.","Elige la propiedad y copia la red y la contraseña."]},
+  {id:"notiscenter", type:"Notificaciones", roles:["vendor","admin"], cat:"mas", title:"El centro de notificaciones", lines:["El triángulo con número, arriba a la izquierda junto al logo, abre tus avisos.","Ahí se agrupan tareas, calificaciones y recordatorios, aunque ya no sean push."]},
   {id:"formulario", type:"Reportes", roles:["vendor"], cat:"mas", title:"Llenar un formulario", lines:["Toca «Nuevo reporte» y elige el tipo de trabajo.","Avanza paso a paso; se guarda solo mientras llenas. Sube las fotos que te pida y confirma al final."]},
   {id:"pagos", type:"Pagos", roles:["vendor"], cat:"mas", title:"Revisar tu historial de pagos", lines:["Entra a Pagos y quédate en «Historial de pagos».","Ahí ves cada comprobante con su fecha y monto; toca uno para el detalle."]},
   // ── Compartido ──
   {id:"notiquitar", type:"Notificaciones", roles:["vendor","admin"], cat:"mas", title:"Eliminar o posponer un aviso", lines:["Abre el centro de notificaciones desde el triángulo de arriba.","Desliza el aviso a la izquierda (←) para eliminarlo.","Deslízalo a la derecha (→) o toca «Después» para posponerlo."]},
   // ── Administradores ──
-  {id:"codigos", type:"Programación", roles:["admin"], cat:"nuevo", title:"Asignar códigos de acceso", lines:["En Programación, en «Rutas del día», escribe el código en la última columna de cada propiedad.","Los códigos valen 2 semanas; la fecha de validez se muestra bajo los filtros.","Marca «Permanente» si el código no cambia, o «No usa código» para no pedirlo de nuevo. Se guarda solo."]},
-  {id:"reasignar", type:"Programación", roles:["admin"], cat:"nuevo", title:"Reasignar una ausencia", lines:["En Programación, abre el bloque de ausencias documentadas.","Toca cualquier ausencia —aunque ya diga «Reasignada»— para elegir o cambiar quién la cubre."]},
+  {id:"codigos", type:"Programación", roles:["admin"], cat:"mas", title:"Asignar códigos de acceso", lines:["En Programación, en «Rutas del día», escribe el código en la última columna de cada propiedad.","Los códigos valen 2 semanas; la fecha de validez se muestra bajo los filtros.","Marca «Permanente» si el código no cambia, o «No usa código» para no pedirlo de nuevo. Se guarda solo."]},
+  {id:"reasignar", type:"Programación", roles:["admin"], cat:"mas", title:"Reasignar una ausencia", lines:["En Programación, abre el bloque de ausencias documentadas.","Toca cualquier ausencia —aunque ya diga «Reasignada»— para elegir o cambiar quién la cubre."]},
   {id:"intercambios", type:"Programación", roles:["admin"], cat:"mas", title:"Ver intercambios de ruta", lines:["En Programación, abre la bitácora «Intercambios entre técnicos».","Ahí ves quién le cedió qué a quién y en qué quedó cada solicitud."]},
   {id:"fotos", type:"Dashboard", roles:["admin"], cat:"mas", title:"Análisis de fotos del equipo", lines:["En el Dashboard Ejecutivo, abre «¿Están subiendo las fotos?».","Filtra por técnico o ve al equipo completo; el Pareto muestra las fotos que más se omiten."]},
 ];
@@ -9480,6 +9510,171 @@ function TipVisual({id, mobile}){
       <div style={gap}>
         <TipRow title="Pago · 14 ago 2026" sub="Comprobante adjunto" right={<span style={{fontSize:13,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>Q 1,240</span>}/>
         <TipRow title="Pago · 31 jul 2026" sub="Comprobante adjunto" right={<span style={{fontSize:13,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums"}}>Q 980</span>}/>
+      </div>
+    </TipChrome>
+  );
+  if(id==="correccion") return (
+    <TipChrome mobile={mobile} tab="quality">
+      <div style={gap}>
+        <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+          <span style={{fontSize:9,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",padding:"3px 9px",borderRadius:"var(--sa-pill)",background:"#F7E7E4",color:"#C0392B"}}>Corrección inmediata</span>
+          <span style={{fontSize:9.5,color:C.taupe}}>hace 12 min</span>
+        </div>
+        <div style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"11px 12px"}}>
+          <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:7}}>Qué hay que corregir</div>
+          {[["Cocina","Quedó grasa en la campana"],["Baño principal","Falta reponer amenidades"]].map(function(h,k){
+            return <div key={k} style={{display:"flex",gap:8,alignItems:"flex-start",marginTop:k?7:0}}>
+              <span style={{flexShrink:0,width:6,height:6,borderRadius:"50%",background:C.peach,marginTop:5}}/>
+              <div><div style={{fontSize:11.5,fontWeight:700,color:C.black}}>{h[0]}</div><div style={{fontSize:10.5,color:C.earth,marginTop:1,lineHeight:1.5}}>{h[1]}</div></div>
+            </div>;
+          })}
+        </div>
+        <div style={{display:"flex",gap:7}}>
+          {[0,1].map(function(k){ return <div key={k} style={{width:50,height:50,borderRadius:9,border:"1px solid "+C.line,background:C.sand||C.surfaceWarm}}/>; })}
+          <div style={{width:50,height:50,borderRadius:9,border:"1.5px dashed "+C.peach,background:"#FCEDE8",display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:19,color:C.peach,lineHeight:1}}>+</span></div>
+        </div>
+        <TipRing note="aquí" pill><span style={{display:"block",textAlign:"center",padding:"11px 12px",borderRadius:"var(--sa-pill)",background:"#C0392B",color:"#fff",fontSize:12,fontWeight:700}}>✓ Corrección realizada</span></TipRing>
+        <TipBtn>He leído y lo pondré en práctica</TipBtn>
+      </div>
+    </TipChrome>
+  );
+  if(id==="noentendi") return (
+    <TipChrome mobile={mobile} tab="quality">
+      <div style={gap}>
+        <div style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"11px 12px"}}>
+          <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Qué hay que corregir</div>
+          <div style={{fontSize:11.5,color:C.black,lineHeight:1.55}}>Cocina · quedó grasa en la campana</div>
+        </div>
+        <TipRing note="aquí" pill><span style={{display:"block",textAlign:"center",padding:"11px 12px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:C.surface,color:C.black,fontSize:12,fontWeight:600}}>No entendí, favor aclarar</span></TipRing>
+        <div style={{border:"1.5px solid "+C.gray,borderRadius:12,padding:"11px 12px",background:C.surface}}>
+          <div style={{fontSize:11,color:C.taupe,lineHeight:1.5}}>¿Qué no entendiste?</div>
+        </div>
+        <div style={{fontSize:10.5,color:C.earth,background:"#F5EBE5",borderRadius:9,padding:"8px 11px",lineHeight:1.5}}>Le llega a quien hizo la revisión y te responde aquí mismo.</div>
+      </div>
+    </TipChrome>
+  );
+  if(id==="fotoscamara") return (
+    <TipChrome mobile={mobile} tab="dash">
+      <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:16,color:C.black,marginBottom:10}}>Sala</div>
+      <div style={{display:"flex",gap:8,marginBottom:11}}>
+        <TipRing note="toca" radius={10}><div style={{width:mobile?74:88,paddingTop:"64%",position:"relative",borderRadius:10,border:"1.5px dashed "+C.peach,background:"#FCEDE8"}}><span style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="camera" size={19} stroke={C.peach}/></span></div></TipRing>
+        {[0,1].map(function(k){ return <div key={k} style={{flex:1,paddingTop:"64%",position:"relative",borderRadius:10,border:"1.5px dashed "+C.gray,background:C.surface}}><span style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="camera" size={17} stroke={C.taupe}/></span></div>; })}
+      </div>
+      <div style={{fontSize:10.5,color:C.earth,background:C.surfaceWarm,borderRadius:9,padding:"9px 11px",lineHeight:1.55}}>Se abre la cámara, no la galería: la foto es del trabajo de hoy.</div>
+    </TipChrome>
+  );
+  if(id==="visitas") return (
+    <TipChrome mobile={mobile} tab="sched">
+      <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:9}}>Visitas · escoge el día</div>
+      <TipRing note="1º" radius={12}>
+        <div style={{display:"flex",gap:6}}>
+          {[["Mié","27",3],["Jue","28",1],["Vie","29",0]].map(function(d,k){
+            var on=k===0;
+            return <div key={k} style={{flex:1,padding:"8px 6px",borderRadius:11,border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:C.surface,textAlign:"center"}}>
+              <div style={{fontSize:9,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:on?"rgba(255,255,255,.7)":C.taupe}}>{d[0]}</div>
+              <div style={{fontSize:14,fontWeight:700,color:on?"#fff":C.black,marginTop:2}}>{d[1]}</div>
+              <div style={{fontSize:9.5,fontWeight:600,color:on?"#fff":(d[2]?"#B4553C":C.taupe),marginTop:2}}>{d[2]} casos</div>
+            </div>;
+          })}
+        </div>
+      </TipRing>
+      <div style={{marginTop:11,display:"flex",flexDirection:"column",gap:8}}>
+        <TipRow title="Torre 1 · 502" sub="Cortina rota · 2 fotos" right={<span style={{fontSize:8.5,fontWeight:700,color:"#B54D36",background:"#F8ECE9",padding:"3px 8px",borderRadius:"var(--sa-pill)",letterSpacing:".06em",textTransform:"uppercase"}}>Sale huésped</span>}/>
+        <TipRow title="Zona 10 · Loft" sub="Falta lámpara de mesa" right={<span style={{fontSize:8.5,fontWeight:700,color:"#3d6b52",background:"#E8F2ED",padding:"3px 8px",borderRadius:"var(--sa-pill)",letterSpacing:".06em",textTransform:"uppercase"}}>Disponible</span>}/>
+      </div>
+      <div style={{marginTop:10}}><TipBtn solid>Programar la visita</TipBtn></div>
+    </TipChrome>
+  );
+  if(id==="visorfotos") return (
+    <TipChrome mobile={mobile} tab="quality">
+      <div style={{position:"relative",borderRadius:14,overflow:"hidden",background:"rgba(62,63,63,.92)",padding:mobile?"14px 12px":"18px 16px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{color:"#fff",fontSize:17,opacity:.7}}>‹</span>
+          <div style={{flex:1,paddingTop:"56%",borderRadius:10,background:C.sand||"#E5DED6"}}/>
+          <span style={{color:"#fff",fontSize:17,opacity:.7}}>›</span>
+        </div>
+        <div style={{textAlign:"center",fontSize:10,color:"rgba(255,255,255,.7)",marginTop:9,letterSpacing:".1em"}}>2 / 5</div>
+        <span style={{position:"absolute",top:9,right:11,width:24,height:24,borderRadius:"50%",background:"rgba(255,255,255,.18)",color:"#fff",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</span>
+      </div>
+      <div style={{fontSize:10.5,color:C.earth,marginTop:10,textAlign:"center",lineHeight:1.55}}>Se abre dentro del app · flechas para pasar · Esc para cerrar</div>
+    </TipChrome>
+  );
+  if(id==="aclaracion") return (
+    <TipChrome mobile={mobile} navSet="admin" tab="reps">
+      <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:9}}>Calidad › Limpiezas</div>
+      <TipRing note="aquí" radius={13}>
+        <div style={{background:C.surface,border:"1.5px solid "+C.peach,borderRadius:13,padding:"12px 13px"}}>
+          <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase"}}>Esperan tu aclaración</div>
+          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:15,color:C.black,marginTop:4}}>1 técnico no entendió</div>
+          <div style={{background:C.surfaceWarm,borderRadius:10,padding:"10px 11px",marginTop:9}}>
+            <div style={{fontSize:11.5,fontWeight:700,color:C.black}}>Torre 1 · 502 · María L.</div>
+            <div style={{fontSize:10.5,color:C.earth,marginTop:4,fontStyle:"italic",lineHeight:1.5}}>“¿La campana o el filtro?”</div>
+          </div>
+          <div style={{marginTop:9,border:"1.5px solid "+C.gray,borderRadius:10,padding:"9px 11px",fontSize:10.5,color:C.taupe,background:C.surface}}>Escribe la aclaración…</div>
+        </div>
+      </TipRing>
+    </TipChrome>
+  );
+  if(id==="mergedanos") return (
+    <TipChrome mobile={mobile} navSet="admin" tab="reps">
+      <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:9}}>Calidad › Daños</div>
+      <div style={{background:C.black,borderRadius:12,padding:"10px 12px",marginBottom:10,display:"flex",alignItems:"center",gap:9,flexWrap:"wrap"}}>
+        <span style={{fontSize:11,fontWeight:700,color:"#fff"}}>2 marcados</span>
+        <TipRing note="aquí" pill><span style={{display:"inline-block",fontSize:10.5,fontWeight:700,color:"#fff",padding:"6px 11px",borderRadius:"var(--sa-pill)",border:"1.5px solid rgba(255,255,255,.4)"}}>Unificar en un reporte</span></TipRing>
+      </div>
+      <div style={gap}>
+        {[["María L. · 24 ago","Cortina de la sala rota"],["Luis P. · 26 ago","La cortina no sube"]].map(function(r,k){
+          return <div key={k} style={{display:"flex",gap:9,alignItems:"center",background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:11,padding:"10px 11px"}}>
+            <span style={{flexShrink:0,width:19,height:19,borderRadius:6,background:C.black,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="check" size={12} stroke="#fff"/></span>
+            <div style={{minWidth:0}}><div style={{fontSize:11.5,fontWeight:600,color:C.black}}>{r[1]}</div><div style={{fontSize:10,color:C.taupe,marginTop:1}}>Torre 1 · 502 · {r[0]}</div></div>
+          </div>;
+        })}
+      </div>
+    </TipChrome>
+  );
+  if(id==="mantdanos") return (
+    <TipChrome mobile={mobile} navSet="admin" tab="reps">
+      <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:9}}>Calidad › Daños · programar</div>
+      <div style={gap}>
+        <div>
+          <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>¿Quién lo repara?</div>
+          <TipRing note="aquí" radius={12}>
+            <div style={{background:C.surface,border:"1.5px solid "+C.gray,borderRadius:12,overflow:"hidden"}}>
+              {[["Equipo interno",0],["Carlos M. · EPI Mantenimiento",1],["Externo · Cerrajería",0],["Cerrajería El Roble — Julio A.",1]].map(function(o,k){
+                return <div key={k} style={{padding:o[1]?"8px 12px 8px 20px":"7px 12px",fontSize:o[1]?11.5:9,fontWeight:700,letterSpacing:o[1]?"0":".12em",textTransform:o[1]?"none":"uppercase",color:o[1]?C.black:C.taupe,background:o[1]?C.surface:C.surfaceWarm,borderTop:k?"1px solid "+C.line:"none"}}>{o[0]}</div>;
+              })}
+            </div>
+          </TipRing>
+        </div>
+        <div>
+          <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Próximas salidas</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {["28 ago","31 ago","3 sep"].map(function(d,k){
+              var on=k===0;
+              return <span key={d} style={{fontSize:10.5,fontWeight:600,padding:"6px 11px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:C.surface,color:on?"#fff":C.earth}}>{d}</span>;
+            })}
+          </div>
+        </div>
+        <TipBtn solid>Programar mantenimiento</TipBtn>
+      </div>
+    </TipChrome>
+  );
+  if(id==="fotosperiodo") return (
+    <TipChrome mobile={mobile} navSet="admin" tab="dash">
+      <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:16,color:C.black,marginBottom:10}}>¿Están subiendo las fotos?</div>
+      <TipRing note="aquí" radius={12}>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",padding:2}}>
+          {["Último mes","2 meses","3 meses","Todo","Rango"].map(function(l,k){
+            var on=k===0;
+            return <span key={l} style={{fontSize:10,fontWeight:600,padding:"6px 11px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:C.surface,color:on?"#fff":C.earth}}>{l}</span>;
+          })}
+        </div>
+      </TipRing>
+      <div style={{display:"flex",alignItems:"flex-end",gap:14,marginTop:12}}>
+        <div><div style={{fontSize:26,fontWeight:600,color:"#9a5020",lineHeight:1}}>74<span style={{fontSize:14}}>%</span></div><div style={{fontSize:9.5,color:C.taupe,marginTop:2}}>en agosto</div></div>
+        <div style={{flex:1,display:"flex",alignItems:"flex-end",gap:4,height:42}}>
+          {[38,29,20,13,8].map(function(h,k){ return <div key={k} style={{flex:1,height:h+"px",borderRadius:"3px 3px 0 0",background:k===0?C.peach:C.sand}}/>; })}
+        </div>
       </div>
     </TipChrome>
   );
@@ -15287,7 +15482,7 @@ function DamageBoard({reps, vendors, me, isAdmin, onUpdate, onSelect, reviews, p
             <div style={{background:"#fff",borderRadius:11,padding:"12px",display:"flex",flexDirection:"column",gap:9}}>
               <select value={tec} onChange={function(e){setTec(e.target.value);}} style={Object.assign({},IN,{width:"100%"})}>
                 <option value="">¿Quién lo repara?…</option>
-                {mants.map(function(v){ return <option key={v.email} value={String(v.email).toLowerCase()}>{vendorDisplay(v)}</option>; })}
+                {mantOptGroups(mants)}
               </select>
               {salidas.length>0&&(
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
@@ -15511,7 +15706,7 @@ function VisitaPlanner({me, reps, vendors, props, reservas, schedules, onSvSched
               <button key={f} onClick={function(){setFecha(f);setSel({});}} style={{flexShrink:0,minWidth:74,padding:"9px 10px",borderRadius:12,border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",cursor:"pointer",fontFamily:"Montserrat,sans-serif",textAlign:"center"}}>
                 <div style={{fontSize:9.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:on?"rgba(255,255,255,.7)":C.taupe}}>{schedDiaNombre(f).slice(0,3)}</div>
                 <div style={{fontSize:14,fontWeight:700,color:on?"#fff":C.black,marginTop:2}}>{f.slice(8,10)}</div>
-                <div style={{fontSize:10,fontWeight:600,color:n>0?(on?"#fff":C.attentionText):(on?"rgba(255,255,255,.5)":C.gray),marginTop:2}}>{n} caso{n===1?"":"s"}</div>
+                <div style={{fontSize:10,fontWeight:600,color:n>0?(on?"#fff":C.attentionText):(on?"rgba(255,255,255,.5)":C.taupe),marginTop:2}}>{n} caso{n===1?"":"s"}</div>
               </button>
             );
           })}
@@ -20150,6 +20345,25 @@ function mantVendors(vendors){
     return String(v.categoria||"").toLowerCase().indexOf("mantenimiento")>=0;
   });
 }
+/* Las opciones del select, agrupadas: el equipo interno arriba y cada servicio
+   externo bajo su categoría, con el nombre de quién es. */
+function mantOptGroups(mants){
+  var internos=(mants||[]).filter(function(v){ return v.tipo!=="externo"; });
+  var extPorCat={}, orden=[];
+  (mants||[]).forEach(function(v){
+    if(v.tipo!=="externo") return;
+    var c=(v.categoria||"").trim()||"Sin categoría";
+    if(!extPorCat[c]){ extPorCat[c]=[]; orden.push(c); }
+    extPorCat[c].push(v);
+  });
+  orden.sort(function(a,b){ return a.localeCompare(b,"es"); });
+  function opt(v){ return <option key={v.id||v.email} value={String(v.email||"").toLowerCase()}>{mantLabel(v)}</option>; }
+  var out=[];
+  if(internos.length) out.push(<optgroup key="int" label="Equipo interno">{internos.map(opt)}</optgroup>);
+  orden.forEach(function(c){ out.push(<optgroup key={"ext-"+c} label={"Externo · "+c}>{extPorCat[c].map(opt)}</optgroup>); });
+  return out;
+}
+
 /* Las próximas cinco salidas de una propiedad: reparar el día que sale un
    huésped es lo que menos estorba. */
 function salidasDeProp(reservas, p, hoy){
@@ -20509,7 +20723,7 @@ function DanosAnalisis({reps, props, vendors, reservas, schedules, onSvSchedules
                 <span style={LBL}>Técnico</span>
                 <select value={tec} onChange={function(e){setTec(e.target.value);}} style={IN}>
                   <option value="">Escoge quién lo repara</option>
-                  {mants.map(function(v){ return <option key={v.email} value={String(v.email).toLowerCase()}>{vendorDisplay(v)}</option>; })}
+                  {mantOptGroups(mants)}
                 </select>
               </div>
               <div>
