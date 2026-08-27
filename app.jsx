@@ -71,6 +71,7 @@ const BADGE = {
   "Limpieza tradicional":{bg:"var(--sa-b-lt-bg)",tx:"var(--sa-b-lt-tx)"},
   "Limpieza profunda":   {bg:"var(--sa-b-lp-bg)",tx:"var(--sa-b-lp-tx)"},
   "Mantenimiento":       {bg:"var(--sa-b-mant-bg)",tx:"var(--sa-b-mant-tx)"},
+  "Visita":             {bg:"var(--sa-b-mant-bg)",tx:"var(--sa-b-mant-tx)"},
   "Nuevo Producto":      {bg:"var(--sa-b-np-bg)",tx:"var(--sa-b-np-tx)"},
   "Ajuste":             {bg:"var(--sa-b-aj-bg)",tx:"var(--sa-b-aj-tx)"},
   "Reporte de Daños":   {bg:"var(--sa-b-dano-bg)",tx:"var(--sa-b-dano-tx)"},
@@ -931,6 +932,74 @@ function qaFueraDeTiempo(r){
   return SCHED.dias(f, SCHED.hoyGT()) > QA_VENTANA_DIAS;
 }
 
+/* ═══ VENTANA DE RESPUESTA A UNA CORRECCIÓN ═══
+   La revisión de supervisión lleva hora exacta (`qaTs`). Lo que se le puede pedir
+   al técnico depende de cuándo ABRE el aviso, no de cuándo se escribió:
+   · dentro de los primeros 60 min → corrección inmediata, con 1 a 3 fotos de evidencia;
+   · después de 60 min → ya no se corrige: se lee y se pone en práctica la próxima vez.
+   El modo se congela en la PRIMERA vista (se sella en el navegador y viaja al reporte
+   cuando responde) para que no cambie a media respuesta.
+   El pop-up forzado vive 2 días; después el aviso queda solo en la sección de Calidad. */
+var QA_INMEDIATA_MS = 60*60*1000;
+var QA_POPUP_MS     = 2*24*60*60*1000;
+function qaRevTs(r){
+  if(!r) return 0;
+  if(r.qaTs){ var n=+r.qaTs; if(n) return n; }
+  var f=String(r.qaFecha||"").slice(0,10);
+  if(f){ var t=new Date(f+"T12:00:00").getTime(); if(!isNaN(t)) return t; }
+  return 0;
+}
+function qaVistoKey(r){ return String(r&&r.id)+"|"+qaRevTs(r); }
+function qaVistoTs(r){
+  if(!r) return Date.now();
+  if(r.qaVistoTs) return +r.qaVistoTs;
+  var m={}; try{ m=JSON.parse(localStorage.getItem("epi:qaVisto")||"{}")||{}; }catch(_){ m={}; }
+  var k=qaVistoKey(r);
+  if(!m[k]){ m[k]=Date.now(); try{ localStorage.setItem("epi:qaVisto",JSON.stringify(m)); }catch(_){} }
+  return m[k];
+}
+/* ¿Todavía se le pide corrección inmediata? */
+function qaEsInmediata(r){
+  if(!r || r.qaTipo==="futuro") return false;
+  var rev=qaRevTs(r); if(!rev) return false;
+  return (qaVistoTs(r)-rev) < QA_INMEDIATA_MS;
+}
+/* Una duda esperando aclaración NO cuenta como pendiente del técnico: la pelota
+   la tiene quien revisó. */
+function qaEsperaAclaracion(r){ return !!(r&&r.qaStatus==="correccion"&&r.qaDuda&&!r.qaAclaracion); }
+function qaSinResponder(r){
+  if(!r || r.qaStatus!=="correccion") return false;
+  if(r.qaRespuesta) return false;
+  return !qaEsperaAclaracion(r);
+}
+function qaPopupVigente(r){ var rev=qaRevTs(r); return !!rev && (Date.now()-rev) < QA_POPUP_MS; }
+/* Los hallazgos de la revisión, uno por uno. El formulario de supervisión ya los
+   guarda estructurados (`supForm.items`); el comentario plano es el respaldo para
+   revisiones viejas o escritas a mano. Sin esto, los nueve criterios le llegaban
+   al técnico pegados en un solo párrafo, ilegibles. */
+function qaHallazgos(rep, fallback){
+  var out=[];
+  var items=(rep&&rep.supForm&&rep.supForm.items)||null;
+  if(items&&items.length){
+    items.forEach(function(q){ if(q&&!q.ok) out.push({t:q.titulo||q.id, nota:String(q.nota||"").trim(), critico:!!q.critico}); });
+    if(out.length) return out;
+  }
+  var txt=String((rep&&rep.qaComentario)||fallback||"");
+  txt.split(/\n+/).forEach(function(l){
+    l=String(l||"").replace(/^[⚠•·\-\s]+/,"").trim(); if(!l) return;
+    var i=l.indexOf(":");
+    if(i>0) out.push({t:l.slice(0,i).trim(), nota:l.slice(i+1).trim(), critico:false});
+    else out.push({t:l, nota:"", critico:false});
+  });
+  return out;
+}
+/* Al abrir una corrección nueva se limpia cualquier respuesta anterior. */
+function qaResetRespuesta(status){
+  return status==="correccion"
+    ? {qaTs:Date.now(),qaRespuesta:"",qaRespuestaFecha:"",qaFotos:[],qaDuda:"",qaDudaTs:0,qaAclaracion:"",qaAclaracionPor:"",qaAclaracionTs:0,qaVistoTs:0}
+    : {};
+}
+
 function alertLvl(r) {
   if (r.paid || !r.total || isDanos(r.categoria)) return null;
   var d = daysSince(r.createdAt||r.id);
@@ -1131,6 +1200,7 @@ var NOTIF_META = [
   {id:"correccionFutura",   label:"Corrección para el futuro",    desc:"Observación para próximas limpiezas"},
   {id:"listaSupervision",   label:"Lista para supervisión",       desc:"Una limpieza terminó y espera revisión"},
   {id:"correccionAtendida", label:"Corrección atendida",          desc:"El técnico confirmó que corrigió"},
+  {id:"correccionDuda",     label:"Aclaración pedida",            desc:"El técnico no entendió la corrección"},
   {id:"ratingRevision",     label:"Revisión de calificación",     desc:"Un técnico pidió revisar una nota de huésped"},
   {id:"danoUrgente",        label:"Daño urgente",                 desc:"Se clasificó un daño de urgencia alta"},
   {id:"solicitudAdelanto",  label:"Nueva solicitud de adelanto",  desc:"Un técnico solicitó un adelanto"},
@@ -1155,6 +1225,7 @@ var CORREOS_CAT = [
   {id:"correccionFutura",       cat:"Calidad",          roles:["tecnico"], dedicado:true, disparo:"QA deja observación futura"},
   {id:"listaSupervision",       cat:"Calidad",          roles:["supervisor"], dedicado:true, disparo:"Termina una limpieza por revisar"},
   {id:"correccionAtendida",     cat:"Calidad",          roles:["supervisor","adminPrincipal","adminSecundario"], dedicado:true, disparo:"El técnico confirma que corrigió"},
+  {id:"correccionDuda",         cat:"Calidad",          roles:["supervisor","adminPrincipal","adminSecundario"], dedicado:false, disparo:"El técnico pide aclarar la corrección"},
   {id:"ratingRevision",         cat:"Calidad",          roles:["adminPrincipal","adminSecundario","supervisor"], dedicado:true, disparo:"Un técnico pide revisar una calificación"},
   {id:"danoUrgente",            cat:"Daños",            roles:["adminPrincipal","adminSecundario"], dedicado:true, disparo:"Se clasifica un daño como urgente"},
   {id:"solicitudAdelanto",      cat:"Adelantos y pagos",roles:["adminPrincipal","adminSecundario"], dedicado:true, disparo:"Un técnico solicita un adelanto"},
@@ -1176,6 +1247,7 @@ function correoLabel(id){ var m=NOTIF_META.find(function(x){return x.id===id;});
 var NOTIF_DEFAULTS = {
   limpiezaAprobada:{tecnico:1}, correccionInmediata:{tecnico:1}, correccionFutura:{tecnico:1},
   listaSupervision:{supervisores:1}, correccionAtendida:{supervisores:1,adminPrincipal:1,adminSecundarios:1},
+  correccionDuda:{supervisores:1,adminPrincipal:1,adminSecundarios:1},
   ratingRevision:{adminPrincipal:1,adminSecundarios:1,supervisores:1},
   danoUrgente:{adminPrincipal:1,adminSecundarios:1}, solicitudAdelanto:{adminPrincipal:1,adminSecundarios:1},
   adelantoFirma:{tecnico:1}, adelantoDepositado:{tecnico:1}, comprobantePago:{tecnico:1},
@@ -1213,13 +1285,14 @@ function notifyQAResult(rep, status, comment, vendors){
   if(!rep||!rep.reportadoPor) return;
   var tecnico=vendorNameByEmail(vendors, rep.reportadoPor);
   var base={tecnico:tecnico, propiedad:rep.propiedad, fecha:fmtDate(rep.fecha)};
+  var lista=qaHallazgos(rep, comment).map(function(x){ return {t:(x.critico?"Crítico · ":"")+x.t, nota:x.nota}; });
   if(status==="aprobada"){
     notifyTemplate(resolveNotifRecipients("limpiezaAprobada", vendors, [rep.reportadoPor]), "limpiezaAprobada", base);
   } else if(status==="correccion"){
     if(rep.qaTipo==="inmediata"){
-      notifyTemplate(resolveNotifRecipients("correccionInmediata", vendors, [rep.reportadoPor]), "correccionInmediata", Object.assign({}, base, {detalle:comment||""}));
+      notifyTemplate(resolveNotifRecipients("correccionInmediata", vendors, [rep.reportadoPor]), "correccionInmediata", Object.assign({}, base, {detalle:comment||"", lista:lista}));
     } else {
-      notifyTemplate(resolveNotifRecipients("correccionFutura", vendors, [rep.reportadoPor]), "correccionFutura", Object.assign({}, base, {detalle:comment||""}));
+      notifyTemplate(resolveNotifRecipients("correccionFutura", vendors, [rep.reportadoPor]), "correccionFutura", Object.assign({}, base, {detalle:comment||"", lista:lista}));
     }
   }
 }
@@ -2075,7 +2148,7 @@ function App() {
       <div className="vercomo-wrap" style={{paddingTop:40}}>
         {vcV.isAdmin
           ? <AdminApp pagosReady={pagosReady} reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} formCfg={formCfg} onSvFormCfg={svFormCfg} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={vcV} swaps={swaps} onSvSwaps={svSwaps} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={function(){setVerComo(null);}} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>
-          : <VendorApp vendor={vcV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,vcV);})} props={props} company={company} schedules={vcSched} codigos={codigos} ausencias={ausencias} onSvAusencias={svAusencias} swaps={swaps} onSvSwaps={svSwaps} allSchedules={schedules} onSvSchedules={svSchedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={function(){setVerComo(null);}} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>}
+          : <VendorApp vendor={vcV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,vcV);})} props={props} company={company} schedules={vcSched} codigos={codigos} ausencias={ausencias} onSvAusencias={svAusencias} swaps={swaps} onSvSwaps={svSwaps} allSchedules={schedules} onSvSchedules={svSchedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={function(){setVerComo(null);}} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} reservas={reservas}/>}
       </div>
     </>);
   } else if (sess.role==="vendor"&&sess.vendor) {
@@ -2092,11 +2165,11 @@ function App() {
     });
     var needsOnb = isEpiLimpieza(freshV) && !freshV.notifSetupDone && !onbDone;
     try{ if(localStorage.getItem("epi_onboard_done_"+freshV.id)) needsOnb=false; }catch(_){}
-    inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={misSchedules} codigos={codigos} ausencias={ausencias} onSvAusencias={svAusencias} swaps={swaps} onSvSwaps={svSwaps} allSchedules={schedules} onSvSchedules={svSchedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
+    inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={misSchedules} codigos={codigos} ausencias={ausencias} onSvAusencias={svAusencias} swaps={swaps} onSvSwaps={svSwaps} allSchedules={schedules} onSvSchedules={svSchedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} reservas={reservas}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
   } else {
     inner = <AdminApp pagosReady={pagosReady} reservas={reservas} onSvReservas={svReservas} ausencias={ausencias} onSvAusencias={svAusencias} formCfg={formCfg} onSvFormCfg={svFormCfg} regSol={regSol} onSvRegSol={svRegSol} nomAjustes={nomAjustes} onSvNomAjustes={svNomAjustes} reviews={reviews} onSvReviews={svReviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} onSvRvIA={svRvIA} reps={reps} vendors={vendors} props={props} adminPin={pin} company={company} extCats={extCats} schedules={schedules} codigos={codigos} onSvCodigos={svCodigos} schedErr={schedErr} onVerComo={setVerComo} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} feedback={feedback} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} syncing={syncing} syncMsg={syncMsg} sheetsOk={sheetsOk} retryQ={retryQ} setRetryQ={setRetryQ} setReps={setReps} adminVendor={sess&&sess.vendor?sess.vendor:null} swaps={swaps} onSvSwaps={svSwaps} onUpsert={upsert} onDelete={del} onSvV={svV} onSvP={svP} onSvPin={svPin} onSvCo={svCo} onSvExtCats={svExtCats} onSvSchedules={svSchedules} onSvHospUrlDay={svHospUrlDay} onSvHospUrlWeek={svHospUrlWeek} onSvFeedback={svFeedback} onRefresh={refresh} onLogout={logout} notifPrefs={notifPrefs} onSvNotifPrefs={svNotifPrefs}/>;
   }
-  return <ErrorBoundary>{inner}</ErrorBoundary>;
+  return <ErrorBoundary><LightboxHost/>{inner}</ErrorBoundary>;
 }
 
 /* ═══ LOGIN */
@@ -2719,7 +2792,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,swap
   }
   function qaUpdate(id,status,comment,tipo) {
     var r=reps.find(function(x){return x.id===id;}); if(!r) return;
-    var upd=Object.assign({},r,{qaStatus:status,qaComentario:comment||"",qaFecha:todayStr(),qaTipo:status==="correccion"?(tipo||"inmediata"):r.qaTipo});
+    var upd=Object.assign({},r,{qaStatus:status,qaComentario:comment||"",qaFecha:todayStr(),qaTipo:status==="correccion"?(tipo||"inmediata"):r.qaTipo},qaResetRespuesta(status));
     onUpsert(upd);
     /* Solo refrescar el modal si ya estaba abierto con este reporte (no abrirlo) */
     setDetail(function(d){return d&&d.id===id?upd:d;});
@@ -3726,14 +3799,39 @@ function CalView({reps,onSelect,onMarkPaid,vendors}) {
    más frecuencia (Pareto). Se filtra por técnico o se ve todo el equipo. */
 function FotosLimpiezaAnalisis({reps, vendors, props}){
   const [fTec,setFTec] = useState("__all");
+  const [per,setPer]   = useState("3");   /* 1 | 2 | 3 meses | todo | rango */
+  const [desde,setDesde] = useState("");
+  const [hasta,setHasta] = useState("");
   var tecs=schedTecnicos(vendors||[]);
   var propsByName={}; (props||[]).forEach(function(p){ propsByName[normalize(p.name||"")]=p; });
   var selV = fTec==="__all"?null:tecs.find(function(v){return String(v.email||"").toLowerCase()===fTec;});
+  /* Ventana de tiempo: los meses corren hacia atrás desde hoy; «Rango» abre dos fechas. */
+  var rango = React.useMemo(function(){
+    if(per==="todo") return {from:"",to:""};
+    if(per==="rango") return {from:desde,to:hasta};
+    var n=parseInt(per,10)||3;
+    var d=new Date(); d.setHours(12,0,0,0);
+    var to=d.toISOString().split("T")[0];
+    var f=new Date(d); f.setMonth(f.getMonth()-n);
+    return {from:f.toISOString().split("T")[0], to:to};
+  },[per,desde,hasta]);
+  var scoped = React.useMemo(function(){
+    return (reps||[]).filter(function(r){
+      var f=String(r.fecha||"").slice(0,10);
+      if(!rango.from&&!rango.to) return true;
+      if(!f) return false;
+      if(rango.from&&f<rango.from) return false;
+      if(rango.to&&f>rango.to) return false;
+      return true;
+    });
+  },[reps,rango.from,rango.to]);
   var match = selV ? function(r){ return repMatchesVendor(r, selV); } : null;
-  var res = React.useMemo(function(){ return fotosPareto(reps, match, propsByName); },[reps, fTec, vendors, props]);
+  var res = React.useMemo(function(){ return fotosPareto(scoped, match, propsByName); },[scoped, fTec, vendors, props]);
   var rows = res.rows.map(function(x){ return {name:x.label, v:x.missing}; });
   var top = res.rows[0];
   var pctColor = res.pct>=90?C.green : res.pct>=70?"#9a5020" : C.attentionText;
+  var IN={boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:"var(--sa-pill)",padding:"8px 12px",fontSize:11.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",color:C.black};
+  var perLbl={"1":"del último mes","2":"de los últimos 2 meses","3":"de los últimos 3 meses","todo":"de todo el historial","rango":"del rango elegido"}[per];
   return (
     <div style={{background:"#fff",borderRadius:18,border:"1px solid "+C.gray,padding:"20px 22px",boxShadow:"var(--sa-shadow-sm)"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:14,flexWrap:"wrap"}}>
@@ -3747,8 +3845,23 @@ function FotosLimpiezaAnalisis({reps, vendors, props}){
         </select>
       </div>
 
+      {/* Ventana de tiempo — el porcentaje de todo el historial esconde el mes que va mal. */}
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginTop:14}}>
+        {[["1","Último mes"],["2","2 meses"],["3","3 meses"],["todo","Todo"],["rango","Rango"]].map(function(o){
+          var on=per===o[0];
+          return <button key={o[0]} onClick={function(){setPer(o[0]);}} style={{padding:"7px 13px",minHeight:34,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",color:on?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{o[1]}</button>;
+        })}
+        {per==="rango"&&(
+          <span style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+            <input type="date" value={desde} onChange={function(e){setDesde(e.target.value);}} style={IN}/>
+            <span style={{fontSize:11,color:C.taupe}}>a</span>
+            <input type="date" value={hasta} onChange={function(e){setHasta(e.target.value);}} style={IN}/>
+          </span>
+        )}
+      </div>
+
       {res.forms===0
-        ? <div style={{marginTop:18,padding:"28px 16px",textAlign:"center",color:C.earth,fontSize:13,background:C.surfaceWarm,borderRadius:12,lineHeight:1.6}}>Sin formularios de limpieza {selV?"de "+vendorDisplay(selV):"registrados"} todavía.</div>
+        ? <div style={{marginTop:18,padding:"28px 16px",textAlign:"center",color:C.earth,fontSize:13,background:C.surfaceWarm,borderRadius:12,lineHeight:1.6}}>Sin formularios de limpieza {selV?"de "+vendorDisplay(selV):"registrados"} {perLbl}.</div>
         : <>
             <div style={{display:"flex",gap:20,flexWrap:"wrap",alignItems:"flex-end",marginTop:16}}>
               <div>
@@ -3756,7 +3869,7 @@ function FotosLimpiezaAnalisis({reps, vendors, props}){
                 <div style={{fontSize:11,color:C.earth,marginTop:4}}>de las fotos esperadas se subieron</div>
               </div>
               <div style={{fontSize:11.5,color:C.taupe,lineHeight:1.7}}>
-                {res.forms} formulario{res.forms===1?"":"s"} · {res.fill} de {res.exp} fotos
+                {res.forms} formulario{res.forms===1?"":"s"} {perLbl} · {res.fill} de {res.exp} fotos
                 {res.sinFoto>0&&<div style={{color:C.attentionText,fontWeight:600,marginTop:2}}>{res.sinFoto} sin ninguna foto</div>}
               </div>
             </div>
@@ -6480,6 +6593,15 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, re
                     : <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"3px 9px",borderRadius:"var(--sa-pill)",background:C.surfaceWarm,color:C.earth,border:"1px solid "+C.gray}}>Admin secundario</span>)}
                 </div>
               )}
+              {/* Visitas: resolver daños que implican una compra, entrando el día que se puede */}
+              <div style={{display:"flex",alignItems:"center",gap:10,paddingTop:6,borderTop:"1px solid "+C.line,flexWrap:"wrap"}}>
+                <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase",minWidth:72}}>Visitas</span>
+                <button onClick={function(){var u=vendors.map(function(x){if(x.id===v.id){var r=Object.assign({},x);r.puedeVisitas=!x.puedeVisitas;return r;}return x;});onSave(u);}} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 12px",borderRadius:6,border:"1px solid "+C.gray,background:v.puedeVisitas?C.black:"#fff",color:v.puedeVisitas?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",transition:"all .2s",fontFamily:"Montserrat,sans-serif"}}>
+                  <span style={{width:14,height:14,borderRadius:"50%",background:v.puedeVisitas?"#fff":"#ccc",display:"inline-block",flexShrink:0}}/>
+                  {v.puedeVisitas?"Puede programar visitas":"Sin visitas"}
+                </button>
+                {v.puedeVisitas&&<span style={{fontSize:10.5,color:C.taupe,lineHeight:1.5}}>Arma su propia ruta con los daños de apartamentos visitables ese día</span>}
+              </div>
               {/* Programación: zonas, preferencias, tope y descansos */}
               {SCHED.esLimpieza(v)&&(
                 <div style={{paddingTop:8,borderTop:"1px solid "+C.line}}>
@@ -7978,7 +8100,7 @@ function BounceGate({vendor, allVendors, onSvV}){
 }
 
 /* ═══ VENDOR APP */
-function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codigos,ausencias,onSvAusencias,swaps,onSvSwaps,allSchedules,onSvSchedules,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout,reviews,rvCasos,onSvRvCasos,rvIA}) {
+function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codigos,ausencias,onSvAusencias,swaps,onSvSwaps,allSchedules,onSvSchedules,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout,reviews,rvCasos,onSvRvCasos,rvIA,reservas}) {
   const [view,setView] = useState("jobs");
   useEPIPrefs();   /* repinta al cambiar idioma/moneda desde el menú de usuario */
   const [pagTab,setPagTab] = useState("hist");
@@ -7986,11 +8108,24 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codig
   var cob=reps.filter(function(r){return r.paid;}).reduce(function(s,r){return s+parseFloat(r.total||0);},0);
   var pnd=reps.filter(function(r){return r.total&&!r.paid;});
   var cleaningReps = reps.filter(function(r){return isCleaning(r.categoria);});
-  var pendingCorrections = cleaningReps.filter(function(r){return r.qaStatus==="correccion";}).length;
+  var pendingCorrections = cleaningReps.filter(qaSinResponder).length;
 
-  async function vendorRespond(repId, response) {
+  /* Respuesta del técnico a una revisión. Tres caminos: corrección inmediata con
+     fotos, lectura confirmada («lo pondré en práctica») y duda, que le devuelve
+     la pelota a quien revisó y no vuelve a molestar hasta que aclaren. */
+  async function vendorRespond(repId, response, extra) {
     var r = reps.find(function(x){return x.id===repId;}); if(!r) return;
-    var upd = Object.assign({},r,{qaStatus:response,qaRespuesta:response,qaRespuestaFecha:todayStr()});
+    var ex = extra||{};
+    if(response==="duda"){
+      var dd = Object.assign({},r,{qaDuda:(ex.texto||"No entendí, favor aclarar"),qaDudaTs:Date.now(),qaAclaracion:"",qaVistoTs:qaVistoTs(r)});
+      if(onUpdate) await onUpdate(dd);
+      try{ notifyTemplate(resolveNotifRecipients("correccionDuda", allVendors, []), "correccionDuda", {tecnico:vendorDisplay(vendor), propiedad:r.propiedad, fecha:fmtDate(r.fecha), detalle:(ex.texto||"")}); }catch(_){}
+      return;
+    }
+    var upd = Object.assign({},r,{
+      qaStatus:response, qaRespuesta:response, qaRespuestaFecha:todayStr(), qaRespuestaTs:Date.now(),
+      qaVistoTs:qaVistoTs(r), qaModo:qaEsInmediata(r)?"inmediata":"tardia"
+    }, (ex.fotos&&ex.fotos.length)?{qaFotos:ex.fotos}:{});
     if(onUpdate) await onUpdate(upd);
     /* Avisar a supervisión y admin que el técnico respondió una corrección inmediata */
     if(r.qaTipo==="inmediata"&&response==="corregido"){
@@ -8008,6 +8143,7 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codig
     if(isInternal) navItems.push(["sched","Programa","calendar"]);
     if(isInternal) navItems.push(["hist","Calidad","star"]);
     if(vendor.isSupervisor) navItems.push(["sup","Supervisión","star"]);
+    if(vendor.puedeVisitas) navItems.push(["visitas","Visitas","grid"]);
     navItems.push(["pagos","Pagos","coins"]);
     return navItems;
   })()}
@@ -8024,11 +8160,13 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codig
       <SwapLightbox vendor={vendor} allVendors={allVendors} swaps={swaps||[]} onSvSwaps={onSvSwaps} allSchedules={allSchedules||[]} onSvSchedules={onSvSchedules}/>
       <TutorialSystem enabled={true} role="vendor"/>
       <BounceGate vendor={vendor} allVendors={allVendors} onSvV={onSvV}/>
+      {vendor.tipo==="interno"&&<QAPopupGate reps={cleaningReps} onRespond={vendorRespond} onGoCalidad={function(){setView("hist");}}/>}
       <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} adelantos={adelantos} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}} onGoAccount={function(){setView("account");}} vendor={vendor} allVendors={allVendors} reviews={reviews} allReps={allReps} rvCasos={rvCasos} rvIA={rvIA} onGoCalidad={vendor.tipo==="interno"?function(){setView("hist");}:null}/></div>
       <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={allVendors||[]} props={props} company={company} defaultVendor={vendor.email} myReps={reps} allReps={allReps||[]} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
       <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} codigos={codigos||{}} ausencias={ausencias||[]} onSvAusencias={onSvAusencias} reps={reps} allVendors={allVendors||[]} swaps={swaps||[]} onSvSwaps={onSvSwaps} allSchedules={allSchedules||[]} onSvSchedules={onSvSchedules}/></div>
       <div style={{display:view==="hist"   ?"block":"none"}}><VendorHistory reps={cleaningReps} onRespond={vendorRespond} vendor={vendor} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}} reviews={reviews} allReps={allReps} allVendors={allVendors} rvCasos={rvCasos} onSvRvCasos={onSvRvCasos} rvIA={rvIA}/></div>
       {vendor.isSupervisor&&<div style={{display:view==="sup"?"block":"none"}}><SupervisionPanel me={vendor} reps={allReps||[]} vendors={allVendors||[]} props={props} onUpdate={onUpdate}/></div>}
+      {vendor.puedeVisitas&&<div style={{display:view==="visitas"?"block":"none"}}><VisitaPlanner me={vendor} reps={allReps||[]} vendors={allVendors||[]} props={props} reservas={reservas||[]} schedules={allSchedules||[]} onSvSchedules={onSvSchedules} onUpdate={onUpdate}/></div>}
       <div style={{display:view==="account"?"block":"none"}}><VendorAccount vendor={vendor} allVendors={allVendors} allReps={allReps} onSvV={onSvV}/></div>
       {/* Pagos: el historial de comprobantes y el adelanto son la misma pregunta
           —"¿cuánto me toca?"— así que viven bajo el mismo techo. */}
@@ -8227,12 +8365,209 @@ function SuggestionBox({vendor, onSaveFeedback}) {
   );
 }
 
+/* Los hallazgos de la revisión en lista: un punto por criterio, con su nota debajo.
+   Reemplaza el párrafo corrido que antes le llegaba al técnico. */
+function QAComentario({rep, titulo}){
+  var hs=qaHallazgos(rep);
+  if(!hs.length) return null;
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:9}}>
+      <div style={{fontSize:9.5,color:C.earth,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase"}}>{titulo||"Qué hay que corregir"}</div>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {hs.map(function(h,i){ return (
+          <div key={i} style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+            <span style={{flexShrink:0,width:7,height:7,borderRadius:"50%",background:h.critico?C.red:C.peach,marginTop:6}}/>
+            <div style={{minWidth:0,flex:1}}>
+              <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
+                <span style={{fontSize:13,fontWeight:700,color:C.black,lineHeight:1.4}}>{h.t}</span>
+                {h.critico&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 7px",borderRadius:"var(--sa-pill)",background:"#F7E7E4",color:C.red}}>Crítico</span>}
+              </div>
+              {h.nota&&<div style={{fontSize:12.5,color:C.earth,lineHeight:1.6,marginTop:2,textWrap:"pretty"}}>{h.nota}</div>}
+            </div>
+          </div>
+        ); })}
+      </div>
+    </div>
+  );
+}
+
+/* ═══ CORRECCIONES DE CALIDAD — respuesta del técnico ═══
+   Tres piezas: el subidor de evidencia, el bloque de respuesta (vive igual en el
+   pop-up y en la tarjeta de Calidad) y el portón que decide qué se ve al entrar. */
+function QAFotos({fotos,onChange,max}){
+  var lim=max||3;
+  var ref=useRef(null);
+  var [busy,setBusy]=useState(false);
+  async function pick(e){
+    var fs=Array.prototype.slice.call(e.target.files||[]); e.target.value="";
+    if(!fs.length) return;
+    setBusy(true);
+    var out=fotos.slice();
+    for(var i=0;i<fs.length&&out.length<lim;i++){
+      if(!/^image\//.test(fs[i].type)) continue;
+      try{ out.push(await compress(fs[i])); }catch(_){}
+    }
+    setBusy(false); onChange(out);
+  }
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:7}}>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        {fotos.map(function(f,i){ return (
+          <div key={i} style={{position:"relative",width:76,height:76,borderRadius:10,overflow:"hidden",border:"1px solid "+C.line}}>
+            <img src={f} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+            <button onClick={function(){ onChange(fotos.filter(function(_,j){return j!==i;})); }} aria-label="Quitar foto"
+              style={{position:"absolute",top:3,right:3,width:22,height:22,borderRadius:"50%",border:"none",background:"rgba(62,63,63,.72)",color:"#fff",fontSize:13,lineHeight:1,cursor:"pointer",padding:0}}>×</button>
+          </div>
+        ); })}
+        {fotos.length<lim&&(
+          <button onClick={function(){ref.current&&ref.current.click();}} disabled={busy}
+            style={{width:76,height:76,borderRadius:10,border:"1.5px dashed "+C.peach,background:"var(--accent-tint,#FCEFEB)",cursor:busy?"wait":"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:0}}>
+            <span style={{fontSize:21,color:C.peach,lineHeight:1}}>+</span>
+            <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",color:C.earth}}>{busy?"…":"FOTO"}</span>
+          </button>
+        )}
+      </div>
+      <input ref={ref} type="file" accept="image/*" capture="environment" multiple onChange={pick} style={{display:"none"}}/>
+      <div style={{fontSize:10.5,color:C.taupe,letterSpacing:".04em"}}>{fotos.length} de {lim} · mínimo 1 foto</div>
+    </div>
+  );
+}
+
+function QAResponder({rep,onRespond,onDone}){
+  var inm=qaEsInmediata(rep);
+  var [fotos,setFotos]=useState([]);
+  var [modo,setModo]=useState(null);   /* null | "duda" */
+  var [duda,setDuda]=useState("");
+  var [busy,setBusy]=useState(false);
+  var [err,setErr]=useState("");
+  async function enviar(tipo,extra){
+    setBusy(true); setErr("");
+    try{ await onRespond(rep.id,tipo,extra||{}); onDone&&onDone(); }
+    catch(e){ setErr("No se pudo enviar. Revisa tu conexión e intenta de nuevo."); }
+    setBusy(false);
+  }
+  var btn={padding:"14px 16px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",fontSize:12.5,fontWeight:700,letterSpacing:".06em",cursor:"pointer",fontFamily:"Montserrat,sans-serif",width:"100%",boxSizing:"border-box"};
+  var ghost=Object.assign({},btn,{background:C.surface||"#fff",border:"1.5px solid "+C.gray,color:C.earth,fontWeight:600});
+
+  if(modo==="duda"){
+    return (
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{fontSize:12.5,color:C.black,lineHeight:1.6,textWrap:"pretty"}}>Cuéntanos qué parte no quedó clara. Le llega de vuelta a quien hizo la revisión y te responde por aquí mismo.</div>
+        <textarea value={duda} onChange={function(e){setDuda(e.target.value);}} rows={3} autoFocus placeholder="Opcional: ¿qué no entendiste?"
+          style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:12,padding:"11px 13px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",resize:"vertical",color:C.black}}/>
+        {err&&<div style={{fontSize:11.5,color:C.red,fontWeight:600}}>{err}</div>}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button disabled={busy} onClick={function(){enviar("duda",{texto:duda.trim()});}} style={Object.assign({},btn,{background:C.black,color:"#fff",flex:"1 1 180px",width:"auto"})}>{busy?"Enviando…":"Enviar mi duda"}</button>
+          <button disabled={busy} onClick={function(){setModo(null);}} style={Object.assign({},ghost,{flex:"0 1 120px",width:"auto"})}>Atrás</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:11}}>
+      {inm ? (
+        <React.Fragment>
+          <div style={{fontSize:12.5,color:C.black,lineHeight:1.6,textWrap:"pretty"}}>
+            <b style={{color:C.red}}>Todavía estás a tiempo.</b> Corrige ahora y sube de 1 a 3 fotos como evidencia.
+          </div>
+          <QAFotos fotos={fotos} onChange={setFotos}/>
+          {err&&<div style={{fontSize:11.5,color:C.red,fontWeight:600}}>{err}</div>}
+          <button disabled={busy||!fotos.length} onClick={function(){enviar("corregido",{fotos:fotos});}}
+            style={Object.assign({},btn,{background:(busy||!fotos.length)?C.divider||"#D8D4CE":C.red,color:(busy||!fotos.length)?C.taupe:"#fff",cursor:(busy||!fotos.length)?"not-allowed":"pointer"})}>
+            {busy?"Enviando…":"✓ Corrección realizada · enviar evidencia"}
+          </button>
+        </React.Fragment>
+      ) : (
+        <React.Fragment>
+          <div style={{fontSize:12.5,color:C.black,lineHeight:1.6,textWrap:"pretty"}}>
+            Pasó más de una hora desde la revisión, así que no hace falta que regreses hoy. Solo léelo y confírmanos que lo pondrás en práctica.
+          </div>
+          {err&&<div style={{fontSize:11.5,color:C.red,fontWeight:600}}>{err}</div>}
+          <button disabled={busy} onClick={function(){enviar("futuro",{leido:true});}} style={Object.assign({},btn,{background:C.black,color:"#fff"})}>
+            {busy?"Enviando…":"He leído y lo pondré en práctica"}
+          </button>
+        </React.Fragment>
+      )}
+      <button disabled={busy} onClick={function(){setModo("duda");}} style={ghost}>No entendí, favor aclarar</button>
+    </div>
+  );
+}
+
+/* Portón de entrada: al abrir la app, la corrección sin responder más antigua
+   se anuncia sola. Dentro de la primera hora (y hasta 2 días después) como
+   pop-up forzado; después, como una sola notificación que lleva a Calidad.
+   Se repite en cada entrada a la app mientras no contesten. */
+function QAPopupGate({reps,onRespond,onGoCalidad}){
+  var pend=(reps||[]).filter(qaSinResponder).sort(function(a,b){return qaRevTs(a)-qaRevTs(b);});
+  var [modalId,setModalId]=useState(null);
+  var [push,setPush]=useState(null);
+  var armed=useRef(false);
+  var n=pend.length;
+  useEffect(function(){
+    if(armed.current||!n) return;
+    armed.current=true;
+    pend.forEach(function(r){ qaVistoTs(r); });  /* sella el modo de cada aviso */
+    var r=pend[0];
+    var forzado=qaEsInmediata(r)&&qaPopupVigente(r);
+    var t=setTimeout(function(){
+      if(forzado){ setModalId(r.id); }
+      else{
+        setPush({id:"qa|"+r.id,ts:Date.now(),
+          texto:n===1?"Tienes una revisión de limpieza sin responder.":("Tienes "+n+" revisiones de limpieza sin responder."),
+          contexto:r.propiedad+" · "+fmtDate(r.fecha)+" — ábrela en Calidad."});
+      }
+    }, forzado?800:2200);
+    return function(){ clearTimeout(t); };
+  },[n]);
+
+  var rep=modalId?(reps||[]).find(function(x){return x.id===modalId;}):null;
+  function siguiente(){
+    var next=pend.filter(function(x){return x.id!==modalId&&qaEsInmediata(x)&&qaPopupVigente(x);})[0];
+    setModalId(next?next.id:null);
+  }
+  return (
+    <React.Fragment>
+      {push&&<NotiToast key={push.id} item={push} onOpen={function(){onGoCalidad&&onGoCalidad();}} onClose={function(){setPush(null);}}/>}
+      {rep&&(
+        <Overlay>
+          <div onClick={function(e){e.stopPropagation();}} style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:460,maxHeight:"88vh",overflowY:"auto",boxShadow:"var(--sa-shadow-lg,0 28px 80px rgba(62,63,63,.10))",WebkitOverflowScrolling:"touch"}}>
+            <div style={{padding:"20px 20px 0"}}>
+              <span style={{display:"inline-block",padding:"5px 12px",borderRadius:"var(--sa-pill)",background:"#F7E7E4",color:C.red,fontSize:10.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase"}}>Corrección inmediata</span>
+              <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:24,color:C.black,lineHeight:1.2,marginTop:12}}>{rep.propiedad}</div>
+              <div style={{fontSize:11.5,color:C.taupe,marginTop:3}}>{fmtDate(rep.fecha)} · {rep.categoria}{rep.qaPor?" · revisó "+rep.qaPor:""}</div>
+            </div>
+            {rep.qaComentario&&(
+              <div style={{margin:"16px 20px 0",background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:14,padding:"14px 16px"}}>
+                <QAComentario rep={rep}/>
+              </div>
+            )}
+            {rep.qaAclaracion&&(
+              <div style={{margin:"10px 20px 0",background:"#fff",border:"1px solid "+C.line,borderLeft:"3px solid "+C.peach,borderRadius:12,padding:"12px 14px"}}>
+                <div style={{fontSize:9.5,color:C.earth,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",marginBottom:4}}>Aclaración{rep.qaAclaracionPor?" · "+rep.qaAclaracionPor:""}</div>
+                <div style={{fontSize:12.5,color:C.black,lineHeight:1.6}}>{rep.qaAclaracion}</div>
+              </div>
+            )}
+            <div style={{padding:"16px 20px 6px"}}>
+              <QAResponder rep={rep} onRespond={onRespond} onDone={siguiente}/>
+            </div>
+            <button onClick={function(){ setModalId(null); onGoCalidad&&onGoCalidad(); }}
+              style={{width:"100%",padding:"15px",border:"none",borderTop:"1px solid "+C.line,background:"transparent",color:C.taupe,fontSize:11.5,fontWeight:600,letterSpacing:".06em",cursor:"pointer",fontFamily:"Montserrat,sans-serif",marginTop:10}}>
+              Responder más tarde
+            </button>
+          </div>
+        </Overlay>
+      )}
+    </React.Fragment>
+  );
+}
+
 /* ─── Vendor History — Historial de calidad de limpiezas */
 function VendorHistory({reps, onRespond, vendor, onSaveFeedback, reviews, allReps, allVendors, rvCasos, onSvRvCasos, rvIA}) {
   var cleanReps = (reps||[]).filter(function(r){return isCleaning(r.categoria);})
     .sort(function(a,b){return (b.createdAt||b.id)-(a.createdAt||a.id);});
 
-  var pendCnt = cleanReps.filter(function(r){return r.qaStatus==="correccion";}).length;
+  var pendCnt = cleanReps.filter(qaSinResponder).length;
 
   var qaLabel = {
     pendiente:  {label:"En revisión", bg:"#F0F0EE", tx:C.taupe},
@@ -8269,7 +8604,8 @@ function VendorHistory({reps, onRespond, vendor, onSaveFeedback, reviews, allRep
         {cleanReps.map(function(r){
           var ql  = qaLabel[r.qaStatus] || qaLabel["pendiente"];
           var isCorr = r.qaStatus==="correccion";
-          var isInm  = isCorr && r.qaTipo!=="futuro";
+          var isInm  = isCorr && qaEsInmediata(r);
+          var espera = qaEsperaAclaracion(r);
           return (
             <div key={r.id} style={{background:"#fff",borderRadius:10,border:"1.5px solid "+(isCorr?"#E9C9C2":C.line),overflow:"hidden",boxShadow:isCorr?"0 2px 8px rgba(155,58,58,.08)":"none"}}>
               {/* Header row */}
@@ -8278,29 +8614,38 @@ function VendorHistory({reps, onRespond, vendor, onSaveFeedback, reviews, allRep
                   <div style={{fontSize:13.5,fontWeight:600,color:C.black}}>{r.propiedad}</div>
                   <div style={{fontSize:11,color:C.taupe,marginTop:2}}>{fmtDate(r.fecha)} · {r.categoria}</div>
                 </div>
-                <span style={{padding:"4px 10px",borderRadius:"var(--sa-pill)",fontSize:11,fontWeight:700,background:ql.bg,color:ql.tx}}>{isCorr?(isInm?"🔴 Corrección INMEDIATA":"→ Corrección a futuro"):ql.label}</span>
+                <span style={{padding:"4px 10px",borderRadius:"var(--sa-pill)",fontSize:11,fontWeight:700,background:ql.bg,color:ql.tx}}>{isCorr?(isInm?"🔴 Corrección INMEDIATA":(r.qaTipo==="futuro"?"→ Corrección a futuro":"→ Para tu próxima limpieza")):ql.label}</span>
               </div>
 
               {/* Admin comment */}
               {r.qaComentario&&(
-                <div style={{padding:"12px 16px",background:C.surfaceWarm,borderBottom:"1px solid "+C.line}}>
-                  <div style={{fontSize:9.5,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Comentario del admin</div>
-                  <div style={{fontSize:13,color:C.black,lineHeight:1.6}}>{r.qaComentario}</div>
+                <div style={{padding:"13px 16px",background:C.surfaceWarm,borderBottom:"1px solid "+C.line}}>
+                  <QAComentario rep={r} titulo={isCorr?"Qué hay que corregir":"Observaciones de la revisión"}/>
                 </div>
               )}
 
-              {/* Vendor response buttons — only when correction pending */}
-              {isCorr&&(
-                <div style={{padding:"12px 16px",display:"flex",flexDirection:"column",gap:8}}>
-                  {isInm&&<div style={{fontSize:11.5,fontWeight:700,color:C.red}}>⚠ Urgente: corrige hoy y confirma aquí. El administrador ve si respondiste o no.</div>}
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                    <button onClick={function(){onRespond(r.id,"corregido");}} style={{flex:1,minWidth:140,padding:"11px 12px",borderRadius:7,border:"none",background:isInm?C.red:C.black,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",letterSpacing:".04em"}}>
-                      ✓ Corrección realizada
-                    </button>
-                    {!isInm&&<button onClick={function(){onRespond(r.id,"futuro");}} style={{flex:1,minWidth:140,padding:"11px 12px",borderRadius:7,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer",letterSpacing:".04em"}}>
-                      → Lo tomo en cuenta
-                    </button>}
-                  </div>
+              {/* Aclaración del revisor, si ya la escribió */}
+              {isCorr&&r.qaAclaracion&&(
+                <div style={{padding:"12px 16px",borderBottom:"1px solid "+C.line,borderLeft:"3px solid "+C.peach}}>
+                  <div style={{fontSize:9.5,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Aclaración{r.qaAclaracionPor?" · "+r.qaAclaracionPor:""}</div>
+                  <div style={{fontSize:12.5,color:C.black,lineHeight:1.6}}>{r.qaAclaracion}</div>
+                </div>
+              )}
+
+              {/* Esperando que el revisor aclare */}
+              {espera&&(
+                <div style={{padding:"12px 16px",background:"#F5EBE5"}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"#9a5020"}}>Pediste una aclaración</div>
+                  <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.5}}>Te avisamos aquí mismo en cuanto quien revisó te responda.</div>
+                  {r.qaDuda&&<div style={{fontSize:11.5,color:C.taupe,marginTop:5,fontStyle:"italic"}}>“{r.qaDuda}”</div>}
+                </div>
+              )}
+
+              {/* Respuesta del técnico */}
+              {isCorr&&!espera&&(
+                <div style={{padding:"14px 16px"}}>
+                  {isInm&&<div style={{fontSize:11.5,fontWeight:700,color:C.red,marginBottom:9,lineHeight:1.5}}>Urgente: corrige hoy y confirma aquí con fotos. El administrador ve si respondiste o no.</div>}
+                  <QAResponder rep={r} onRespond={onRespond}/>
                 </div>
               )}
 
@@ -8308,9 +8653,14 @@ function VendorHistory({reps, onRespond, vendor, onSaveFeedback, reviews, allRep
               {(r.qaStatus==="corregido"||r.qaStatus==="futuro")&&(
                 <div style={{padding:"10px 16px",background:qaLabel[r.qaStatus].bg}}>
                   <span style={{fontSize:11,fontWeight:700,color:qaLabel[r.qaStatus].tx}}>
-                    {r.qaStatus==="corregido"?"Tu respuesta: Corrección realizada":"Tu respuesta: Tomado en cuenta para próximas limpiezas"}
+                    {r.qaStatus==="corregido"?"Tu respuesta: Corrección realizada":"Tu respuesta: Leído — lo pondré en práctica en mi próxima limpieza"}
                   </span>
                   {r.qaRespuestaFecha&&<span style={{fontSize:10,color:C.taupe,marginLeft:8}}>{fmtDate(r.qaRespuestaFecha)}</span>}
+                  {Array.isArray(r.qaFotos)&&r.qaFotos.length>0&&(
+                    <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+                      {r.qaFotos.map(function(f,i){ return <PhotoBtn key={i} src={f} fotos={r.qaFotos} idx={i} style={{width:54,height:54,borderRadius:8}}/>; })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -9726,9 +10076,7 @@ function InventorySummary({inventario}) {
           {item.countAlways&&item.cantidad!==""&&item.cantidad!==undefined?<div style={{fontSize:12,color:C.earth}}>Contadas: {item.cantidad}</div>:(item.cantidad>0&&<div style={{fontSize:12,color:C.earth}}>Cantidad: {item.cantidad}</div>)}
           {hasMal(item)&&<div style={{fontSize:12,fontWeight:700,color:C.red}}>En mal estado (inutilizables): {item.malEstado}</div>}
           {item.foto&&(item.foto.startsWith("http")||item.foto.startsWith("data:"))&&(
-            <a href={item.foto} target="_blank" rel="noopener noreferrer">
-              <img src={item.foto} alt={item.name} style={{width:80,height:70,objectFit:"cover",borderRadius:6,marginTop:4,border:"1px solid "+C.line}}/>
-            </a>
+            <PhotoBtn src={item.foto} alt={item.name} style={{width:80,height:70,borderRadius:6,marginTop:4}}/>
           )}
         </div>
       );})}
@@ -9758,9 +10106,7 @@ function DamageSummary({danios}) {
             <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:4}}>
               {d.fotos.map(function(src,pi){return (
                 src&&(src.startsWith("http")||src.startsWith("data:"))
-                  ? <a key={pi} href={src} target="_blank" rel="noopener noreferrer">
-                      <img src={driveThumb(src,300)} alt={"daño "+i+" foto "+pi} style={{width:80,height:70,objectFit:"cover",borderRadius:6,border:"1px solid "+C.line}} onError={function(e){e.target.src=src;}}/>
-                    </a>
+                  ? <PhotoBtn key={pi} src={src} fotos={d.fotos.filter(function(x){return x&&(x.startsWith("http")||x.startsWith("data:"));})} idx={pi} thumb={300} alt={"daño "+i+" foto "+pi} style={{width:80,height:70,borderRadius:6}}/>
                   : null
               );})}
             </div>
@@ -10167,9 +10513,7 @@ function ExecSummary({rep, vendors}) {
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
           {rep.fotoUniforme&&(rep.fotoUniforme.startsWith("http")||rep.fotoUniforme.startsWith("data:")) ? (
             <div style={{display:"flex",gap:10,alignItems:"center",padding:"8px 12px",borderRadius:8,background:rep._gorraOk==="no"?"#F5EBE5":"#E8F2ED",border:"1px solid "+(rep._gorraOk==="no"?"#E3D5C8":"#CFE3D6")}}>
-              <a href={rep.fotoUniforme} target="_blank" rel="noopener noreferrer">
-                <img src={driveThumb(rep.fotoUniforme,200)} alt="uniforme" style={{width:44,height:44,objectFit:"cover",borderRadius:6,border:"1px solid "+C.line,flexShrink:0}} onError={function(e){e.target.src=rep.fotoUniforme;}}/>
-              </a>
+              <PhotoBtn src={rep.fotoUniforme} thumb={200} alt="uniforme" style={{width:44,height:44,borderRadius:6,flexShrink:0}}/>
               <div>
                 <div style={{fontSize:12,fontWeight:700,color:rep._gorraOk==="no"?"#9a5020":C.green}}>
                   {rep._gorraOk==="no"?"⚠ Sin gorra en foto":"✓ Foto de uniforme"}
@@ -10394,7 +10738,7 @@ function QASection({rep, onQA}) {
       <div style={{padding:"10px 14px",borderRadius:8,background:sc.bg,fontSize:13,fontWeight:700,color:sc.tx}}>{sc.label}{st==="correccion"&&rep.qaTipo?(rep.qaTipo==="inmediata"?" · 🔴 INMEDIATA":" · para el futuro"):""}</div>
 
       {/* Sin respuesta del técnico */}
-      {st==="correccion"&&rep.qaFecha&&(function(){
+      {st==="correccion"&&rep.qaFecha&&!qaEsperaAclaracion(rep)&&(function(){
         var days=Math.floor((Date.now()-new Date(rep.qaFecha+"T12:00:00").getTime())/86400000);
         return <div style={{padding:"8px 12px",borderRadius:8,background:"#F5EBE5",fontSize:12,color:"#9a5020",fontWeight:600}}>⏳ El técnico aún no responde{days>0?" — "+days+" día"+(days!==1?"s":"")+" sin respuesta":""}</div>;
       })()}
@@ -10402,8 +10746,7 @@ function QASection({rep, onQA}) {
       {/* Admin comment if flagged */}
       {(st==="correccion"||st==="corregido"||st==="futuro")&&rep.qaComentario&&(
         <div style={{background:C.surfaceWarm,borderRadius:8,padding:"11px 14px",border:"1px solid "+C.line}}>
-          <div style={{fontSize:9.5,color:C.earth,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",marginBottom:5}}>Comentario admin</div>
-          <div style={{fontSize:13,color:C.black,lineHeight:1.6}}>{rep.qaComentario}</div>
+          <QAComentario rep={rep} titulo="Hallazgos de la revisión"/>
           <div style={{fontSize:10,color:C.taupe,marginTop:4}}>{fmtDate(rep.qaFecha)}</div>
         </div>
       )}
@@ -10413,6 +10756,27 @@ function QASection({rep, onQA}) {
         <div style={{padding:"8px 12px",borderRadius:8,background:statusColors[st].bg,fontSize:12,color:statusColors[st].tx,fontWeight:600}}>
           Respuesta del proveedor: {st==="corregido"?"Corrección realizada":"Tomado en cuenta para próximas limpiezas"}
           {rep.qaRespuestaFecha&&<span style={{fontWeight:400,marginLeft:6,opacity:.7}}>({fmtDate(rep.qaRespuestaFecha)})</span>}
+        </div>
+      )}
+
+      {/* Evidencia que subió el técnico al corregir */}
+      {Array.isArray(rep.qaFotos)&&rep.qaFotos.length>0&&(
+        <div>
+          <div style={{fontSize:9.5,color:C.earth,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",marginBottom:6}}>Evidencia de la corrección</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {rep.qaFotos.map(function(f,i){ return <PhotoBtn key={i} src={f} fotos={rep.qaFotos} idx={i} style={{width:82,height:82,borderRadius:10}}/>; })}
+          </div>
+        </div>
+      )}
+
+      {/* El técnico pidió que le aclaren */}
+      {rep.qaDuda&&(
+        <div style={{background:"#fff",border:"1px solid "+C.line,borderLeft:"3px solid "+C.peach,borderRadius:8,padding:"11px 14px"}}>
+          <div style={{fontSize:9.5,color:C.earth,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",marginBottom:5}}>El técnico no entendió</div>
+          <div style={{fontSize:12.5,color:C.black,lineHeight:1.55,fontStyle:"italic"}}>“{rep.qaDuda}”</div>
+          {rep.qaAclaracion
+            ? <div style={{fontSize:12,color:C.earth,marginTop:6,lineHeight:1.55}}><b style={{color:C.black}}>Aclaración{rep.qaAclaracionPor?" · "+rep.qaAclaracionPor:""}:</b> {rep.qaAclaracion}</div>
+            : <div style={{fontSize:11.5,color:C.attentionText,marginTop:6,fontWeight:600}}>Pendiente de aclarar — respóndele desde Calidad › Limpiezas.</div>}
         </div>
       )}
 
@@ -14116,6 +14480,50 @@ function QuickEditTotal({rep, vendors, onSave}) {
 
 
 
+/* ─── Aclaraciones pedidas por los técnicos — la pelota está de este lado.
+   Al enviar la aclaración, el reloj de la corrección arranca de nuevo: si el
+   técnico la abre dentro de la hora, todavía se le pide corregir en el momento. */
+function QADudasPanel({reps, vendors, me, onUpdate}){
+  var [txt,setTxt]=useState({});
+  var [busy,setBusy]=useState("");
+  var pend=(reps||[]).filter(qaEsperaAclaracion).sort(function(a,b){return (b.qaDudaTs||0)-(a.qaDudaTs||0);});
+  if(!pend.length) return null;
+  async function enviar(r){
+    var t=(txt[r.id]||"").trim(); if(!t) return;
+    setBusy(r.id);
+    var upd=Object.assign({},r,{qaAclaracion:t,qaAclaracionPor:me?vendorDisplay(me):"",qaAclaracionTs:Date.now(),qaTs:Date.now(),qaVistoTs:0});
+    try{ await onUpdate(upd); }catch(_){}
+    setBusy(""); setTxt(function(p){ var u=Object.assign({},p); delete u[r.id]; return u; });
+  }
+  return (
+    <div style={{background:"#fff",border:"1.5px solid "+C.peach,borderRadius:14,padding:"14px 16px",display:"flex",flexDirection:"column",gap:12}}>
+      <div>
+        <div style={{fontSize:9.5,color:C.earth,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase"}}>Esperan tu aclaración</div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:20,color:C.black,marginTop:3}}>{pend.length} técnico{pend.length===1?"":"s"} no entendió la corrección</div>
+      </div>
+      {pend.map(function(r){
+        var nm=vendorNameByEmail(vendors,r.reportadoPor)||r.reportadoPor||"—";
+        return (
+          <div key={r.id} style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"12px 14px",display:"flex",flexDirection:"column",gap:9}}>
+            <div>
+              <div style={{fontSize:12.5,fontWeight:700,color:C.black}}>{r.propiedad}</div>
+              <div style={{fontSize:10.5,color:C.taupe,marginTop:2}}>{fmtDate(r.fecha)} · {nm}</div>
+            </div>
+            <div style={{fontSize:12,color:C.black,lineHeight:1.55,fontStyle:"italic"}}>“{r.qaDuda}”</div>
+            <div style={{fontSize:11.5,color:C.earth,lineHeight:1.5}}><b>Tu comentario fue:</b> {r.qaComentario||"—"}</div>
+            <textarea value={txt[r.id]||""} onChange={function(e){var v=e.target.value; setTxt(function(p){var u=Object.assign({},p); u[r.id]=v; return u;});}} rows={2} placeholder="Escribe la aclaración…"
+              style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:10,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",resize:"vertical",background:"#fff",color:C.black}}/>
+            <button onClick={function(){enviar(r);}} disabled={busy===r.id||!(txt[r.id]||"").trim()}
+              style={{alignSelf:"flex-start",padding:"11px 18px",minHeight:44,borderRadius:"var(--sa-pill)",border:"none",background:(busy===r.id||!(txt[r.id]||"").trim())?"#D8D4CE":C.black,color:(busy===r.id||!(txt[r.id]||"").trim())?C.taupe:"#fff",fontSize:12,fontWeight:700,letterSpacing:".06em",cursor:(busy===r.id||!(txt[r.id]||"").trim())?"not-allowed":"pointer",fontFamily:"Montserrat,sans-serif"}}>
+              {busy===r.id?"Enviando…":"Enviar aclaración"}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ─── Admin QA Panel — full quality review across all cleanings + daños + resumen */
 function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos, rvIA, onSvRvIA, onQA, onQAForm, onSelect, onUpdate, isAdmin, me, props, reservas, schedules, onSvSchedules}) {
   const [sec,      setSec]      = useState("limpiezas"); /* limpiezas | danios | resumen */
@@ -14201,6 +14609,7 @@ function AdminQAPanel({reps, vendors, reviews, onSvReviews, rvCasos, onSvRvCasos
       {sec==="resumen"&&isAdmin&&<TechSummary reps={reps} vendors={vendors}/>}
 
       {sec==="limpiezas"&&<>
+      <QADudasPanel reps={cleanReps} vendors={vendors} me={me} onUpdate={onUpdate}/>
       {/* Filtro de período rápido (igual al dashboard) */}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"10px 12px"}}>
         <span style={{fontSize:10,fontWeight:700,color:C.taupe,letterSpacing:".1em",textTransform:"uppercase"}}>Período</span>
@@ -14304,7 +14713,7 @@ function SupervisionPanel({me, reps, vendors, props, onUpdate}) {
   const [form,   setForm]   = useState(null);
   function qaSup(id,status,comment,tipo){
     var r=(reps||[]).find(function(x){return x.id===id;}); if(!r) return;
-    var upd=Object.assign({},r,{qaStatus:status,qaComentario:comment||"",qaFecha:todayStr(),qaPor:vendorDisplay(me),qaTipo:status==="correccion"?(tipo||"inmediata"):r.qaTipo});
+    var upd=Object.assign({},r,{qaStatus:status,qaComentario:comment||"",qaFecha:todayStr(),qaPor:vendorDisplay(me),qaTipo:status==="correccion"?(tipo||"inmediata"):r.qaTipo},qaResetRespuesta(status));
     onUpdate&&onUpdate(upd);
     setDetail(function(d){return d&&d.id===id?upd:d;});
     try{ notifyQAResult(upd,status,comment,vendors); }catch(_){}
@@ -14316,7 +14725,7 @@ function SupervisionPanel({me, reps, vendors, props, onUpdate}) {
       qaStatus:res.status, qaComentario:res.comentario||"", qaFecha:todayStr(), qaPor:vendorDisplay(me),
       qaTipo:res.status==="correccion"?(res.tipo||"inmediata"):r.qaTipo,
       supForm:Object.assign({},res.supForm,{por:vendorDisplay(me)})
-    });
+    }, qaResetRespuesta(res.status));
     onUpdate&&onUpdate(upd);
     setForm(null);
     setDetail(function(d){return d&&d.id===upd.id?upd:d;});
@@ -14696,7 +15105,9 @@ function DamageBoard({reps, vendors, me, isAdmin, onUpdate, onSelect, reviews, p
   const [aviso, setAviso] = useState("");
   var hoy = SCHED.hoyGT();
   var vMap={}; (vendors||[]).forEach(function(v){if(v.email)vMap[v.email]=vendorDisplay(v);});
-  var danios=(reps||[]).filter(function(r){return isDanos(r.categoria);});
+  var danios=(reps||[]).filter(function(r){return isDanos(r.categoria)&&!r.dmgMergedInto;});
+  /* Los reportes que absorbió un unificado siguen existiendo: se leen desde el principal. */
+  function absorbidos(r){ return (reps||[]).filter(function(x){ return x.dmgMergedInto===r.id; }); }
 
   /* La urgencia se calcula por apartamento a partir del pareto; la que alguien
      puso a mano siempre gana. */
@@ -14781,6 +15192,31 @@ function DamageBoard({reps, vendors, me, isAdmin, onUpdate, onSelect, reviews, p
     limpiar();
   }
   var listoProg = !!(tec&&fecha&&marcados.length&&unSoloApto);
+  /* ── Unificar reportes duplicados ──
+     El mismo daño lo reporta más de una persona en días distintos. Unificar deja
+     UN reporte con todas las fotos y todas las notas; los otros no se borran,
+     se cuelgan del principal y se pueden separar después. */
+  function unificar(){
+    if(marcados.length<2||!unSoloApto) return;
+    var orden=marcados.slice().sort(function(a,b){ return String(a.fecha||"").localeCompare(String(b.fecha||""))||((a.createdAt||a.id)-(b.createdAt||b.id)); });
+    var principal=orden[0], resto=orden.slice(1);
+    var previos=(principal.dmgMerge||[]).slice();
+    resto.forEach(function(r){ if(previos.indexOf(r.id)<0) previos.push(r.id); });
+    var nota={id:"c"+Date.now(),autor:me?vendorDisplay(me):"Administración",rol:isAdmin?"Admin":"Supervisión",fecha:todayStr(),
+      texto:"Se unificaron "+resto.length+" reporte"+(resto.length===1?"":"s")+" duplicado"+(resto.length===1?"":"s")+" en este: "+resto.map(function(r){ return (vMap[r.reportadoPor]||r.reportadoPor)+" · "+fmtDate(r.fecha); }).join(" · ")+"."};
+    upd(principal,{dmgMerge:previos, dmgComments:(principal.dmgComments||[]).concat([nota])});
+    resto.forEach(function(r){ upd(r,{dmgMergedInto:principal.id, dmgStatus:principal.dmgStatus||r.dmgStatus||"pendiente"}); });
+    setAviso("Unificado: "+(resto.length+1)+" reportes ahora son uno solo ("+principal.propiedad+" · "+fmtDate(principal.fecha)+").");
+    limpiar();
+  }
+  function separar(r){
+    (r.dmgMerge||[]).forEach(function(id){
+      var x=(reps||[]).find(function(y){ return y.id===id; });
+      if(x) upd(x,{dmgMergedInto:""});
+    });
+    upd(r,{dmgMerge:[]});
+    setAviso("Reportes separados: cada uno vuelve a la lista por su cuenta.");
+  }
   var IN={boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:14,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44,color:C.black};
 
   return (
@@ -14843,9 +15279,10 @@ function DamageBoard({reps, vendors, me, isAdmin, onUpdate, onSelect, reviews, p
               })}
             </span>
             {puedeProgramar&&<button onClick={function(){ setProg(function(x){return !x;}); if(!fecha) setFecha(salidas[0]||""); }} style={{padding:"6px 12px",minHeight:34,borderRadius:"var(--sa-pill)",border:"none",background:"#fff",color:C.black,fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Programar mantenimiento</button>}
+            {marcados.length>1&&unSoloApto&&<button onClick={unificar} style={{padding:"6px 12px",minHeight:34,borderRadius:"var(--sa-pill)",border:"1.5px solid rgba(255,255,255,.35)",background:"transparent",color:"#fff",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Unificar en un reporte</button>}
             <button onClick={limpiar} style={{marginLeft:"auto",padding:"6px 10px",minHeight:34,borderRadius:"var(--sa-pill)",border:"none",background:"transparent",color:"rgba(255,255,255,.75)",fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Quitar</button>
           </div>
-          {!unSoloApto&&<div style={{fontSize:11,color:"rgba(255,255,255,.75)",lineHeight:1.6,textWrap:"pretty"}}>Para programar una visita marca daños de un mismo apartamento: el técnico va a una dirección, no a {propsMarcadas.length}.</div>}
+          {!unSoloApto&&<div style={{fontSize:11,color:"rgba(255,255,255,.75)",lineHeight:1.6,textWrap:"pretty"}}>Para programar una visita o unificar reportes, marca daños de un mismo apartamento: el técnico va a una dirección, no a {propsMarcadas.length}.</div>}
           {prog&&puedeProgramar&&(
             <div style={{background:"#fff",borderRadius:11,padding:"12px",display:"flex",flexDirection:"column",gap:9}}>
               <select value={tec} onChange={function(e){setTec(e.target.value);}} style={Object.assign({},IN,{width:"100%"})}>
@@ -14893,10 +15330,45 @@ function DamageBoard({reps, vendors, me, isAdmin, onUpdate, onSelect, reviews, p
                       })}
                     </div>
                   )}
+                  {r.visitaProgramada&&<div style={{fontSize:10.5,fontWeight:700,color:"#3B6691",background:"#E8EEF4",padding:"3px 9px",borderRadius:"var(--sa-pill)",letterSpacing:".06em",marginTop:6,display:"inline-block"}}>Visita · {r.visitaProgramada.nombre} · {fmtDate(r.visitaProgramada.fecha)}</div>}
                 </div>
                 <button onClick={function(){onSelect&&onSelect(r);}} style={{fontSize:11,padding:"5px 10px",borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",fontWeight:600,flexShrink:0}}>Ver detalle</button>
               </div>
               {r.descripcion&&<div style={{fontSize:12.5,color:C.black,lineHeight:1.55,background:C.surfaceWarm,padding:"9px 12px",borderRadius:8}}>{r.descripcion}</div>}
+              {(function(){
+                var abs=absorbidos(r);
+                if(!abs.length) return null;
+                var mias=dmgFotos(r);
+                return (
+                  <div style={{border:"1px solid "+C.line,borderRadius:10,overflow:"hidden"}}>
+                    <div style={{padding:"9px 12px",background:C.surfaceWarm,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span style={{fontSize:9.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"3px 9px",borderRadius:"var(--sa-pill)",background:C.black,color:"#fff"}}>Unificado · {abs.length+1} reportes</span>
+                      <span style={{fontSize:11,color:C.taupe,lineHeight:1.5}}>Un solo caso con todas las fotos y todas las notas.</span>
+                      <button onClick={function(){separar(r);}} style={{marginLeft:"auto",padding:"4px 11px",minHeight:30,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Separar</button>
+                    </div>
+                    {mias.length>0&&(
+                      <div style={{padding:"10px 12px",borderTop:"1px solid "+C.line,display:"flex",gap:6,flexWrap:"wrap"}}>
+                        {mias.map(function(f,fi){ return <PhotoBtn key={fi} src={f} fotos={mias} idx={fi} thumb={300} style={{width:64,height:56,borderRadius:7}}/>; })}
+                      </div>
+                    )}
+                    {abs.map(function(x){
+                      var fx=dmgFotos(x);
+                      return (
+                        <div key={x.id} style={{padding:"10px 12px",borderTop:"1px solid "+C.line}}>
+                          <div style={{fontSize:10.5,fontWeight:700,color:C.earth}}>{vMap[x.reportadoPor]||x.reportadoPor} · {fmtDate(x.fecha)}</div>
+                          {x.descripcion&&<div style={{fontSize:12,color:C.black,lineHeight:1.55,marginTop:3}}>{x.descripcion}</div>}
+                          {fx.length>0&&(
+                            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:7}}>
+                              {fx.map(function(f,fi){ return <PhotoBtn key={fi} src={f} fotos={fx} idx={fi} thumb={300} style={{width:64,height:56,borderRadius:7}}/>; })}
+                            </div>
+                          )}
+                          {(x.dmgComments||[]).map(function(c){ return <div key={c.id} style={{fontSize:11.5,color:C.earth,marginTop:5,lineHeight:1.5}}><b style={{color:C.black}}>{c.autor}:</b> {c.texto}</div>; })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
               <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
                 <div>
                   <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Urgencia {esManual(r)?"· a mano":"· del pareto"}</div>
@@ -14933,6 +15405,163 @@ function DamageBoard({reps, vendors, me, isAdmin, onUpdate, onSelect, reviews, p
   );
 }
 
+
+/* ═══ VISITAS — programar un día y ver qué daños se pueden resolver ese día ═══
+   Para el usuario con la facultad de visitas (compras y casos que no son un
+   mantenimiento). Elige el día primero: el día decide a qué apartamentos puede
+   entrar —sale huésped o está vacío— y por lo tanto qué casos caben en la ruta. */
+function VisitaPlanner({me, reps, vendors, props, reservas, schedules, onSvSchedules, onUpdate}){
+  var hoy=SCHED.hoyGT();
+  const [fecha,setFecha]=useState(hoy);
+  const [sel,setSel]=useState({});
+  const [nota,setNota]=useState("");
+  const [aviso,setAviso]=useState("");
+  var vMap={}; (vendors||[]).forEach(function(v){ if(v.email) vMap[v.email]=vendorDisplay(v); });
+  var abiertos=(reps||[]).filter(danoAbierto);
+  var dias=React.useMemo(function(){
+    var out=[]; for(var i=0;i<10;i++){ var d=new Date(hoy+"T12:00:00"); d.setDate(d.getDate()+i); out.push(d.toISOString().split("T")[0]); }
+    return out;
+  },[hoy]);
+  function gruposDe(f){
+    var byProp={};
+    abiertos.forEach(function(r){ (byProp[r.propiedad]=byProp[r.propiedad]||[]).push(r); });
+    var out=[];
+    Object.keys(byProp).forEach(function(p){
+      var v=aptoVisitable(reservas,p,f);
+      if(v.ok) out.push({prop:p, motivo:v.motivo, tipo:v.tipo, reps:byProp[p]});
+    });
+    var ord={checkout:0, libre:1, checkin:2};
+    return out.sort(function(a,b){ return (ord[a.tipo]-ord[b.tipo]) || (b.reps.length-a.reps.length); });
+  }
+  var grupos=gruposDe(fecha);
+  var cabenHoy=grupos.reduce(function(s,g){ return s+g.reps.length; },0);
+  var fuera=abiertos.length-cabenHoy;
+  var marcados=abiertos.filter(function(r){ return sel[r.id]; });
+  var misVisitas=(reps||[]).filter(function(r){
+    return r.visitaProgramada && String(r.visitaProgramada.email||"")===String(me.email||"").toLowerCase() && r.dmgStatus!=="resuelto";
+  }).sort(function(a,b){ return String(a.visitaProgramada.fecha).localeCompare(String(b.visitaProgramada.fecha)); });
+
+  function toggle(r){ setSel(function(p){ var u=Object.assign({},p); if(u[r.id]) delete u[r.id]; else u[r.id]=true; return u; }); }
+  function programar(){
+    if(!marcados.length||!fecha) return;
+    var byProp={}; marcados.forEach(function(r){ (byProp[r.propiedad]=byProp[r.propiedad]||[]).push(r); });
+    var nuevas=[];
+    Object.keys(byProp).forEach(function(p,i){
+      var pp=propParts(p), pObj=(props||[]).find(function(x){ return x.name===p; })||{};
+      nuevas.push({
+        id:"sc_vis_"+Date.now()+"_"+i, key:fecha+"|"+normalize(p)+"|visita",
+        fecha:fecha, hora:SCHED.HORA_INI, horaFin:SCHED.HORA_FIN,
+        propiedad:p, zona:pp.zona, edificio:pp.edificio, unidad:pp.unidad,
+        habitaciones:parseInt(pObj.cuartos,10)||1, tipo:"Visita",
+        entradaHoy:false, codigoAcceso:pObj.codigoAcceso||"",
+        vendorId:me.id, vendorEmail:String(me.email||"").toLowerCase(),
+        orden:i+1, estado:"confirmada", origen:"visita", danoId:String(byProp[p][0].id),
+        motivo:"visita para resolver "+byProp[p].length+" caso"+(byProp[p].length===1?"":"s"),
+        nota:nota||"", generadoEn:hoy, notificadoEn:hoy
+      });
+    });
+    onSvSchedules&&onSvSchedules((schedules||[]).concat(nuevas));
+    marcados.forEach(function(r){
+      onUpdate&&onUpdate(Object.assign({},r,{visitaProgramada:{fecha:fecha, email:String(me.email||"").toLowerCase(), nombre:vendorDisplay(me), programadoEn:hoy, nota:nota||""}}));
+    });
+    setAviso("Visita programada para "+fmtDate(fecha)+" · "+Object.keys(byProp).length+" apartamento"+(Object.keys(byProp).length===1?"":"s")+", "+marcados.length+" caso"+(marcados.length===1?"":"s")+".");
+    setSel({}); setNota("");
+  }
+  function resolver(r){ onUpdate&&onUpdate(Object.assign({},r,{dmgStatus:"resuelto"})); }
+  function quitar(r){ onUpdate&&onUpdate(Object.assign({},r,{visitaProgramada:null})); }
+
+  var IN={boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:14,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44,color:C.black,width:"100%"};
+  var tagCol={checkout:["#B54D36","#F8ECE9"], libre:["#3d6b52","#E8F2ED"], checkin:["#3B6691","#E8EEF4"]};
+
+  return (
+    <div style={{maxWidth:640,margin:"0 auto",padding:"22px 16px 110px",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:14}}>
+      <div>
+        <div style={{fontSize:9.5,color:C.earth,fontWeight:700,letterSpacing:".24em",textTransform:"uppercase",marginBottom:6}}>Visitas</div>
+        <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:24,fontWeight:400,color:C.black,lineHeight:1.2}}>Escoge el día y arma tu ruta</div>
+        <div style={{fontSize:12.5,color:C.earth,marginTop:6,lineHeight:1.65,textWrap:"pretty"}}>Te mostramos solo los daños de apartamentos donde ese día sale el huésped o el apartamento está libre. Son los que sí puedes resolver.</div>
+      </div>
+
+      {aviso&&<div style={{background:"#E8F2ED",border:"1px solid #CFE3D6",borderRadius:12,padding:"11px 14px",fontSize:12,color:C.green,fontWeight:600,lineHeight:1.6}}>{aviso}</div>}
+
+      {misVisitas.length>0&&(
+        <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:14,overflow:"hidden"}}>
+          <div style={{padding:"12px 15px",borderBottom:"1px solid "+C.line}}>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase"}}>Tus visitas programadas</div>
+          </div>
+          {misVisitas.map(function(r){ return (
+            <div key={r.id} style={{padding:"11px 15px",borderBottom:"1px solid "+C.line,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <div style={{flex:"1 1 190px",minWidth:0}}>
+                <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{r.propiedad}</div>
+                <div style={{fontSize:11,color:C.taupe,marginTop:2}}>{fmtDate(r.visitaProgramada.fecha)} · {r.descripcion||"Daño reportado"}</div>
+              </div>
+              <button onClick={function(){resolver(r);}} style={{padding:"7px 13px",minHeight:36,borderRadius:"var(--sa-pill)",border:"none",background:"#3d6b52",color:"#fff",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Resuelto</button>
+              <button onClick={function(){quitar(r);}} style={{padding:"7px 11px",minHeight:36,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Quitar</button>
+            </div>
+          ); })}
+        </div>
+      )}
+
+      {/* Día de la visita */}
+      <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:14,padding:"14px 15px",display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase"}}>Día de la visita</div>
+        <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:2}}>
+          {dias.map(function(f){
+            var on=fecha===f, n=gruposDe(f).reduce(function(s,g){ return s+g.reps.length; },0);
+            return (
+              <button key={f} onClick={function(){setFecha(f);setSel({});}} style={{flexShrink:0,minWidth:74,padding:"9px 10px",borderRadius:12,border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",cursor:"pointer",fontFamily:"Montserrat,sans-serif",textAlign:"center"}}>
+                <div style={{fontSize:9.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:on?"rgba(255,255,255,.7)":C.taupe}}>{schedDiaNombre(f).slice(0,3)}</div>
+                <div style={{fontSize:14,fontWeight:700,color:on?"#fff":C.black,marginTop:2}}>{f.slice(8,10)}</div>
+                <div style={{fontSize:10,fontWeight:600,color:n>0?(on?"#fff":C.attentionText):(on?"rgba(255,255,255,.5)":C.gray),marginTop:2}}>{n} caso{n===1?"":"s"}</div>
+              </button>
+            );
+          })}
+        </div>
+        <input type="date" value={fecha} min={hoy} onChange={function(e){setFecha(e.target.value);setSel({});}} style={IN}/>
+      </div>
+
+      {grupos.length===0
+        ? <div style={{textAlign:"center",padding:"36px 18px",color:C.taupe,fontSize:13,background:C.surfaceWarm,borderRadius:14,lineHeight:1.6}}>Ese día no hay apartamentos con daños abiertos a los que puedas entrar. Prueba otro día.</div>
+        : grupos.map(function(g){
+            var tc=tagCol[g.tipo]||tagCol.libre;
+            return (
+              <div key={g.prop} style={{background:"#fff",border:"1px solid "+C.line,borderRadius:14,overflow:"hidden"}}>
+                <div style={{padding:"12px 15px",borderBottom:"1px solid "+C.line,display:"flex",alignItems:"center",gap:9,flexWrap:"wrap"}}>
+                  <div style={{fontSize:13.5,fontWeight:600,color:C.black,minWidth:0,flex:"1 1 auto"}}>{g.prop}</div>
+                  <span style={{fontSize:9.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",padding:"3px 9px",borderRadius:"var(--sa-pill)",background:tc[1],color:tc[0]}}>{g.motivo}</span>
+                </div>
+                {g.reps.map(function(r){
+                  var on=!!sel[r.id], fx=dmgFotos(r);
+                  return (
+                    <div key={r.id} style={{padding:"12px 15px",borderBottom:"1px solid "+C.line,display:"flex",gap:11,alignItems:"flex-start",background:on?C.surfaceWarm:"#fff"}}>
+                      <button onClick={function(){toggle(r);}} aria-label="Marcar" style={{flexShrink:0,width:22,height:22,borderRadius:7,border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",marginTop:2,padding:0}}>{on&&<Icon name="check" size={13} stroke="#fff"/>}</button>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:12.5,color:C.black,lineHeight:1.5,fontWeight:600}}>{r.descripcion||"Daño reportado"}</div>
+                        <div style={{fontSize:10.5,color:C.taupe,marginTop:3}}>{vMap[r.reportadoPor]||r.reportadoPor} · {fmtDate(r.fecha)}{(r.dmgMerge&&r.dmgMerge.length)?" · unificado ("+(r.dmgMerge.length+1)+")":""}</div>
+                        {fx.length>0&&(
+                          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
+                            {fx.slice(0,4).map(function(f,fi){ return <PhotoBtn key={fi} src={f} fotos={fx} idx={fi} thumb={300} style={{width:60,height:52,borderRadius:7}}/>; })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+
+      {fuera>0&&<div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6,textWrap:"pretty"}}>{fuera} caso{fuera===1?"":"s"} más quedan fuera de este día: el apartamento está ocupado.</div>}
+
+      {marcados.length>0&&(
+        <div style={{position:"sticky",bottom:70,background:C.black,borderRadius:16,padding:"13px 15px",display:"flex",flexDirection:"column",gap:10,boxShadow:"var(--sa-shadow-md)"}}>
+          <div style={{fontSize:12.5,fontWeight:700,color:"#fff"}}>{marcados.length} caso{marcados.length===1?"":"s"} · {fmtDate(fecha)}</div>
+          <input value={nota} onChange={function(e){setNota(e.target.value);}} placeholder="Nota de la visita (opcional)" style={Object.assign({},IN,{border:"none"})}/>
+          <button onClick={programar} style={{padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:"#fff",color:C.black,fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Programar la visita</button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /* ═══ MANTENIMIENTOS EN CALIDAD — asignar pagador + comentarios para el proveedor (solo admin) */
 var MANT_PAGADORES = ["Spacio AM","Dueño","Airbnb","Seguro"];
@@ -15246,6 +15875,30 @@ function PhotoRecoveryTool() {
 
 
 /* ─── Photo Lightbox — full screen photo viewer */
+/* Una sola instancia para toda la app: cualquier foto se abre DENTRO de la
+   plataforma con openPhoto(fotos, i) — nunca en una pestaña nueva, que en el
+   teléfono equivale a salirse del app. */
+var __lightbox={open:function(){}};
+function openPhoto(fotos, idx){
+  var list=(Array.isArray(fotos)?fotos:[fotos]).filter(function(x){ return x&&typeof x==="string"; });
+  if(!list.length) return;
+  __lightbox.open(list, idx||0);
+}
+function LightboxHost(){
+  const [st,setSt]=useState(null);
+  useEffect(function(){ __lightbox.open=function(fotos,idx){ setSt({fotos:fotos,idx:idx||0}); }; return function(){ __lightbox.open=function(){}; }; },[]);
+  if(!st) return null;
+  return <PhotoLightbox photos={st.fotos} initialIdx={st.idx} onClose={function(){setSt(null);}}/>;
+}
+function PhotoBtn({src, fotos, idx, style, alt, thumb}){
+  var list=fotos||[src];
+  return (
+    <button type="button" onClick={function(e){ e.stopPropagation(); openPhoto(list, idx||0); }} aria-label="Ver foto"
+      style={Object.assign({padding:0,border:"1px solid "+C.line,background:"none",cursor:"zoom-in",borderRadius:8,overflow:"hidden",display:"block",lineHeight:0},style||{})}>
+      <img src={thumb?driveThumb(src,thumb):src} alt={alt||""} loading="lazy" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}} onError={function(e){ if(e.target.src!==src) e.target.src=src; }}/>
+    </button>
+  );
+}
 function PhotoLightbox({photos, initialIdx, onClose}) {
   const [idx, setIdx] = useState(initialIdx||0);
   var total = photos.length;
@@ -18205,7 +18858,7 @@ function PicUp({label,max,photos,accent,onAdd,onDel}) {
     </div>
   );
 }
-function PicsRow({title,photos,accent}) { return <div><div style={{fontSize:10,color:accent||C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>{title}</div><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{(photos||[]).map(function(src,i){ if(!src||typeof src!=="string"||!(src.startsWith("http")||src.startsWith("data:"))) return null; return <a key={i} href={src} target="_blank" rel="noopener noreferrer"><img src={driveThumb(src,400)} alt="" loading="lazy" style={{width:110,height:90,objectFit:"cover",borderRadius:9,border:"1px solid "+C.gray,background:"#f0f0f0"}} onError={function(e){if(e.target.src!==src)e.target.src=src;}}/></a>;})}</div></div>; }
+function PicsRow({title,photos,accent}) { var list=(photos||[]).filter(function(s){ return s&&typeof s==="string"&&(s.startsWith("http")||s.startsWith("data:")); }); return <div><div style={{fontSize:10,color:accent||C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>{title}</div><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{list.map(function(src,i){ return <PhotoBtn key={i} src={src} fotos={list} idx={i} thumb={400} style={{width:110,height:90,borderRadius:9,border:"1px solid "+C.gray,background:"#f0f0f0"}}/>;})}</div></div>; }
 function InvoiceUp({factura,onAdd,onDel}) {
   var ref=useRef(null);
   return (
@@ -19455,6 +20108,40 @@ function mantDesdeDanos(o){
   return {resumen:vendorDisplay(v)+" · "+fmtDate(fecha)+" · "+items.length+" daño"+(items.length===1?"":"s"), tocados:tocados.length};
 }
 
+/* ═══ VISITAS DE RESOLUCIÓN DE DAÑOS ═══
+   Hay daños que no son un mantenimiento: implican una compra, y quien los resuelve
+   necesita ENTRAR al apartamento. Por eso la visita se arma al revés que el
+   mantenimiento: primero el día, y el día decide qué casos caben — solo los
+   apartamentos donde ese día sale el huésped o el apartamento está vacío. */
+function aptoVisitable(reservas, prop, fecha){
+  var p=normalize(prop||""), f=String(fecha||"").slice(0,10);
+  if(!f) return {ok:false, motivo:"Sin fecha"};
+  var rs=(reservas||[]).filter(function(r){ return r&&normalize(r.propiedad||"")===p; });
+  var sale=rs.some(function(r){ return String(r.checkOut||"").slice(0,10)===f; });
+  if(sale) return {ok:true, motivo:"Sale huésped", tipo:"checkout"};
+  var ocupado=rs.some(function(r){
+    var ci=String(r.checkIn||"").slice(0,10), co=String(r.checkOut||"").slice(0,10);
+    return ci&&co&&f>ci&&f<co;
+  });
+  if(ocupado) return {ok:false, motivo:"Ocupado"};
+  var entra=rs.some(function(r){ return String(r.checkIn||"").slice(0,10)===f; });
+  if(entra) return {ok:true, motivo:"Entra huésped — ir temprano", tipo:"checkin"};
+  return {ok:true, motivo:"Disponible", tipo:"libre"};
+}
+/* Quién puede programar visitas: la facultad se activa por usuario en Configuración › Equipo. */
+function visitaVendors(vendors){
+  return (vendors||[]).filter(function(v){ return v&&v.puedeVisitas&&v.email&&v.active!==false; });
+}
+/* Un daño sigue abierto si nadie lo resolvió, no se programó y no fue absorbido por otro. */
+function danoAbierto(r){
+  return isDanos(r.categoria) && r.dmgStatus!=="resuelto" && !r.dmgMergedInto && !r.mantProgramado && !r.visitaProgramada;
+}
+/* Todas las fotos de un reporte de daños, para el visor y para el reporte unificado. */
+function dmgFotos(r){
+  var out=[];
+  ((r&&r.danios)||[]).forEach(function(d){ ((d&&d.fotos)||[]).forEach(function(f){ if(f&&typeof f==="string") out.push(f); }); });
+  return out;
+}
 /* Los técnicos que pueden tomar un mantenimiento. */
 function mantVendors(vendors){
   return (vendors||[]).filter(function(v){
