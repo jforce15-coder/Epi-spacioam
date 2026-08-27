@@ -212,6 +212,19 @@ function mantLabel(v){
   return base + (cat?" · "+cat:"") + (v.tipo==="externo"?" · externo":"");
 }
 
+/* ═══ PERMISO TEMPORAL DE GALERÍA ═══
+   Las fotos de un formulario se toman con la cámara: son del trabajo de hoy. Pero
+   pasa —con señal mala, con un teléfono que se quedó sin batería— que el técnico
+   ya tomó las fotos y necesita subirlas desde su galería. El administrador le
+   habilita eso por HOY: se guarda la fecha del día, no un interruptor, así que
+   mañana el permiso ya no existe sin que nadie lo apague.
+   Para el técnico no cambia nada más: el formulario es el mismo, solo que el
+   selector de foto también le ofrece la galería. */
+var GAL_PERMISO = false;
+function galeriaHoy(v){ return !!(v && v.galeriaFotos && String(v.galeriaFotos).slice(0,10)===SCHED.hoyGT()); }
+/* El `capture` que va en el input: se cae solo si hay permiso vigente. */
+function galCap(camOnly){ return (camOnly && !GAL_PERMISO) ? "environment" : undefined; }
+
 /* ─── Identidad de usuario
    Un técnico puede haber cambiado de correo. Sus reportes antiguos guardan el correo
    viejo en `reportadoPor`; los nuevos guardan además `vendorId`. Estas funciones
@@ -5852,8 +5865,8 @@ function SinglePhotoUp({foto,accent,onAdd,onDel,cameraOnly,label}) {
         :<label style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",width:"100%",maxWidth:280,minHeight:130,borderRadius:12,border:"2px dashed "+(accent||C.earth),cursor:"pointer",background:C.surfaceWarm,gap:6}}>
           <span style={{fontSize:26}}>📷</span>
           <span style={{fontSize:12,color:C.earth,fontWeight:600,textAlign:"center",padding:"0 12px"}}>{label||"Toca para añadir foto"}</span>
-          {cameraOnly&&<span style={{fontSize:10,color:C.taupe}}>Solo cámara</span>}
-          <input ref={ref} type="file" accept="image/*" capture={cameraOnly?"environment":undefined} style={{display:"none"}} onChange={function(e){var f=e.target.files&&e.target.files[0];if(f)onAdd(f);e.target.value="";}}/>
+          {cameraOnly&&<span style={{fontSize:10,color:C.taupe}}>{GAL_PERMISO?"Cámara o galería · permiso de hoy":"Solo cámara"}</span>}
+          <input ref={ref} type="file" accept="image/*" capture={galCap(cameraOnly)} style={{display:"none"}} onChange={function(e){var f=e.target.files&&e.target.files[0];if(f)onAdd(f);e.target.value="";}}/>
         </label>
       }
     </div>
@@ -6619,6 +6632,20 @@ function VendorsCfg({vendors, extCats, onSave, onSaveExtCats, props:cfgProps, re
                 </button>
                 {v.puedeVisitas&&<span style={{fontSize:10.5,color:C.taupe,lineHeight:1.5}}>Arma su propia ruta con los daños de apartamentos visitables ese día</span>}
               </div>
+              {/* Permiso de galería — vale solo hoy y se vence solo */}
+              {v.tipo==="interno"&&(function(){
+                var on=galeriaHoy(v);
+                return (
+                  <div style={{display:"flex",alignItems:"center",gap:10,paddingTop:6,borderTop:"1px solid "+C.line,flexWrap:"wrap"}}>
+                    <span style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase",minWidth:72}}>Galería</span>
+                    <button onClick={function(){var u=vendors.map(function(x){if(x.id===v.id){var r=Object.assign({},x);r.galeriaFotos=on?"":SCHED.hoyGT();r.galeriaFotosPor=on?"":SCHED.hoyGT();return r;}return x;});onSave(u);}} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 12px",borderRadius:6,border:"1px solid "+C.gray,background:on?C.black:"#fff",color:on?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",transition:"all .2s",fontFamily:"Montserrat,sans-serif"}}>
+                      <span style={{width:14,height:14,borderRadius:"50%",background:on?"#fff":"#ccc",display:"inline-block",flexShrink:0}}/>
+                      {on?"Puede subir fotos de galería hoy":"Solo cámara"}
+                    </button>
+                    <span style={{fontSize:10.5,color:C.taupe,lineHeight:1.5}}>{on?"Se vence solo al terminar el día"+(""):"Permítele subir fotos ya tomadas, solo por hoy"}</span>
+                  </div>
+                );
+              })()}
               {/* Programación: zonas, preferencias, tope y descansos */}
               {SCHED.esLimpieza(v)&&(
                 <div style={{paddingTop:8,borderTop:"1px solid "+C.line}}>
@@ -8117,8 +8144,30 @@ function BounceGate({vendor, allVendors, onSvV}){
 }
 
 /* ═══ VENDOR APP */
+/* El permiso de galería es del día: se lee en cada render, no se guarda en estado. */
+function GaleriaAviso({vendor}){
+  var on=galeriaHoy(vendor);
+  const [push,setPush]=useState(null);
+  useEffect(function(){
+    if(!on) return;
+    var k="epi:galAviso:"+String(vendor.galeriaFotos).slice(0,10);
+    try{ if(localStorage.getItem(k)==='1') return; localStorage.setItem(k,'1'); }catch(_){}
+    var t=setTimeout(function(){
+      setPush({id:k, ts:Date.now(),
+        texto:"Hoy puedes subir fotos que ya tomaste.",
+        contexto:"La administración te dio permiso solo por hoy: al tocar un espacio de foto también podrás elegirla de tu galería. Mañana vuelve a ser solo cámara."});
+    },1400);
+    return function(){ clearTimeout(t); };
+  },[on, vendor.galeriaFotos]);
+  if(!push) return null;
+  return <NotiToast key={push.id} item={push} onOpen={function(){setPush(null);}} onClose={function(){setPush(null);}}/>;
+}
+
 function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codigos,ausencias,onSvAusencias,swaps,onSvSwaps,allSchedules,onSvSchedules,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout,reviews,rvCasos,onSvRvCasos,rvIA,reservas}) {
   const [view,setView] = useState("jobs");
+  /* El permiso de galería del día abre el selector de fotos a la galería. Se lee
+     en cada render: si el admin lo quita, el siguiente repintado ya lo respeta. */
+  GAL_PERMISO = galeriaHoy(vendor);
   useEPIPrefs();   /* repinta al cambiar idioma/moneda desde el menú de usuario */
   const [pagTab,setPagTab] = useState("hist");
   var tot=reps.reduce(function(s,r){return s+(isDanos(r.categoria)?0:parseFloat(r.total||0));},0);
@@ -8176,6 +8225,7 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codig
       />
       <SwapLightbox vendor={vendor} allVendors={allVendors} swaps={swaps||[]} onSvSwaps={onSvSwaps} allSchedules={allSchedules||[]} onSvSchedules={onSvSchedules}/>
       <TutorialSystem enabled={true} role="vendor"/>
+      <GaleriaAviso vendor={vendor}/>
       <BounceGate vendor={vendor} allVendors={allVendors} onSvV={onSvV}/>
       {vendor.tipo==="interno"&&<QAPopupGate reps={cleaningReps} onRespond={vendorRespond} onGoCalidad={function(){setView("hist");}}/>}
       <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} adelantos={adelantos} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}} onGoAccount={function(){setView("account");}} vendor={vendor} allVendors={allVendors} reviews={reviews} allReps={allReps} rvCasos={rvCasos} rvIA={rvIA} onGoCalidad={vendor.tipo==="interno"?function(){setView("hist");}:null}/></div>
@@ -8444,7 +8494,7 @@ function QAFotos({fotos,onChange,max}){
           </button>
         )}
       </div>
-      <input ref={ref} type="file" accept="image/*" capture="environment" multiple onChange={pick} style={{display:"none"}}/>
+      <input ref={ref} type="file" accept="image/*" capture={galCap(true)} multiple onChange={pick} style={{display:"none"}}/>
       <div style={{fontSize:10.5,color:C.taupe,letterSpacing:".04em"}}>{fotos.length} de {lim} · mínimo 1 foto</div>
     </div>
   );
@@ -9235,12 +9285,13 @@ function AusenciaHoyModal({aus, schedules, vendors, onClose, onApply}){
    Cada tarjeta usa una captura real del web app (móvil o escritorio según el
    dispositivo) en public/tips/<id>-<mobile|desktop>.png; si aún no existe, se
    muestra un marcador de posición con el nombre de la pantalla. */
-var TIPS_VERSION = "v3";
+var TIPS_VERSION = "v4";
 /* roles: quién lo ve. cat: "nuevo" (forzado la 1ª vez) o "mas" (solo en el hub "?"). */
 var TUTORIALES = [
   // ── Lo más nuevo · técnicos ──
   {id:"correccion", type:"Calidad", roles:["vendor"], cat:"nuevo", title:"Responder una solicitud de corrección", lines:["Cuando el supervisor te deja una corrección, al entrar al app te sale sola. Ahora los puntos vienen en lista, uno por uno.","Si la abres dentro de la primera hora, corriges de una vez: toma de 1 a 3 fotos de lo que arreglaste y toca «Corrección realizada».","Si ya pasó más de una hora no tienes que regresar: solo toca «He leído y lo pondré en práctica».","El aviso vuelve cada vez que entres al app hasta que contestes."]},
   {id:"noentendi", type:"Calidad", roles:["vendor"], cat:"nuevo", title:"Cuando no entiendes la corrección", lines:["En la misma solicitud, abajo, toca «No entendí, favor aclarar».","Escribe qué parte no te quedó clara — es opcional, pero ayuda — y envía.","Le llega de vuelta a quien hizo la revisión. Mientras te aclara, no te volvemos a insistir; la respuesta te aparece en Calidad."]},
+  {id:"galeria", type:"Reportes", roles:["admin"], cat:"nuevo", title:"Dar permiso de subir fotos de galería", lines:["Normalmente las fotos del formulario se toman con la cámara: son del trabajo de hoy.","Si un técnico ya las tomó y necesita subirlas —se quedó sin batería, no había señal— entra a Configuración › Equipo, abre su ficha y activa «Galería».","El permiso vale solo por hoy y se vence solo: mañana vuelve a ser solo cámara sin que tengas que apagarlo.","Al técnico le llega un aviso y su formulario sigue siendo el mismo; lo único que cambia es que ahora también puede elegir la foto de su galería."]},
   {id:"fotoscamara", type:"Reportes", roles:["vendor"], cat:"nuevo", title:"Las fotos ahora se toman con la cámara", lines:["Al tocar un espacio de foto se abre la cámara directo, no la galería.","La foto es del trabajo de hoy: por eso ya no se sube una imagen guardada de antes.","Se comprime sola antes de enviarse, así que no gasta tus datos ni se tarda."]},
   {id:"visitas", type:"Programación", roles:["vendor","admin"], cat:"nuevo", title:"Programar un día de visita", lines:["Si tienes la facultad de visitas, en tu menú aparece la pestaña Visitas.","Escoge primero el día. Solo te mostramos los daños de apartamentos donde ese día sale el huésped o el apartamento está libre — los que sí puedes resolver.","Marca los casos que vas a atender y toca «Programar la visita». Se agregan a tu agenda de ese día.","Al terminar cada caso, márcalo como «Resuelto» desde «Tus visitas programadas»."]},
   {id:"intercambio", type:"Programación", roles:["vendor"], cat:"nuevo", title:"Intercambiar una ruta", lines:["En Programa, toca «Intercambiar tareas con otro técnico».","Elige el día, las limpiezas que cedes y un técnico de tu misma zona. Él acepta o rechaza; te avisamos con el resultado."]},
@@ -9550,6 +9601,24 @@ function TipVisual({id, mobile}){
           <div style={{fontSize:11,color:C.taupe,lineHeight:1.5}}>¿Qué no entendiste?</div>
         </div>
         <div style={{fontSize:10.5,color:C.earth,background:"#F5EBE5",borderRadius:9,padding:"8px 11px",lineHeight:1.5}}>Le llega a quien hizo la revisión y te responde aquí mismo.</div>
+      </div>
+    </TipChrome>
+  );
+  if(id==="galeria") return (
+    <TipChrome mobile={mobile} navSet="admin" tab="dash">
+      <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:10}}>Configuración › Equipo</div>
+      <div style={{background:C.surface,border:"1px solid "+C.line,borderRadius:12,padding:"11px 12px"}}>
+        <div style={{fontSize:12,fontWeight:600,color:C.black}}>María L.</div>
+        <div style={{fontSize:10,color:C.taupe,marginTop:1,marginBottom:9}}>Interno · EPI Limpieza</div>
+        <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap"}}>
+          <span style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".1em",textTransform:"uppercase"}}>Galería</span>
+          <TipRing note="aquí" radius={6}>
+            <span style={{display:"inline-flex",alignItems:"center",gap:7,padding:"5px 12px",borderRadius:6,border:"1px solid "+C.gray,background:C.black,color:"#fff",fontSize:11,fontWeight:600}}>
+              <span style={{width:12,height:12,borderRadius:"50%",background:"#fff"}}/>Puede subir fotos de galería hoy
+            </span>
+          </TipRing>
+        </div>
+        <div style={{fontSize:10,color:C.taupe,marginTop:8,lineHeight:1.5}}>Se vence solo al terminar el día</div>
       </div>
     </TipChrome>
   );
