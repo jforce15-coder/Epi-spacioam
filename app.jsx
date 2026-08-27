@@ -796,17 +796,40 @@ var PROF_PHOTO_KEYS = [
 var FORM_CFG = {};
 /* Preguntas configurables por formulario. Las de habitaciones/baños son
    dinámicas (una por cuarto), representadas por una fila-tipo. */
+/* Las listas de auditoría (TRAD_SINGLE_PHOTOS, PROF_PHOTO_KEYS) miden el Pareto de
+   fotos y a propósito solo llevan las obligatorias. Pero el admin tiene que poder
+   configurar TODAS las fotos del formulario —incluidas las opcionales, que son las
+   que más se preguntan—, así que aquí se suman las que faltaban. */
+var TRAD_EXTRA_PHOTOS = [
+  ["fotosSillon","Sala — sillón desde arriba"],
+  ["fotosTv","Sala — TV encendida"],
+  ["fotosVasos","Comedor — vasos disponibles"],
+  ["fotosPlatos","Comedor — platos disponibles"],
+  ["fotosInsumos","Detalles — insumos de cortesía"],
+  ["fotoUniforme","Foto con uniforme"],
+];
+var PROF_EXTRA_PHOTOS = [
+  ["fotosDrenajes","Drenajes — 1 foto por baño",true],
+  ["fotosDetalle","Detalle extra (antes/después)"],
+  ["fotoUniforme","Foto con uniforme"],
+];
+function fqRow(p){ return {key:p[0], label:p[1], dyn:!!p[2]}; }
 var FORM_QUESTIONS = {
   "Limpieza tradicional": [{key:"hab_general",label:"Habitación — foto general",dyn:true}]
     .concat([{key:"bano_ducha",label:"Baño — ducha",dyn:true},{key:"bano_inodoro",label:"Baño — inodoro",dyn:true}])
-    .concat(TRAD_SINGLE_PHOTOS.map(function(p){return {key:p[0],label:p[1]};})),
-  "Limpieza profunda": PROF_PHOTO_KEYS.map(function(p){return {key:p[0],label:p[1]};})
+    .concat(TRAD_SINGLE_PHOTOS.map(fqRow))
+    .concat(TRAD_EXTRA_PHOTOS.map(fqRow)),
+  "Limpieza profunda": PROF_PHOTO_KEYS.map(fqRow).concat(PROF_EXTRA_PHOTOS.map(fqRow))
 };
+/* Las fotos opcionales no nacen obligatorias: eso cambiaría el % mínimo de golpe. */
+var FORM_Q_OPT = {};
+TRAD_EXTRA_PHOTOS.concat(PROF_EXTRA_PHOTOS).forEach(function(p){ if(p[0]!=="fotoUniforme") FORM_Q_OPT[p[0]]=true; });
 /* Default por foto: obligatoria, permite subir y también cámara (no solo cámara). */
 var FORM_Q_DEFAULT = {req:true, cam:false, upl:true};
 function formQCfg(formId, key){
   var f=(FORM_CFG&&FORM_CFG[formId])||{}; var o=f[key]||{};
-  return {req: o.req!=null?!!o.req:FORM_Q_DEFAULT.req,
+  var defReq = FORM_Q_OPT[key] ? false : FORM_Q_DEFAULT.req;
+  return {req: o.req!=null?!!o.req:defReq,
           cam: o.cam!=null?!!o.cam:FORM_Q_DEFAULT.cam,
           upl: o.upl!=null?!!o.upl:FORM_Q_DEFAULT.upl};
 }
@@ -5619,7 +5642,7 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
               <div>
                 <div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Drenajes — 1 foto por baño</div>
                 <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                  {Array.from({length:banos},function(_,i){var foto=form.fotosDrenajes[i]||null;return <div key={i}><div style={{fontSize:11,color:C.earth,marginBottom:6}}>Drenaje baño {i+1}</div><SinglePhotoUp foto={foto} accent="#3d6b52" onAdd={function(f){compress(f).then(function(d){var arr=[...form.fotosDrenajes];arr[i]=d;sf("fotosDrenajes",arr);});}} onDel={function(){var arr=[...form.fotosDrenajes];arr[i]=null;sf("fotosDrenajes",arr);}}/></div>;})}
+                  {Array.from({length:banos},function(_,i){var foto=form.fotosDrenajes[i]||null;return <div key={i}><div style={{fontSize:11,color:C.earth,marginBottom:6}}>Drenaje baño {i+1}</div><SinglePhotoUp foto={foto} accent="#3d6b52" cameraOnly={pCam("fotosDrenajes")} onAdd={function(f){compress(f).then(function(d){var arr=[...form.fotosDrenajes];arr[i]=d;sf("fotosDrenajes",arr);});}} onDel={function(){var arr=[...form.fotosDrenajes];arr[i]=null;sf("fotosDrenajes",arr);}}/></div>;})}
                 </div>
               </div>
             </div>
@@ -5629,7 +5652,7 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
         {step===3&&(
           <WizStep title="Ventanas" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext color="#3d6b52">
             <div><div style={{fontSize:13,color:C.earth,marginBottom:12}}>Al menos 1 ventana limpia por apartamento.</div>
-            <MultiPhotoUp label="Ventanas" photos={form.fotosVentanas} max={4} accent="#3d6b52" onAdd={function(files){var copies=[...form.fotosVentanas];Promise.all(Array.from(files).slice(0,4-copies.length).map(compress)).then(function(ds){sf("fotosVentanas",copies.concat(ds).slice(0,4));});}} onDel={function(i){sf("fotosVentanas",form.fotosVentanas.filter(function(_,j){return j!==i;}));}}/>
+            <MultiPhotoUp label="Ventanas" cameraOnly={pCam("fotosVentanas")} photos={form.fotosVentanas} max={4} accent="#3d6b52" onAdd={function(files){var copies=[...form.fotosVentanas];Promise.all(Array.from(files).slice(0,4-copies.length).map(compress)).then(function(ds){sf("fotosVentanas",copies.concat(ds).slice(0,4));});}} onDel={function(i){sf("fotosVentanas",form.fotosVentanas.filter(function(_,j){return j!==i;}));}}/>
             </div>
           </WizStep>
         )}
@@ -5646,7 +5669,7 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
         {step===5&&(
           <WizStep title="Gavetas y detrás de electrodomésticos" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext color="#3d6b52">
             <div style={{display:"flex",flexDirection:"column",gap:16}}>
-              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Organización de gavetas / utensilios (1-2 ejemplos)</div><MultiPhotoUp label="Gavetas" photos={form.fotosGavetas} max={3} accent="#3d6b52" onAdd={function(files){var c=[...form.fotosGavetas];Promise.all(Array.from(files).slice(0,3-c.length).map(compress)).then(function(ds){sf("fotosGavetas",c.concat(ds).slice(0,3));});}} onDel={function(i){sf("fotosGavetas",form.fotosGavetas.filter(function(_,j){return j!==i;}));}}/></div>
+              <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Organización de gavetas / utensilios (1-2 ejemplos)</div><MultiPhotoUp label="Gavetas" cameraOnly={pCam("fotosGavetas")} photos={form.fotosGavetas} max={3} accent="#3d6b52" onAdd={function(files){var c=[...form.fotosGavetas];Promise.all(Array.from(files).slice(0,3-c.length).map(compress)).then(function(ds){sf("fotosGavetas",c.concat(ds).slice(0,3));});}} onDel={function(i){sf("fotosGavetas",form.fotosGavetas.filter(function(_,j){return j!==i;}));}}/></div>
               <div><div style={{fontSize:11,color:C.earth,fontWeight:600,marginBottom:8}}>Detrás de electrodomésticos (si se movieron)</div><SinglePhotoUp foto={form.fotosDetrasElect} accent="#3d6b52" cameraOnly={pCam("fotosDetrasElect")} onAdd={function(f){compress(f).then(function(d){sf("fotosDetrasElect",d);});}} onDel={function(){sf("fotosDetrasElect",null);}}/></div>
             </div>
           </WizStep>
@@ -5656,7 +5679,7 @@ function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
           <WizStep title="Detalle extra" step={step} total={STEPS_P.length-2} onPrev={prev} onNext={next} canNext color="#3d6b52">
             <div>
               <div style={{fontSize:13,color:C.earth,marginBottom:12}}>Cualquier detalle adicional que hayas corregido — antes/después si aplica.</div>
-              <MultiPhotoUp label="Detalles extra" photos={form.fotosDetalle} max={6} accent="#3d6b52" onAdd={function(files){var c=[...form.fotosDetalle];Promise.all(Array.from(files).slice(0,6-c.length).map(compress)).then(function(ds){sf("fotosDetalle",c.concat(ds).slice(0,6));});}} onDel={function(i){sf("fotosDetalle",form.fotosDetalle.filter(function(_,j){return j!==i;}));}}/>
+              <MultiPhotoUp label="Detalles extra" cameraOnly={pCam("fotosDetalle")} photos={form.fotosDetalle} max={6} accent="#3d6b52" onAdd={function(files){var c=[...form.fotosDetalle];Promise.all(Array.from(files).slice(0,6-c.length).map(compress)).then(function(ds){sf("fotosDetalle",c.concat(ds).slice(0,6));});}} onDel={function(i){sf("fotosDetalle",form.fotosDetalle.filter(function(_,j){return j!==i;}));}}/>
               <div style={{marginTop:16}}><F label="Comentarios adicionales"><textarea rows={3} placeholder="Observaciones del equipo…" value={form.comentarios} onChange={function(e){sf("comentarios",e.target.value);}}/></F></div>
             </div>
           </WizStep>
@@ -5884,7 +5907,7 @@ function SinglePhotoUp({foto,accent,onAdd,onDel,cameraOnly,label}) {
   );
 }
 
-function MultiPhotoUp({label,photos,max,accent,onAdd,onDel}) {
+function MultiPhotoUp({label,photos,max,accent,onAdd,onDel,cameraOnly}) {
   var ref=useRef(null);
   /* Hay claves (platos, vasos) que en la limpieza tradicional son UNA foto y en la
      profunda son varias. Un borrador guardado con el otro formato no debe tumbar
@@ -5896,7 +5919,7 @@ function MultiPhotoUp({label,photos,max,accent,onAdd,onDel}) {
         {photos.map(function(src,i){return <div key={i} style={{position:"relative",width:84,height:84,borderRadius:10,overflow:"hidden",border:"2px solid color-mix(in srgb, "+accent+" 19%, transparent)"}}><img src={src} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/><button onClick={function(){onDel(i);}} style={{position:"absolute",top:3,right:3,width:20,height:20,borderRadius:"50%",border:"none",background:"rgba(0,0,0,.55)",color:"#fff",fontSize:14,cursor:"pointer",lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button></div>;})}
         {photos.length<max&&<button onClick={function(){if(ref.current)ref.current.click();}} style={{width:84,height:84,borderRadius:10,border:"1.5px dashed "+C.line,background:C.surface,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,cursor:"pointer",transition:"background .2s"}}><span style={{fontSize:20,color:C.earth}}>+</span><span style={{fontSize:9.5,color:C.earth,fontWeight:600,letterSpacing:".1em",textTransform:"uppercase"}}>Foto</span></button>}
       </div>
-      <input ref={ref} type="file" accept="image/*" multiple style={{display:"none"}} onChange={function(e){if(e.target.files&&e.target.files.length)onAdd(e.target.files);e.target.value="";}}/>
+      <input ref={ref} type="file" accept="image/*" capture={galCap(cameraOnly)} multiple style={{display:"none"}} onChange={function(e){if(e.target.files&&e.target.files.length)onAdd(e.target.files);e.target.value="";}}/>
     </div>
   );
 }
@@ -5964,7 +5987,7 @@ function OrphanEmailLinker({reps, vendors, onSvV}) {
 /* ─── Config */
 function FormulariosCfg({formCfg, onSave}){
   var cfg=formCfg||{};
-  function qc(formId,key){ var f=cfg[formId]||{}, o=f[key]||{}; return {req:o.req!=null?!!o.req:true, cam:o.cam!=null?!!o.cam:false, upl:o.upl!=null?!!o.upl:true}; }
+  function qc(formId,key){ var f=cfg[formId]||{}, o=f[key]||{}; return {req:o.req!=null?!!o.req:!FORM_Q_OPT[key], cam:o.cam!=null?!!o.cam:false, upl:o.upl!=null?!!o.upl:true}; }
   function setFlag(formId,key,flag,val){
     var next=Object.assign({},cfg); var f=Object.assign({},next[formId]||{}); var o=Object.assign({},f[key]||{});
     o[flag]=val;
