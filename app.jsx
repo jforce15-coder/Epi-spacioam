@@ -12230,6 +12230,17 @@ function esCierre(cat){ return CATS_CIERRE.indexOf(String(cat||""))>=0; }
    ya no es "todavía no", es una limpieza que puede no estar ocurriendo. */
 var CIERRE_HORA_ALERTA = 13;
 function horaGT(){ var n=new Date(); return new Date(n.getTime()+(n.getTimezoneOffset()-360)*60000).getHours(); }
+/* El motor de las 6:00 pm corre en el SERVIDOR y manda la ruta de mañana sin pasar
+   por el app, así que `notificadoEn` puede seguir vacío aunque el correo ya salió.
+   El panel del admin ya compensaba esto; la vista del técnico no, y por eso a las
+   8 pm leía «sin confirmar» una ruta que le habían confirmado a las 6. */
+function schedConfirmada(s, hoy){
+  if(!s) return false;
+  if(s.notificadoEn) return true;
+  var f=String(s.fecha||"").slice(0,10);
+  if(f<=hoy) return true;
+  return f===SCHED.shift(hoy,1) && horaGT()>=18;
+}
 function cierresIndex(reps){
   var ix={};
   (reps||[]).forEach(function(r){
@@ -14514,6 +14525,11 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
     return (a.orden||0)-(b.orden||0);
   });
   var deHoy = mias.filter(function(s){ return String(s.fecha).slice(0,10)===hoy; });
+  /* Después de las 6 pm lo que el técnico viene a ver es la ruta de MAÑANA: ya se
+     la confirmaron por correo. Antes vivía escondida en la otra pestaña y el equipo
+     entendía —con razón— que no tenía ruta. */
+  var deManana = mias.filter(function(s){ return String(s.fecha).slice(0,10)===manana; });
+  var esTarde = horaGT()>=18;
   var deSemana = mias.filter(function(s){ var f=String(s.fecha).slice(0,10); return f>=hoy&&f<=finSemana; });
   var lista = view==="hoy" ? deHoy : deSemana;
   /* La semana agrupada por día: siete tarjetas cerradas caben en una pantalla. */
@@ -14580,9 +14596,11 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
           </div>
         )}
         {String(s.fecha).slice(0,10)>hoy&&(
-          s.notificadoEn
+          schedConfirmada(s,hoy)
             ? <div style={{marginTop:11,fontSize:11,color:C.taupe,lineHeight:1.6,textWrap:"pretty"}}>
-                Te la adelantamos para que te organices. La confirmación final llega el día anterior a las 6:00 pm; si entra una reserva nueva podría cambiar.
+                {String(s.fecha).slice(0,10)===manana
+                  ? "Esta es tu ruta confirmada de mañana. Si entrara un cambio de última hora, te avisamos aquí mismo."
+                  : "Te la adelantamos para que te organices. La confirmación final llega el día anterior a las 6:00 pm; si entra una reserva nueva podría cambiar."}
               </div>
             : <div style={{marginTop:11,background:C.surfaceWarm,borderRadius:9,padding:"10px 12px",fontSize:11,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>
                 <span style={{fontWeight:700}}>Sin confirmar todavía.</span> Te llega confirmada por correo el {SCHED.shift(String(s.fecha).slice(0,10),-1)===hoy?"día de hoy":fmtDate(SCHED.shift(String(s.fecha).slice(0,10),-1))} a las 6:00 pm.
@@ -14606,7 +14624,9 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
       <div>
         <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:21,color:C.black,lineHeight:1.2}}>Tu programación</div>
         <div style={{fontSize:11.5,color:C.earth,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>
-          Las limpiezas van de {SCHED.HORA_INI} a {SCHED.HORA_FIN}. La del día siguiente te llega confirmada cada tarde a las 6:00 pm{parseInt(vendor.avisoDias,10)===3?", y tu ruta te la adelantamos con tres días para que puedas organizar el viaje":""}.
+          {esTarde
+            ? <>Tu ruta de mañana ya está confirmada — la tienes aquí abajo{deManana.length?" y también te llegó por correo":""}.</>
+            : <>Las limpiezas van de {SCHED.HORA_INI} a {SCHED.HORA_FIN}. La del día siguiente te llega confirmada cada tarde a las 6:00 pm{parseInt(vendor.avisoDias,10)===3?", y tu ruta te la adelantamos con tres días para que puedas organizar el viaje":""}.</>}
         </div>
       </div>
 
@@ -14659,6 +14679,19 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
       )}
       {view==="hoy"&&deHoy.map(function(s,i){ return <Tarjeta key={s.id||i} s={s} idx={i}/>; })}
 
+      {/* Mañana, a la vista, desde las 6 pm */}
+      {view==="hoy"&&esTarde&&(
+        <div style={{marginTop:4,display:"flex",flexDirection:"column",gap:9}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,padding:"0 4px"}}>
+            <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>Mañana · {fmtDate(manana)}</div>
+            <div style={{fontSize:11,color:C.taupe}}>{deManana.length} limpieza{deManana.length===1?"":"s"}</div>
+          </div>
+          {deManana.length===0
+            ? <div style={{textAlign:"center",padding:"20px 16px",color:C.earth,fontSize:12.5,background:C.surfaceWarm,borderRadius:14,lineHeight:1.7}}>No tienes limpiezas mañana.<div style={{fontSize:11,color:C.taupe,marginTop:5}}>Si crees que es un error, avísale al administrador.</div></div>
+            : deManana.map(function(s,i){ return <Tarjeta key={s.id||i} s={s} idx={i}/>; })}
+        </div>
+      )}
+
       {/* Esta semana: un día por línea, cerrado. Se abre el que se quiere ver. */}
       {view==="semana"&&diasSemana.map(function(d){
         var abierto=diasAbiertos[d.fecha]!==undefined?diasAbiertos[d.fecha]:(d.fecha===hoy);
@@ -14675,7 +14708,7 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
                   {d.lista.map(function(s){ var p=SCHED.partes(s.propiedad); return [p.edificio,p.unidad].filter(Boolean).join(" ")||s.propiedad; }).join(" → ")}
                 </div>
               </div>
-              {d.fecha>hoy&&!d.lista.some(function(s){return s.notificadoEn;})&&(
+              {d.fecha>hoy&&!d.lista.some(function(s){return schedConfirmada(s,hoy);})&&(
                 <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:C.taupe,background:C.surfaceWarm,padding:"3px 8px",borderRadius:"var(--sa-pill)",flexShrink:0}}>Sin confirmar</span>
               )}
               {d.lista.some(function(s){return s.entradaHoy;})&&(
