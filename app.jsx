@@ -2980,6 +2980,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,swap
       {ausPopup&&<AusenciaHoyModal aus={ausPopup} schedules={schedules||[]} vendors={vendors} onClose={function(){setAusPopup(null);}} onApply={aplicarAusenciaHoy}/>}
       {canNotif&&!codPopupOff&&tab!=="sched"&&<CodigosPopupDash schedules={schedules||[]} codigos={codigos||{}} onGo={function(){ cerrarCodPopup(); setTab("sched"); }} onClose={cerrarCodPopup}/>}
       <TutorialSystem enabled={true} role="admin"/>
+      <ConciliacionGate reservas={reservas||[]} schedules={schedules||[]} props={props||[]} vendors={vendors||[]} adminVendor={adminVendor} hoy={SCHED.hoyGT()} onIrProgramacion={function(){setTab("sched");}}/>
 
       <div style={{display:tab==="dash"?"block":"none"}}><DashView props={props} reservas={reservas||[]} nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} meEmails={adminVendor?vendorEmailSet(adminVendor):[]} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh} schedules={schedules||[]} onSvSchedules={onSvSchedules} onUpsert={onUpsert} onDelete={onDelete}/></div>
       <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} myReps={reps} allReps={reps} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
@@ -11883,6 +11884,7 @@ function PausasCfg({props, onSvP, hoy}){
       desde:porFechas?(nueva.desde||""):"",
       hasta:porFechas?(nueva.hasta||""):"",
       motivo:(nueva.motivo||"").trim(),
+      soloProfundas:(nueva.alcance||"todo")==="prof",
       creadaEn:hoy
     });
     setNueva(null);
@@ -11930,6 +11932,7 @@ function PausasCfg({props, onSvP, hoy}){
                     <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{p.name}</div>
                     <div style={{fontSize:11,color:C.earth,marginTop:3}}>
                       {textoPausa(p)}
+                      {p.pausa.soloProfundas&&<span style={{color:C.earth}}> · solo profundas</span>}
                       {!activa&&<span style={{color:C.taupe}}> · no aplica hoy</span>}
                     </div>
                     {p.pausa.motivo&&<div style={{fontSize:11,color:C.taupe,marginTop:3,lineHeight:1.5}}>“{p.pausa.motivo}”</div>}
@@ -11941,7 +11944,7 @@ function PausasCfg({props, onSvP, hoy}){
           })}
 
           {!nueva
-            ? <button onClick={function(){setNueva({propiedad:"",modo:"indef",desde:hoy,hasta:"",motivo:""});}} style={{width:"100%",padding:"11px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>+ Pausar una propiedad</button>
+            ? <button onClick={function(){setNueva({propiedad:"",modo:"indef",alcance:"todo",desde:hoy,hasta:"",motivo:""});}} style={{width:"100%",padding:"11px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>+ Pausar una propiedad</button>
             : <div style={{display:"flex",flexDirection:"column",gap:11,borderTop:"1px solid "+C.line,paddingTop:13}}>
                 <div>
                   <span style={LBL}>Propiedad</span>
@@ -11949,6 +11952,20 @@ function PausasCfg({props, onSvP, hoy}){
                     <option value="">Elegir…</option>
                     {disponibles.map(function(p){ return <option key={p.id||p.name} value={p.name}>{p.name}</option>; })}
                   </select>
+                </div>
+                <div>
+                  <span style={LBL}>Qué se pausa</span>
+                  <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                    {[["todo","Todo el reparto"],["prof","Solo profundas"]].map(function(it){
+                      var sel=(nueva.alcance||"todo")===it[0];
+                      return <button key={it[0]} onClick={function(){setNueva(Object.assign({},nueva,{alcance:it[0]}));}} style={{flex:1,minWidth:140,padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{it[1]}</button>;
+                    })}
+                  </div>
+                  <div style={{fontSize:11,color:C.taupe,marginTop:6,lineHeight:1.55,textWrap:"pretty"}}>
+                    {(nueva.alcance||"todo")==="prof"
+                      ? "La limpieza de checkout se sigue programando normal. Solo se deja de montar la profunda — es lo que aplica a las estancias largas."
+                      : "La propiedad sale de todo: ni limpieza de checkout ni profunda. Es para remodelación o apartamento fuera de servicio."}
+                  </div>
                 </div>
                 <div>
                   <span style={LBL}>Duración</span>
@@ -11967,7 +11984,7 @@ function PausasCfg({props, onSvP, hoy}){
                 )}
                 <div><span style={LBL}>Motivo</span><input value={nueva.motivo} onChange={function(e){setNueva(Object.assign({},nueva,{motivo:e.target.value}));}} placeholder="Estancia larga, remodelación, fuera de servicio…" style={IN}/></div>
                 <div style={{fontSize:11,color:C.taupe,lineHeight:1.6,textWrap:"pretty"}}>
-                  Mientras esté en pausa, esta propiedad no se le asigna a nadie. Lo ya programado no se borra: quítalo del día si corresponde.
+                  Lo ya programado no se borra: quítalo del día si corresponde.
                 </div>
                 <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
                   <button onClick={crear} disabled={!nueva.propiedad||(nueva.modo==="fechas"&&!nueva.desde)} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"none",background:(!nueva.propiedad||(nueva.modo==="fechas"&&!nueva.desde))?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Pausar</button>
@@ -12330,7 +12347,7 @@ function DiagProgramacion({props, reservas, schedules, vendors, ausencias, reps,
     var checkout=resProp.filter(function(r){ return String(r.checkOut||"").slice(0,10)===fecha; });
     var checkin =resProp.filter(function(r){ return String(r.checkIn ||"").slice(0,10)===fecha; });
     var sinNombre=(reservas||[]).filter(function(r){ return r&&!String(r.propiedad||"").trim(); });
-    var pausa=pObj?SCHED.enPausa(pObj,fecha):false;
+    var pausa=pObj?SCHED.enPausa(pObj,fecha,"limpieza"):false;
     var z=SCHED.zonaKey(SCHED.partes(prop).zona);
     var conZona=tecs.filter(function(v){ return z&&(v.zonas||[]).map(SCHED.zonaKey).indexOf(z)>=0; });
     var libresZona=conZona.filter(function(v){
@@ -12749,6 +12766,187 @@ function DiaDoblePanel({schedules, reps, vendors, onUpsert, hoy, onAviso, onLog}
   );
 }
 
+/* ═══ CONCILIACIÓN CONTRA HOSPITABLE ════════════════════════════════════════
+   `checkoutsSinRuta` compara las reservas que YA sincronizamos contra las rutas.
+   Eso no atrapa el caso peor: una reserva que nunca llegó a la app. Para eso
+   está la lista oficial de Hospitable — dos tableros compartidos, uno de los
+   checkouts de hoy y otro de mañana.
+   Los tableros son de otro dominio, así que el navegador no los deja leer por
+   nosotros (CORS): el administrador abre el enlace, copia la tabla y la pega.
+   Al pegar comparamos nombre por nombre y decimos exactamente qué falta. */
+var HOSP_CO_HOY    = "https://share.hospitable.com/metrics/0b82819d-9dc2-4f22-bea9-bdb561a93185";
+var HOSP_CO_MANANA = "https://share.hospitable.com/metrics/2884790a-fa3a-4472-8f32-cd7fdce4252b";
+
+/* De un pegado suelto saca los nombres de propiedad. La tabla trae fecha y
+   nombre; cualquier línea sin letras (totales, encabezados) se descarta. */
+function hospParsePegado(txt){
+  var out=[], vistos={};
+  String(txt||"").split(/[\n\r]+/).forEach(function(ln){
+    var l=String(ln||"").trim();
+    if(!l) return;
+    /* Quita fechas y horas sueltas al inicio o al final de la fila. */
+    l=l.replace(/\t+/g," ").replace(/\s{2,}/g," ").trim();
+    l=l.replace(/^\d{1,4}[-\/]\d{1,2}[-\/]\d{1,4}\s*/,"").replace(/\s*\d{1,4}[-\/]\d{1,2}[-\/]\d{1,4}$/,"");
+    l=l.replace(/^\d{1,2}:\d{2}(\s*[ap]\.?m\.?)?\s*/i,"").trim();
+    if(!/[a-záéíóúñ]/i.test(l)) return;
+    if(/^(propiedad|property|listing|nombre|total|checkouts?|fecha|date)\b/i.test(l)) return;
+    var k=normalize(l);
+    if(!k||vistos[k]) return;
+    vistos[k]=1; out.push(l);
+  });
+  return out;
+}
+/* Compara la lista oficial contra lo que la app tiene programado ese día. */
+function hospConciliar(lista, schedules, reservas, fecha){
+  var conRuta={}, conReserva={};
+  (schedules||[]).forEach(function(s){ if(String(s.fecha||"").slice(0,10)===fecha) conRuta[normalize(s.propiedad)]=1; });
+  (reservas||[]).forEach(function(r){ if(String(r.checkOut||"").slice(0,10)===fecha) conReserva[normalize(r.propiedad)]=1; });
+  var faltan=[], sinReserva=[];
+  (lista||[]).forEach(function(nm){
+    var k=normalize(nm);
+    if(conRuta[k]) return;
+    faltan.push(nm);
+    if(!conReserva[k]) sinReserva.push(nm);
+  });
+  return {faltan:faltan, sinReserva:sinReserva, total:(lista||[]).length};
+}
+
+/* Lightbox forzado: al entrar, si hay checkouts de hoy o de mañana sin ruta,
+   el administrador lo ve antes que nada. Una vez por día y por discrepancia —
+   si la lista cambia, vuelve a salir; si la arregla, no vuelve. */
+function ConciliacionGate({reservas, schedules, props, vendors, adminVendor, hoy, onIrProgramacion}){
+  var esAdmin = !adminVendor || adminVendor.isAdmin;
+  var manana  = SCHED.shift(hoy,1);
+  var faltantes = React.useMemo(function(){
+    return checkoutsSinRuta({reservas:reservas, schedules:schedules, props:props, hoy:hoy, dias:1});
+  },[reservas, schedules, props, hoy]);
+  var firma = faltantes.map(function(x){ return x.fecha+"|"+normalize(x.propiedad); }).sort().join(",");
+  const [abierto,setAbierto]=useState(false);
+  const [tab,setTab]=useState("hoy");
+  const [pegado,setPegado]=useState("");
+  const [res,setRes]=useState(null);
+  useEffect(function(){
+    if(!esAdmin||!firma) return;
+    var k="epi:conc:"+hoy+":"+firma;
+    try{ if(localStorage.getItem(k)==="1") return; }catch(_){}
+    var t=setTimeout(function(){ setAbierto(true); try{ localStorage.setItem(k,"1"); }catch(_){} },700);
+    return function(){ clearTimeout(t); };
+  },[esAdmin, firma, hoy]);
+  if(!abierto) return null;
+
+  var fecha = tab==="hoy"?hoy:manana;
+  var delDia = faltantes.filter(function(x){ return x.fecha===fecha; });
+  function revisar(){
+    var lista=hospParsePegado(pegado);
+    setRes(Object.assign({}, hospConciliar(lista, schedules, reservas, fecha), {leidos:lista.length}));
+  }
+  var IN={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:12,padding:"11px 13px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",color:C.black,resize:"vertical"};
+  var tabBtn=function(on){ return {flex:1,padding:"9px 12px",minHeight:40,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",color:on?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}; };
+
+  return (
+    <Overlay>
+      <div onClick={function(e){e.stopPropagation();}} style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:520,maxHeight:"88vh",overflowY:"auto",boxShadow:"var(--sa-shadow-lg,0 28px 80px rgba(62,63,63,.10))",WebkitOverflowScrolling:"touch"}}>
+        <div style={{padding:"20px 20px 0"}}>
+          <span style={{display:"inline-block",padding:"5px 12px",borderRadius:"var(--sa-pill)",background:"#F7E7E4",color:C.attentionText,fontSize:10.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase"}}>Revisar antes de seguir</span>
+          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,color:C.black,lineHeight:1.2,marginTop:12}}>
+            {faltantes.length} checkout{faltantes.length===1?"":"s"} sin limpieza programada
+          </div>
+          <div style={{fontSize:12,color:C.earth,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>
+            Un apartamento con salida y sin nadie asignado amanece sucio. Revísalo ahora: correr el motor suele resolverlo sin tocarle la ruta a quien ya la recibió.
+          </div>
+        </div>
+
+        <div style={{display:"flex",gap:7,padding:"16px 20px 0"}}>
+          <button onClick={function(){setTab("hoy");setRes(null);}} style={tabBtn(tab==="hoy")}>Hoy · {faltantes.filter(function(x){return x.fecha===hoy;}).length}</button>
+          <button onClick={function(){setTab("man");setRes(null);}} style={tabBtn(tab==="man")}>Mañana · {faltantes.filter(function(x){return x.fecha===manana;}).length}</button>
+        </div>
+
+        <div style={{padding:"13px 20px 0",display:"flex",flexDirection:"column",gap:7}}>
+          {delDia.length===0
+            ? <div style={{padding:"18px 14px",textAlign:"center",background:"#E8F2ED",borderRadius:12,fontSize:12.5,color:"#3d6b52",fontWeight:600}}>Todos los checkouts de {tab==="hoy"?"hoy":"mañana"} tienen limpieza.</div>
+            : delDia.map(function(x,i){ return (
+                <div key={i} style={{display:"flex",alignItems:"center",gap:9,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:11,padding:"10px 12px"}}>
+                  <span style={{flexShrink:0,width:6,height:6,borderRadius:"50%",background:C.peach}}/>
+                  <span style={{flex:1,minWidth:0,fontSize:12.5,fontWeight:600,color:C.black}}>{x.propiedad}</span>
+                  {!x.conocida&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",padding:"2px 7px",borderRadius:"var(--sa-pill)",background:"#F8ECE9",color:C.attentionText,flexShrink:0}}>Sin registrar</span>}
+                </div>
+              ); })}
+        </div>
+
+        {/* Contraste contra la lista oficial de Hospitable */}
+        <div style={{margin:"16px 20px 0",border:"1px solid "+C.line,borderRadius:14,overflow:"hidden"}}>
+          <div style={{padding:"12px 14px",background:C.surfaceWarm}}>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Contrastar con Hospitable</div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:5,lineHeight:1.6,textWrap:"pretty"}}>
+              Lo de arriba sale de las reservas que ya sincronizamos. Para descartar que falte una reserva que nunca llegó, abre la lista oficial y pégala aquí.
+            </div>
+            <a href={tab==="hoy"?HOSP_CO_HOY:HOSP_CO_MANANA} target="_blank" rel="noopener noreferrer" style={{display:"inline-block",marginTop:9,fontSize:11.5,fontWeight:700,color:C.black,letterSpacing:".04em"}}>Abrir checkouts de {tab==="hoy"?"hoy":"mañana"} →</a>
+          </div>
+          <div style={{padding:"12px 14px",display:"flex",flexDirection:"column",gap:9}}>
+            <textarea value={pegado} onChange={function(e){setPegado(e.target.value);setRes(null);}} rows={3} placeholder="Pega aquí la tabla de Hospitable…" style={IN}/>
+            <button onClick={revisar} disabled={!pegado.trim()} style={{alignSelf:"flex-start",padding:"10px 16px",minHeight:42,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:pegado.trim()?"#fff":C.surfaceWarm,color:pegado.trim()?C.black:C.taupe,fontSize:11.5,fontWeight:700,cursor:pegado.trim()?"pointer":"not-allowed",fontFamily:"Montserrat,sans-serif"}}>Comparar</button>
+            {res&&(
+              <div style={{fontSize:12,lineHeight:1.65,color:C.black}}>
+                {res.faltan.length===0
+                  ? <span style={{color:"#3d6b52",fontWeight:600}}>Coinciden: las {res.leidos} propiedades de la lista tienen limpieza programada.</span>
+                  : <>
+                      <div style={{fontWeight:700,color:C.attentionText}}>{res.faltan.length} de {res.leidos} sin limpieza:</div>
+                      <div style={{marginTop:4,color:C.earth}}>{res.faltan.join(" · ")}</div>
+                      {res.sinReserva.length>0&&<div style={{marginTop:7,color:C.earth,textWrap:"pretty"}}><b style={{color:C.black}}>Y estas ni siquiera llegaron a la app:</b> {res.sinReserva.join(" · ")}. Hay que sincronizar Hospitable o darlas de alta en Propiedades.</div>}
+                    </>}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{padding:"16px 20px 20px",display:"flex",gap:9,flexWrap:"wrap"}}>
+          <button onClick={function(){ setAbierto(false); onIrProgramacion&&onIrProgramacion(); }} style={{flex:"1 1 200px",padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Ir a Programación</button>
+          <button onClick={function(){setAbierto(false);}} style={{padding:"13px 18px",minHeight:48,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Después</button>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+/* ═══ CHECKOUTS SIN RUTA ═══════════════════════════════════════════════════
+   El motor sabe recuperar un checkout que entró tarde: al volver a correr, la
+   ruta ya enviada queda fija y la limpieza nueva se agrega encima. El problema
+   nunca fue recuperarlo — fue ENTERARSE. El aviso de "checkout sin limpieza"
+   vivía dentro del panel de un día concreto, así que solo lo veía quien abría
+   justo ese día. Si nadie lo abría, el apartamento amanecía sin nadie.
+   Esto barre todo el horizonte de una vez y grita en la cabecera. */
+function checkoutsSinRuta(o){
+  var reservas=o.reservas||[], schedules=o.schedules||[], props=o.props||[];
+  var hoy=o.hoy, dias=o.dias||3, out=[];
+  var hasta=SCHED.shift(hoy,dias);
+  /* Lo que YA tiene ruta ese día — incluidas las canceladas a propósito: una
+     limpieza que el administrador canceló no es un olvido. */
+  var cubierto={};
+  schedules.forEach(function(s){
+    if(!s) return;
+    var f=String(s.fecha||"").slice(0,10);
+    if(f<hoy||f>hasta) return;
+    cubierto[f+"|"+normalize(s.propiedad)]=1;
+  });
+  var vistos={};
+  reservas.forEach(function(r){
+    if(!r||!r.checkOut) return;
+    var f=String(r.checkOut).slice(0,10);
+    if(f<hoy||f>hasta) return;
+    var nombre=String(r.propiedad||"").trim();
+    if(!nombre) return;
+    var k=f+"|"+normalize(nombre);
+    if(vistos[k]||cubierto[k]) return;
+    vistos[k]=1;
+    var p=props.find(function(x){ return normalize(x.name)===normalize(nombre); });
+    /* Una propiedad en pausa no es un olvido: se excluye a propósito. Una pausa
+       "solo profundas" no cuenta: esa sí debe tener limpieza de checkout. */
+    if(p&&SCHED.enPausa(p,f,"limpieza")) return;
+    out.push({fecha:f, propiedad:nombre, conocida:!!p, reservaId:r.id||""});
+  });
+  return out.sort(function(a,b){ return a.fecha<b.fecha?-1:(a.fecha>b.fecha?1:(a.propiedad<b.propiedad?-1:1)); });
+}
+
 function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, swaps, onSvSwaps, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, onSvCodigos, schedErr, onUpsert, onReasignar}) {
   /* Abre en HOY: la ruta que el equipo está corriendo ahora mismo es la que el
      administrador necesita ver al entrar, no la de mañana. */
@@ -12862,7 +13060,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   }
 
   /* ─── Corrida del motor (la misma que corre a las 6pm) */
-  function generar(desdeCero){
+  function generar(desdeCero, incluirHoy){
     desdeCero = (desdeCero === true);   /* onClick manda el evento: solo `true` cuenta */
     setBusy("gen");
     /* Desde cero: se descarta todo lo futuro que aún no salió por correo, para que
@@ -12870,8 +13068,13 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
     var previas = desdeCero
       ? (schedules||[]).filter(function(s){ var sf=String(s.fecha).slice(0,10); return sf<=hoy || s.notificadoEn; })
       : (schedules||[]);
+    /* La corrida normal empieza mañana: el día de hoy ya está corriendo y rehacerlo
+       le movería el piso al equipo. Pero cuando HOY tiene un checkout sin nadie
+       —una reserva que entró de noche— hay que poder cubrirlo, así que se abre la
+       ventana desde hoy. Es la misma puerta que usa la revisión de las 6:00 am. */
     var r = SCHED.programar({
-      hoy: hoy, dias: 3, reservas: reservas, props: props, vendors: vendors,
+      hoy: hoy, dias: incluirHoy?4:3, offset: incluirHoy?0:1,
+      reservas: reservas, props: props, vendors: vendors,
       ratings: ratings, ausencias: ausencias, existentes: previas,
       historial: reps, pesoRating: 0.7
     });
@@ -12889,13 +13092,19 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
       var sf=String(s.fecha).slice(0,10);
       if(s.notificadoEn && !reabrir[sf] && sf>hoy) cerrados[sf]=(cerrados[sf]||0)+1;
     });
+    /* Al abrir la ventana desde HOY, el día de hoy conserva sus filas y además pasa
+       por el reparto: sin este cerrojo una limpieza que ya existe podría salir dos
+       veces. Se descarta cualquier repetida de propiedad + tipo en la misma fecha. */
+    var yaHay={};
+    conservar.forEach(function(x){ yaHay[String(x.fecha).slice(0,10)+"|"+normalize(x.propiedad)+"|"+String(x.tipo||"")]=1; });
     var nuevas=r.asignaciones
+      .filter(function(x){ return !yaHay[String(x.fecha).slice(0,10)+"|"+normalize(x.propiedad)+"|"+String(x.tipo||"")]; })
       .map(function(x){ return Object.assign({}, x, {id:"sc_"+x.key.replace(/[^a-z0-9]/gi,"").slice(0,28)+"_"+Math.floor(Math.random()*1000)}); });
     onSvSchedules(conservar.concat(nuevas));
     setBusy("");
     var prof=nuevas.filter(function(x){ return SCHED.esProfunda(x.tipo); }).length;
     var cerradosTxt=Object.keys(cerrados);
-    var resumen=(desdeCero?"Reparto rehecho desde cero: ":"")+nuevas.length+" limpiezas programadas para los próximos 3 días"
+    var resumen=(desdeCero?"Reparto rehecho desde cero: ":"")+nuevas.length+" limpiezas programadas para "+(incluirHoy?"hoy y los próximos 3 días":"los próximos 3 días")
       +(prof?" · "+prof+" profunda"+(prof===1?"":"s"):"")
       +(r.sinAsignar.length?" · "+r.sinAsignar.length+" sin asignar":"")
       +((r.postergadas||[]).length?" · "+r.postergadas.length+" profunda"+(r.postergadas.length===1?"":"s")+" postergada"+(r.postergadas.length===1?"":"s")+" por falta de espacio":"")
@@ -13228,7 +13437,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   var pausadasHoy=(reservas||[]).filter(function(r){
     if(!r||String(r.checkOut||"").slice(0,10)!==fecha) return false;
     var p=(props||[]).find(function(x){ return normalize(x.name)===normalize(r.propiedad); });
-    return p&&SCHED.enPausa(p,fecha);
+    return p&&SCHED.enPausa(p,fecha,"limpieza");
   }).map(function(r){ return r.propiedad; });
   pausadasHoy=pausadasHoy.filter(function(x,i){ return pausadasHoy.indexOf(x)===i; });
 
@@ -13335,8 +13544,48 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   var IN={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44};
   var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"};
 
+  /* Se recalcula en cada render: si el administrador corre el motor, desaparece solo. */
+  var faltantes = checkoutsSinRuta({reservas:reservas, schedules:schedules, props:props, hoy:hoy, dias:3});
+  var faltaHoy  = faltantes.some(function(x){ return x.fecha===hoy; });
+
   return (
     <div style={{maxWidth:760,margin:"0 auto",padding:"18px 16px 90px",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:13}}>
+
+      {/* Checkouts sin ruta — lo primero que se ve al entrar */}
+      {faltantes.length>0&&(
+        <div style={{background:"#F7E7E4",border:"1.5px solid #E9C9C2",borderRadius:14,padding:"14px 16px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"baseline"}}>
+            <div>
+              <div style={{fontSize:9.5,fontWeight:700,color:C.attentionText,letterSpacing:".16em",textTransform:"uppercase"}}>Revisar ahora</div>
+              <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:19,color:C.black,marginTop:3,lineHeight:1.25}}>
+                {faltantes.length} checkout{faltantes.length===1?"":"s"} sin limpieza programada
+              </div>
+            </div>
+            <button onClick={function(){generar(false, faltaHoy);}} disabled={busy==="gen"} style={{padding:"9px 15px",minHeight:40,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:700,cursor:busy==="gen"?"wait":"pointer",fontFamily:"Montserrat,sans-serif",flexShrink:0}}>{busy==="gen"?"Corriendo…":(faltaHoy?"Cubrir hoy y correr el motor":"Correr el motor")}</button>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:11}}>
+            {faltantes.slice(0,8).map(function(x,i){
+              var idx=SCHED.dias(hoy,x.fecha);
+              return (
+                <button key={i} onClick={function(){ if(idx>=0&&idx<=3) setDia(idx); }} style={{display:"flex",alignItems:"center",gap:9,width:"100%",textAlign:"left",background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"9px 11px",cursor:(idx>=0&&idx<=3)?"pointer":"default",fontFamily:"Montserrat,sans-serif"}}>
+                  <span style={{flexShrink:0,width:6,height:6,borderRadius:"50%",background:C.peach}}/>
+                  <span style={{flex:1,minWidth:0,fontSize:12,fontWeight:600,color:C.black}}>{x.propiedad}</span>
+                  <span style={{fontSize:10.5,color:C.taupe,flexShrink:0}}>{x.fecha===hoy?"hoy":fmtDate(x.fecha)}</span>
+                  {!x.conocida&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",padding:"2px 7px",borderRadius:"var(--sa-pill)",background:"#F8ECE9",color:C.attentionText,flexShrink:0}}>Sin registrar</span>}
+                </button>
+              );
+            })}
+            {faltantes.length>8&&<div style={{fontSize:11,color:C.earth}}>y {faltantes.length-8} más…</div>}
+          </div>
+          <div style={{fontSize:11,color:C.earth,marginTop:10,lineHeight:1.6,textWrap:"pretty"}}>
+            {faltantes.some(function(x){return !x.conocida;})
+              ? "Las marcadas «Sin registrar» tienen reserva pero no existen en el portafolio: hay que darlas de alta en Propiedades para que el motor las pueda programar."
+              : (faltaHoy
+                  ? "Suele pasar cuando la reserva entró después de que la ruta ya se envió. El motor las agrega sin tocarle la ruta a quien ya la recibió — y esta vez también reparte lo de hoy."
+                  : "Suele pasar cuando la reserva entró después de que la ruta ya se envió. Correr el motor las agrega sin tocar las rutas que el equipo ya recibió.")}
+          </div>
+        </div>
+      )}
 
       {/* Cabecera y corridas */}
       <div style={CARD}>

@@ -191,9 +191,10 @@
       vistos[k] = 1;
       var p = partes(nombre);
       var cfg = props[norm(nombre)] || {};
-      /* Propiedad en pausa: no entra al reparto automático. Se usa para estancias
-         largas (Mónaco) y para apartamentos fuera de servicio. */
-      if (enPausa(cfg, f)) continue;
+      /* Propiedad en pausa: no entra al reparto automático. Se usa para
+         apartamentos fuera de servicio. Una pausa "solo profundas" NO frena la
+         limpieza de checkout — de eso trata el tercer argumento. */
+      if (enPausa(cfg, f, "limpieza")) continue;
       out.push({
         key: k,
         fecha: f,
@@ -210,12 +211,18 @@
   }
   /* ─── Pausa de programación de una propiedad ─────────────────────────────
      pausa:{desde,hasta} — sin fechas es indefinida; solo `desde` es "a partir de";
-     solo `hasta` es "hasta esa fecha". Mientras esté en pausa la propiedad no se
-     programa: ni limpieza de checkout ni profunda. */
-  function enPausa(prop, f) {
+     solo `hasta` es "hasta esa fecha".
+     ALCANCE: por defecto la pausa saca a la propiedad de TODO el reparto. Con
+     `soloProfundas` solo frena las profundas y la limpieza de checkout se sigue
+     programando — que es el caso real de las estancias largas: el huésped sale,
+     hay que limpiar, lo que no toca es la profunda. Antes no existía esa
+     distinción y una propiedad pausada "para profundas" amanecía sin nadie
+     el día de su checkout. */
+  function enPausa(prop, f, ambito) {
     if (!prop) return false;
     var p = prop.pausa;
     if (!p || !p.activa) return false;
+    if (p.soloProfundas && ambito && ambito !== "profunda") return false;
     var d = String(f || "").slice(0, 10);
     var desde = String(p.desde || "").slice(0, 10);
     var hasta = String(p.hasta || "").slice(0, 10);
@@ -297,6 +304,10 @@
       if (!porProp.hasOwnProperty(pk)) continue;
       if (excluir[pk]) continue; /* ya tiene una profunda agendada sin hacer */
       if (reglas[pk] && reglas[pk].sinProfundas) continue; /* fuera del ciclo automático */
+      /* La limpieza de checkout de una propiedad pausada "solo profundas" SÍ se
+         programa, así que aquí hay que frenar la profunda a mano: si no, se
+         montaría justo encima de ella. */
+      if (reglas[pk] && enPausa(reglas[pk], porProp[pk].fecha, "profunda")) continue;
       var base = porProp[pk];
       var prev = ultima[pk];
       /* Sin historial: se programa la primera. Con historial: cuando ya pasaron
@@ -987,7 +998,7 @@
       var nombre = props[p].name || props[p].nombre || "";
       if (!nombre) continue;
       /* Una propiedad en pausa no debe salir como profunda vencida: no se programa. */
-      if (enPausa(props[p], hoy)) continue;
+      if (enPausa(props[p], hoy, "profunda")) continue;
       /* Ni una a la que se le quitaron las profundas a propósito. */
       if (props[p].sinProfundas) continue;
       var key = norm(nombre);
