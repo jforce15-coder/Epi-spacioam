@@ -13101,6 +13101,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
   const [verMotor, setVerMotor] = useState(false);
   const [sim,      setSim]      = useState(null);   /* simulacro: no guarda ni notifica */
   const [plan,     setPlan]     = useState(null);   /* reparto calculado, esperando confirmación */
+  const [huerfanas,setHuerfanas]= useState(null);   /* cancelaciones propuestas, esperando confirmación */
   const autoHecho = useRef(false);                  /* la corrida automática ocurre una vez por sesión */
   const [reabrir,  setReabrir]  = useState({});     /* días ya notificados que se van a rehacer */
   const [tocados,  setTocados]  = useState({});     /* días notificados que el admin ya cambió */
@@ -13179,25 +13180,103 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
      servidor ya lo hace en sus dos corridas; esto lo repite del lado del
      navegador para que una sincronización manual no deje la ruta contradiciendo
      a las reservas que acaba de traer. */
+  /* ── Cancelar limpiezas huérfanas ────────────────────────────────────────
+     Una limpieza automática se cae si su checkout desapareció de Hospitable.
+     PERO esto solo es cierto si las reservas que tenemos son confiables. Si el
+     sync viene vacío, corto o desfasado, "ningún checkout coincide" no significa
+     que se cancelaron todas: significa que no sabemos nada — y borrar la ruta
+     del día con esa duda es mucho peor que dejar una limpieza de sobra.
+     De ahí los tres cerrojos de abajo. El primero ya se cobró una ruta completa.
+
+     Además nunca se cancela en silencio: se propone y una persona confirma. */
   function cancelarHuerfanas(lista, reservasNuevas){
-    var man=SCHED.shift(hoy,1), salidas={};
-    (reservasNuevas||[]).forEach(function(r){
+    var man=SCHED.shift(hoy,1);
+    var res=reservasNuevas||[];
+    var salidas={}, coHoy=0;
+    res.forEach(function(r){
       var co=String(r&&r.checkOut||"").slice(0,10);
-      if(co) salidas[co+"|"+normalize(r.propiedad)]=1;
+      if(!co) return;
+      salidas[co+"|"+normalize(r.propiedad)]=1;
+      if(co===hoy||co===man) coHoy++;
     });
-    var caidas=[];
-    var out=(lista||[]).map(function(s){
-      if(!s) return s;
+
+    /* Cerrojo 1 — datos vacíos. Sin una sola reserva no hay nada que comparar. */
+    if(!res.length) return {lista:lista, caidas:[], bloqueo:"Hospitable no devolvió reservas: no hay con qué comparar."};
+
+    /* Cerrojo 2 — datos desfasados. Si la salida más reciente que conocemos ya
+       pasó, el sync está congelado (fue justo lo que pasó el 29 de agosto: los
+       datos se habían quedado en junio). */
+    var maxCo="";
+    res.forEach(function(r){ var co=String(r&&r.checkOut||"").slice(0,10); if(co>maxCo) maxCo=co; });
+    if(maxCo&&maxCo<hoy) return {lista:lista, caidas:[], bloqueo:"Las reservas sincronizadas terminan el "+fmtDate(maxCo)+": están desfasadas."};
+
+    var candidatas=(lista||[]).filter(function(s){
+      if(!s) return false;
       var f=String(s.fecha||"").slice(0,10);
-      if(f!==hoy&&f!==man) return s;
-      if(s.origen==="manual"||s.origen==="visita"||s.estado==="cancelada") return s;
-      if(SCHED.esProfunda(s.tipo)) return s;
+      if(f!==hoy&&f!==man) return false;
+      if(s.origen==="manual"||s.origen==="visita"||s.estado==="cancelada") return false;
+      if(SCHED.esProfunda(s.tipo)) return false;
       var k=(s.cubreCheckout?String(s.cubreCheckout).slice(0,10):f)+"|"+normalize(s.propiedad);
-      if(salidas[k]) return s;
-      caidas.push(s);
-      return Object.assign({},s,{estado:"cancelada",canceladaEn:hoy,motivoCancel:"El checkout ya no existe en Hospitable"});
+      return !salidas[k];
     });
-    return {lista:out, caidas:caidas};
+    if(!candidatas.length) return {lista:lista, caidas:[]};
+
+    /* Cerrojo 3 — cancelación masiva. Que se caigan casi todas no es una tarde
+       de cancelaciones: es un problema de datos. */
+    var enVentana=(lista||[]).filter(function(s){
+      var f=String(s&&s.fecha||"").slice(0,10);
+      return (f===hoy||f===man) && s.estado!=="cancelada" && !SCHED.esProfunda(s.tipo);
+    }).length;
+    if(enVentana>=3 && candidatas.length > enVentana*0.5)
+      return {lista:lista, caidas:[], bloqueo:"Se caerían "+candidatas.length+" de "+enVentana+" limpiezas. Eso apunta a un problema de sincronización, no a cancelaciones reales."};
+    if(!coHoy && enVentana>=3)
+      return {lista:lista, caidas:[], bloqueo:"Las reservas sincronizadas no traen ningún checkout de hoy ni de mañana: falta información."};
+
+    var ids={}; candidatas.forEach(function(s){ ids[s.id]=1; });
+    var out=(lista||[]).map(function(s){
+      if(!s||!ids[s.id]) return s;
+      /* Se guarda el estado anterior: una cancelación equivocada tiene que poder
+         deshacerse sin adivinar en qué estado estaba la fila. */
+      return Object.assign({},s,{estado:"cancelada",estadoPrev:s.estado||"pendiente",canceladaEn:hoy,motivoCancel:"El checkout ya no existe en Hospitable"});
+    });
+    return {lista:out, caidas:candidatas};
+  }
+
+  /* Deshacer: las filas canceladas por el proceso automático siguen enteras, así
+     que devolverlas es cuestión de restaurar su estado anterior. Se quitan además
+     las limpiezas que el motor generó encima para tapar el hueco que él mismo
+     abrió — si no, la propiedad queda con dos técnicos el mismo día. */
+  function huerfanasCanceladas(){
+    var man=SCHED.shift(hoy,1);
+    return (schedules||[]).filter(function(s){
+      if(!s||s.estado!=="cancelada") return false;
+      if(s.motivoCancel!=="El checkout ya no existe en Hospitable") return false;
+      var f=String(s.fecha||"").slice(0,10);
+      return f===hoy||f===man;
+    });
+  }
+  function restaurarHuerfanas(){
+    var caidas=huerfanasCanceladas();
+    if(!caidas.length) return;
+    var vuelven={}; caidas.forEach(function(s){ vuelven[String(s.fecha).slice(0,10)+"|"+normalize(s.propiedad)]=s.id; });
+    var quitadas=0;
+    var out=(schedules||[]).filter(function(s){
+      if(!s) return false;
+      if(s.estado==="cancelada") return true;
+      var k=String(s.fecha||"").slice(0,10)+"|"+normalize(s.propiedad);
+      /* Solo se descarta el relleno automático que aún no salió por correo. */
+      if(vuelven[k]&&vuelven[k]!==s.id&&!s.notificadoEn&&s.origen!=="manual"&&s.origen!=="visita"){ quitadas++; return false; }
+      return true;
+    }).map(function(s){
+      if(!s||s.estado!=="cancelada"||!vuelven[String(s.fecha).slice(0,10)+"|"+normalize(s.propiedad)]) return s;
+      if(s.motivoCancel!=="El checkout ya no existe en Hospitable") return s;
+      var u=Object.assign({},s,{estado:s.estadoPrev||(s.notificadoEn?"confirmada":"pendiente")});
+      delete u.canceladaEn; delete u.motivoCancel; delete u.estadoPrev;
+      return u;
+    });
+    onSvSchedules(out);
+    aviso("Ruta restaurada: "+caidas.length+" limpieza"+(caidas.length===1?"":"s")+" vuelve"+(caidas.length===1?"":"n")+" a su estado anterior"+(quitadas?" · se quitaron "+quitadas+" que el motor había puesto encima":"")+".");
+    bitacora("programacion","Restauración manual — "+caidas.length+" limpieza(s) canceladas por el detector de huérfanas devueltas a su estado anterior"+(quitadas?"; "+quitadas+" limpieza(s) automáticas de relleno descartadas":"")+".");
   }
 
   /* ─── Traer reservas de Hospitable (checkouts + check-ins + habitaciones) */
@@ -13211,10 +13290,8 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
       else {
         onSvReservas(list);
         var h=cancelarHuerfanas(schedules, list);
-        if(h.caidas.length){
-          onSvSchedules(h.lista);
-          bitacora("programacion", h.caidas.length+" limpieza(s) cancelada(s): su checkout ya no existe en Hospitable — "+h.caidas.map(function(x){ return x.propiedad+" ("+x.fecha+")"; }).join(" · "));
-        }
+        if(h.bloqueo){ bitacora("programacion","Cancelación de huérfanas detenida: "+h.bloqueo); }
+        else if(h.caidas.length){ setHuerfanas({caidas:h.caidas, lista:h.lista}); }
         /* Las habitaciones vienen con la propiedad: se guardan para el motor. */
         if(onSvP && r.propiedades && r.propiedades.length){
           var ix={}; r.propiedades.forEach(function(p){ ix[normalize(p.nombre)]=p; });
@@ -13868,6 +13945,69 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
 
   return (
     <div style={{maxWidth:760,margin:"0 auto",padding:"18px 16px 90px",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:13}}>
+
+      {/* Ruta cancelada por error — se puede devolver */}
+      {(function(){
+        var caidas=huerfanasCanceladas();
+        if(!caidas.length) return null;
+        return (
+          <div style={{background:"#F8ECE9",border:"1.5px solid #E9C9C2",borderRadius:14,padding:"14px 16px"}}>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.attentionText,letterSpacing:".16em",textTransform:"uppercase"}}>Se puede deshacer</div>
+            <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:19,color:C.black,marginTop:3,lineHeight:1.25}}>
+              {caidas.length} limpieza{caidas.length===1?"":"s"} cancelada{caidas.length===1?"":"s"} automáticamente
+            </div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>
+              El detector las dio de baja porque no encontró su checkout en Hospitable. Si las reservas venían incompletas, la baja fue equivocada: nada se borró y puedes devolverlas a como estaban.
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:5,margin:"10px 0"}}>
+              {caidas.slice(0,10).map(function(x,i){ return (
+                <div key={i} style={{display:"flex",alignItems:"center",gap:8,fontSize:11.5,color:C.black}}>
+                  <span style={{flexShrink:0,width:5,height:5,borderRadius:"50%",background:C.peach}}/>
+                  <span style={{flex:1,minWidth:0,fontWeight:600}}>{x.propiedad}</span>
+                  <span style={{fontSize:10.5,color:C.taupe,flexShrink:0}}>{x.fecha===hoy?"hoy":fmtDate(x.fecha)}</span>
+                </div>
+              ); })}
+              {caidas.length>10&&<div style={{fontSize:11,color:C.earth}}>y {caidas.length-10} más…</div>}
+            </div>
+            <button onClick={restaurarHuerfanas} style={{padding:"12px 18px",minHeight:46,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Restaurar la ruta</button>
+          </div>
+        );
+      })()}
+
+      {/* Cancelaciones propuestas — antes se aplicaban solas */}
+      {huerfanas&&(
+        <Overlay>
+          <div onClick={function(e){e.stopPropagation();}} style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:520,maxHeight:"88vh",overflowY:"auto",boxShadow:"var(--sa-shadow-lg,0 28px 80px rgba(62,63,63,.10))"}}>
+            <div style={{padding:"20px 22px 0"}}>
+              <span style={{display:"inline-block",padding:"5px 12px",borderRadius:"var(--sa-pill)",background:"#F7E7E4",color:C.attentionText,fontSize:10.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase"}}>Confirma antes de dar de baja</span>
+              <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,color:C.black,lineHeight:1.2,marginTop:12}}>{huerfanas.caidas.length} limpieza{huerfanas.caidas.length===1?"":"s"} sin checkout</div>
+              <div style={{fontSize:12.5,color:C.earth,marginTop:6,lineHeight:1.65,textWrap:"pretty"}}>
+                Estas limpiezas están programadas pero su reserva ya no aparece en Hospitable. Si de verdad se cancelaron, dales de baja. Si crees que las reservas vinieron incompletas, déjalas.
+              </div>
+            </div>
+            <div style={{padding:"14px 22px 0",display:"flex",flexDirection:"column",gap:6}}>
+              {huerfanas.caidas.map(function(x,i){ return (
+                <div key={i} style={{display:"flex",alignItems:"center",gap:9,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:11,padding:"10px 12px"}}>
+                  <span style={{flexShrink:0,width:6,height:6,borderRadius:"50%",background:C.peach}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{x.propiedad}</div>
+                    <div style={{fontSize:10.5,color:C.taupe,marginTop:2}}>{x.fecha===hoy?"hoy":fmtDate(x.fecha)}{x.notificadoEn?" · el técnico ya la tiene":""}</div>
+                  </div>
+                </div>
+              ); })}
+            </div>
+            <div style={{padding:"18px 22px 22px",display:"flex",gap:9,flexWrap:"wrap"}}>
+              <button onClick={function(){
+                onSvSchedules(huerfanas.lista);
+                bitacora("programacion", huerfanas.caidas.length+" limpieza(s) dada(s) de baja: su checkout ya no existe en Hospitable — "+huerfanas.caidas.map(function(x){ return x.propiedad+" ("+x.fecha+")"; }).join(" · "));
+                aviso(huerfanas.caidas.length+" limpieza"+(huerfanas.caidas.length===1?"":"s")+" dada"+(huerfanas.caidas.length===1?"":"s")+" de baja. Puedes deshacerlo desde el aviso de arriba.");
+                setHuerfanas(null);
+              }} style={{flex:"1 1 200px",padding:"14px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Dar de baja</button>
+              <button onClick={function(){setHuerfanas(null);}} style={{padding:"14px 18px",minHeight:48,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Dejarlas</button>
+            </div>
+          </div>
+        </Overlay>
+      )}
 
       {/* Prevalidación del reparto — nada es oficial hasta aquí */}
       {plan&&(function(){
