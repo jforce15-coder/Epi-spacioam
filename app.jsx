@@ -1413,6 +1413,7 @@ function ls_loadAll(){
     company: ls_get("c:co")||null,
     extcats:   ls_get("c:ec")||null,
     schedules: ls_get("c:sched")||null,
+    schedvers: ls_get("c:schedvers")||null,
     hospurlday:  ls_get("c:hospday")||null,
     hospurlweek: ls_get("c:hospweek")||null,
     feedback:  ls_get("c:fb")||null,
@@ -1779,9 +1780,14 @@ async function saveConfigItem(key, value) {
     return;
   }
   try {
-    await apiCall("saveConfig",{key:km[key]||key,value:value});
+    /* Se devuelve la respuesta: el historial de versiones la necesita para adoptar
+       el mapa ya mezclado que arma el servidor. */
+    return await apiCall("saveConfig",{key:km[key]||key,value:value});
   } catch(e) {
     console.error("saveConfig failed for key "+key+":", e.message);
+    /* El historial no tiene respaldo local que valga: si no llegó al servidor, no
+       existe, y quien llama tiene que poder decirlo en pantalla. */
+    if(key==="schedvers") throw e;
     /* Fallback to localStorage so data isn't lost */
     var ls_km2={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus",swaps:"c:swaps",formcfg:"c:formcfg"};
     ls_set(ls_km2[key]||key,value);
@@ -1873,6 +1879,10 @@ function App() {
   const [hospUrlDay,  setHospUrlDay]  = useState("https://share.hospitable.com/metrics/1d1aabad-db5f-4f7a-847d-0de50c9dedc4");
   const [hospUrlWeek, setHospUrlWeek] = useState("https://share.hospitable.com/metrics/c914e6fc-94b9-4c1b-89c6-7722cf2315d6");
   const [schedules, setSchedules] = useState([]);
+  /* Historial de versiones de la ruta, por día. Vive en Config como cualquier
+     otro ajuste, así que lo ven todos los administradores, no solo quien hizo
+     el cambio. */
+  const [schedVers, setSchedVers] = useState({});
   const [codigos,  setCodigos]  = useState({});
   /* Ver como: el administrador principal abre la app con los ojos de otro usuario. */
   const [verComo,  setVerComo]  = useState(null);
@@ -1968,6 +1978,7 @@ function App() {
       setCompany(d.company||{name:"Spacio AM S.A.",nit:"118287796"});
       if(d.extcats)   setExtCats(d.extcats);
       if(d.schedules) setSchedules(d.schedules);
+      if(d.schedvers&&typeof d.schedvers==="object") setSchedVers(d.schedvers);
       if(d.codigos)   setCodigos(d.codigos);
       if(d.hospurlday)  setHospUrlDay(d.hospurlday||"");
       if(d.hospurlweek) setHospUrlWeek(d.hospurlweek||"");
@@ -2127,8 +2138,41 @@ function App() {
   async function svPin(v) { setPin(v);     saveConfigItem("pin",v); }
   async function svCo(v)  { setCompany(v); saveConfigItem("company",v); }
   async function svExtCats(v)   { setExtCats(v);   saveConfigItem("extcats",v); }
-  async function svSchedules(v) {
+  /* `motivo` es lo que va a leer una persona dentro de tres días en el historial.
+     Cuesta una cadena de texto y ahorra tener que restaurar para averiguar qué
+     pasó, así que todo lo que llama aquí lo manda. */
+  async function svSchedules(v, motivo) {
+    var prev=schedules;
     setSchedules(v);
+    /* El historial se calcula sobre el estado anterior, así que se registra antes
+       de que el guardado pueda fallar: si la ruta no se guarda, la versión que
+       queda apuntada es la misma que sigue en pantalla. */
+    try{
+      /* La sesión no guarda un nombre suelto: el usuario es `vendor` o, para el
+         admin principal que entra con su cuenta de Google, `profile`. */
+      var yo=(sess&&sess.vendor&&vendorDisplay(sess.vendor))
+          || (sess&&sess.profile&&(sess.profile.nombre||sess.profile.name||sess.profile.email))
+          || (sess&&sess.saEmail) || "Administración";
+      var hist=svRegistrar(schedVers, prev, v, {hoy:SCHED.hoyGT(), autor:yo, motivo:motivo||"Cambio manual"});
+      if(hist!==schedVers){
+        setSchedVers(hist);
+        if(IS_CLAUDE_SANDBOX) ls_set("c:schedvers",hist);
+        else {
+          /* Se espera el guardado: si el historial no llega al servidor, el panel
+             lo mostraría igual —vive en memoria— y se perdería al recargar sin
+             que nadie se enterara. El aviso es discreto a propósito: la ruta sí
+             se guardó, lo que falló es poder volver atrás. */
+          /* El servidor mezcla lo que mandamos con lo que ya había y devuelve el
+             resultado: se adopta para ver aquí mismo las versiones que escribió
+             el motor mientras esta pestaña estaba abierta. */
+          saveConfigItem("schedvers",hist).then(function(r){
+            if(r&&r.hist&&typeof r.hist==="object") setSchedVers(r.hist);
+          }).catch(function(){
+            setSchedErr("La ruta se guardó, pero el historial de versiones no. Si necesitas volver a una versión anterior, recarga y revisa que aparezca.");
+          });
+        }
+      }
+    }catch(e){}
     if(IS_CLAUDE_SANDBOX){ ls_set("c:sched",v); return true; }
     try{
       var r = await apiCall("saveConfig",{key:"schedules",value:v});
@@ -2985,7 +3029,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,swap
       <div style={{display:tab==="dash"?"block":"none"}}><DashView props={props} reservas={reservas||[]} nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} meEmails={adminVendor?vendorEmailSet(adminVendor):[]} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh} schedules={schedules||[]} onSvSchedules={onSvSchedules} onUpsert={onUpsert} onDelete={onDelete}/></div>
       <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} myReps={reps} allReps={reps} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
       <div style={{display:tab==="sched"?"block":"none"}}>
-        <ProgramacionAdmin activo={tab==="sched"} schedules={schedules||[]} onSvSchedules={onSvSchedules} vendors={vendors||[]} props={props||[]}
+        <ProgramacionAdmin activo={tab==="sched"} schedVers={schedVers||{}} schedules={schedules||[]} onSvSchedules={onSvSchedules} vendors={vendors||[]} props={props||[]}
           reservas={reservas||[]} onSvReservas={onSvReservas} ausencias={ausencias||[]} onSvAusencias={onSvAusencias}
           reps={reps} reviews={reviews} rvCasos={rvCasos} onSvP={onSvP} onSvV={onSvV} canNom={canNotif} codigos={codigos||{}} onSvCodigos={onSvCodigos} schedErr={schedErr} onUpsert={onUpsert} onReasignar={setAusPopup} swaps={swaps||[]} onSvSwaps={onSvSwaps}/>
       </div>
@@ -12886,6 +12930,156 @@ function DiaDoblePanel({schedules, reps, vendors, onUpsert, hoy, onAviso, onLog}
   );
 }
 
+/* ═══ HISTORIAL DE VERSIONES DE LA RUTA ═════════════════════════════════════
+   Cada vez que la ruta de un día cambia se guarda una foto de ese día, con hora,
+   autor y qué la provocó. Restaurar es volver a poner esa foto.
+
+   Se guarda por DÍA, no la agenda entera: un cambio en la ruta de mañana no debe
+   arrastrar el historial de los otros días, y restaurar mañana no puede tocar lo
+   que el equipo está corriendo hoy. Es la diferencia entre esto y un respaldo.
+
+   La ventana es de anteayer a mañana y el tope 25 versiones por día. Sin tope, el
+   historial crece sin fin en una hoja de cálculo y termina rompiendo el guardado
+   de la programación — que es justo lo que este historial existe para proteger. */
+var SV_MAX_POR_DIA = 25;
+/* Anteayer, ayer, hoy y mañana. Es lo que de verdad se restaura: más atrás ya se
+   pagó, más adelante todavía se puede rehacer con el motor. */
+function svDiasVentana(hoy){
+  var out=[]; for(var i=-2;i<=1;i++) out.push(SCHED.shift(hoy,i));
+  return out;
+}
+function svFilasDe(lista, f){
+  return (lista||[]).filter(function(s){ return s && String(s.fecha||"").slice(0,10)===f; });
+}
+/* Dos días son iguales si sus filas dicen lo mismo. Se compara solo lo que le
+   cambia la vida a alguien: quién, dónde, cuándo, en qué estado y si ya se avisó.
+   Sin esto, cada guardado dejaría una versión idéntica a la anterior. */
+function svHuella(filas){
+  return (filas||[]).map(function(s){
+    return [String(s.fecha||"").slice(0,10), normalize(s.propiedad), String(s.tipo||""),
+            String(s.vendorEmail||"").toLowerCase(), String(s.hora||""), String(s.orden||""),
+            String(s.estado||""), s.notificadoEn?"1":"0"].join("~");
+  }).sort().join("|");
+}
+/* Qué cambió entre dos fotos, en palabras. Un historial que solo dice "cambió"
+   obliga a restaurar para averiguarlo. */
+function svResumenCambio(antes, ahora, vendors){
+  function idx(l){ var m={}; (l||[]).forEach(function(s){ m[normalize(s.propiedad)+"|"+String(s.tipo||"")]=s; }); return m; }
+  var a=idx(antes), b=idx(ahora), partes=[];
+  var nuevas=[], quitadas=[], movidas=[];
+  Object.keys(b).forEach(function(k){
+    if(!a[k]){ nuevas.push(b[k].propiedad); return; }
+    var ea=String(a[k].vendorEmail||"").toLowerCase(), eb=String(b[k].vendorEmail||"").toLowerCase();
+    if(ea!==eb) movidas.push(b[k].propiedad+": "+(vendorNameByEmail(vendors,ea)||"sin técnico")+" → "+(vendorNameByEmail(vendors,eb)||"sin técnico"));
+    else if(a[k].estado!==b[k].estado) movidas.push(b[k].propiedad+": "+(b[k].estado==="cancelada"?"dada de baja":b[k].estado));
+  });
+  Object.keys(a).forEach(function(k){ if(!b[k]) quitadas.push(a[k].propiedad); });
+  if(nuevas.length)   partes.push("+"+nuevas.length+" "+(nuevas.length===1?"limpieza":"limpiezas"));
+  if(quitadas.length) partes.push("−"+quitadas.length);
+  if(movidas.length)  partes.push(movidas.length+(movidas.length===1?" reasignada":" reasignadas"));
+  return {texto:partes.join(" · ")||"sin cambios visibles", detalle:movidas.slice(0,4), nuevas:nuevas, quitadas:quitadas};
+}
+/* Registrar: devuelve el historial nuevo. Guarda la foto del DESPUÉS, y en el
+   primer cambio de un día guarda también la del ANTES — si no, el estado previo
+   a estrenar el historial sería el único al que nunca se podría volver. */
+function svRegistrar(hist, prev, next, o){
+  o=o||{};
+  var hoy=o.hoy||SCHED.hoyGT();
+  /* La bandera existe para poder devolver la MISMA referencia cuando no hubo
+     nada que apuntar. Sin ella, quien llama compara `hist!==schedVers`, la
+     comparación siempre da distinto —el objeto es nuevo— y se dispara un
+     guardado al servidor en cada cambio de la programación, aunque no haya
+     versión nueva. */
+  var cambio=false;
+  var out=Object.assign({}, hist||{});
+  svDiasVentana(hoy).forEach(function(f){
+    var antes=svFilasDe(prev,f), ahora=svFilasDe(next,f);
+    var hA=svHuella(antes), hB=svHuella(ahora);
+    if(hA===hB) return;
+    var lista=(out[f]||[]).slice();
+    if(!lista.length && antes.length){
+      lista.push({id:"v"+(Date.now()-1), ts:Date.now()-1, autor:"", motivo:"Como estaba antes de guardar el historial", filas:antes, n:antes.length});
+    }
+    lista.push({id:"v"+Date.now()+"_"+Math.floor(Math.random()*1000), ts:Date.now(), autor:o.autor||"", motivo:o.motivo||"Cambio manual", filas:ahora, n:ahora.length});
+    /* Se recorta por el principio, pero la primera versión —el punto de partida—
+       se conserva siempre: es el único suelo al que se puede volver. */
+    if(lista.length>SV_MAX_POR_DIA) lista=[lista[0]].concat(lista.slice(lista.length-(SV_MAX_POR_DIA-1)));
+    out[f]=lista;
+    cambio=true;
+  });
+  /* Fuera de la ventana no se guarda historial, y el viejo se descarta. */
+  var vivos={}; svDiasVentana(hoy).forEach(function(f){ vivos[f]=1; });
+  Object.keys(out).forEach(function(f){ if(!vivos[f]){ delete out[f]; cambio=true; } });
+  return cambio ? out : hist;
+}
+/* Restaurar un día: se cambian SOLO las filas de ese día. */
+function svRestaurar(lista, f, filas){
+  var otros=(lista||[]).filter(function(s){ return !s || String(s.fecha||"").slice(0,10)!==f; });
+  return otros.concat(filas||[]);
+}
+
+/* ═══ VERSIONES DE UNA RUTA ═════════════════════════════════════════════════
+   Cuando el motor rehace un día que ya se había enviado, la fila vieja no se
+   borra: queda cancelada al lado de la nueva. Eso significa que el historial de
+   la ruta está en los datos y se puede reconstruir — que es exactamente lo que
+   hace falta cuando una corrida equivocada reemplazó una ruta buena.
+
+   Para cada propiedad de un día se separan las filas en dos: la que se ENVIÓ por
+   correo (`notificadoEn`) y la que el motor puso después. La versión que el
+   equipo tiene en su bandeja es la primera notificada; el resto es reemplazo. */
+/* Un grupo solo es recuperable si restaurarlo CAMBIA algo: o hay que revivir la
+   fila que se envió, o hay al menos un reemplazo que descartar. Sin esta prueba
+   entraba cualquier propiedad con más de una fila —incluida la que ya tiene
+   activa justamente la versión enviada—, y eso inflaba el conteo ("2 limpiezas
+   recuperadas" cuando cambió 1) y mandaba correos de "cambios en tu ruta" a
+   técnicos cuya ruta no cambió. En una restauración de emergencia ese ruido es
+   lo peor que puede pasar: el técnico deja de creerle al correo. */
+function svRecuperable(g){
+  if(!g||!g.enviada) return false;
+  if(g.enviada.estado==="cancelada") return true;
+  return (g.filas||[]).some(function(x){
+    return x.id!==g.enviada.id && x.origen!=="manual" && x.origen!=="visita"
+        && !(x.estado==="cancelada" && x.canceladaPor==="administrador");
+  });
+}
+
+function rutaVersiones(schedules, fecha){
+  var f=String(fecha||"").slice(0,10);
+  var delDia=(schedules||[]).filter(function(s){ return s && String(s.fecha||"").slice(0,10)===f; });
+  var grupos={}, orden=[];
+  delDia.forEach(function(s){
+    var k=normalize(s.propiedad)+"|"+String(s.tipo||"");
+    if(!grupos[k]){ grupos[k]=[]; orden.push(k); }
+    grupos[k].push(s);
+  });
+  var conflictos=[], simples=[];
+  orden.forEach(function(k){
+    var filas=grupos[k];
+    /* Lo notificado más antiguo es lo que el equipo recibió primero. */
+    /* Las filas de agenda no llevan `createdAt`: el desempate va por la fecha en
+       que se generó la fila y, si empatan, por el id. Sin esto, cuando el
+       original y su reemplazo se notificaron el MISMO día el ganador lo decidía
+       el orden del arreglo — y podía elegir como "enviada" a la equivocada. */
+    /* Una fila que el administrador canceló a propósito no es una versión
+       recuperable: es una decisión suya, con media tarifa comprometida. Queda
+       fuera de la candidatura y se muestra aparte, como lo que es. */
+    var porAdmin=filas.filter(function(x){ return x.estado==="cancelada" && x.canceladaPor==="administrador"; });
+    var notif=filas.filter(function(x){ return x.notificadoEn && !(x.estado==="cancelada" && x.canceladaPor==="administrador"); })
+      .sort(function(a,b){
+        return String(a.notificadoEn||"").localeCompare(String(b.notificadoEn||""))
+          || String(a.generadoEn||"").localeCompare(String(b.generadoEn||""))
+          || String(a.id||"").localeCompare(String(b.id||""));
+      });
+    var activas=filas.filter(function(x){ return x.estado!=="cancelada"; });
+    var item={clave:k, propiedad:filas[0].propiedad, tipo:filas[0].tipo, filas:filas, enviada:notif[0]||null, activas:activas, porAdmin:porAdmin};
+    /* Sin candidata no hay conflicto que resolver: si lo único que había lo
+       canceló el administrador, no hay nada que recuperar. */
+    if(filas.length>1 && notif.length) conflictos.push(item); else simples.push(item);
+  });
+  var canceladas=delDia.filter(function(s){ return s.estado==="cancelada"; });
+  return {fecha:f, total:delDia.length, grupos:conflictos.concat(simples), conflictos:conflictos, canceladas:canceladas};
+}
+
 /* ═══ CONCILIACIÓN CONTRA HOSPITABLE ════════════════════════════════════════
    `checkoutsSinRuta` compara las reservas que YA sincronizamos contra las rutas.
    Eso no atrapa el caso peor: una reserva que nunca llegó a la app. Para eso
@@ -13088,7 +13282,7 @@ function checkoutsSinRuta(o){
   return out.sort(function(a,b){ return a.fecha<b.fecha?-1:(a.fecha>b.fecha?1:(a.propiedad<b.propiedad?-1:1)); });
 }
 
-function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, swaps, onSvSwaps, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, onSvCodigos, schedErr, onUpsert, onReasignar}) {
+function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, swaps, onSvSwaps, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, onSvCodigos, schedErr, onUpsert, onReasignar}) {
   /* Abre en HOY: la ruta que el equipo está corriendo ahora mismo es la que el
      administrador necesita ver al entrar, no la de mañana. */
   const [dia,      setDia]      = useState(0);      /* 0 = hoy, 1 = mañana, … */
@@ -13102,6 +13296,14 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
   const [sim,      setSim]      = useState(null);   /* simulacro: no guarda ni notifica */
   const [plan,     setPlan]     = useState(null);   /* reparto calculado, esperando confirmación */
   const [huerfanas,setHuerfanas]= useState(null);   /* cancelaciones propuestas, esperando confirmación */
+  const [verHist,  setVerHist]  = useState(false);
+  /* La bitácora del servidor guarda con hora exacta todo lo que le pasó a una
+     ruta —desde mucho antes de que existiera este historial—, pero guarda el
+     RELATO, no la foto. Se muestra junto a las versiones para que el día se lea
+     completo: lo que tiene foto se puede restaurar, lo demás se puede leer. */
+  const [bitEv,    setBitEv]    = useState(null);
+  const [bitErr,   setBitErr]   = useState("");
+  const [restaurar,setRestaurar]= useState(null);   /* versión elegida, esperando confirmación */
   const autoHecho = useRef(false);                  /* la corrida automática ocurre una vez por sesión */
   const [reabrir,  setReabrir]  = useState({});     /* días ya notificados que se van a rehacer */
   const [tocados,  setTocados]  = useState({});     /* días notificados que el admin ya cambió */
@@ -13237,7 +13439,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
       if(!s||!ids[s.id]) return s;
       /* Se guarda el estado anterior: una cancelación equivocada tiene que poder
          deshacerse sin adivinar en qué estado estaba la fila. */
-      return Object.assign({},s,{estado:"cancelada",estadoPrev:s.estado||"pendiente",canceladaEn:hoy,motivoCancel:"El checkout ya no existe en Hospitable"});
+      return Object.assign({},s,{estado:"cancelada",estadoPrev:s.estado||"pendiente",canceladaEn:hoy,canceladaPor:"sistema",motivoCancel:MOTIVO_DETECTOR});
     });
     return {lista:out, caidas:candidatas};
   }
@@ -13246,37 +13448,201 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
      que devolverlas es cuestión de restaurar su estado anterior. Se quitan además
      las limpiezas que el motor generó encima para tapar el hueco que él mismo
      abrió — si no, la propiedad queda con dos técnicos el mismo día. */
+  /* Limpiezas que canceló un DETECTOR, en la ventana de hoy y mañana.
+     Es una lista blanca a propósito. Una cancelación hecha por el administrador
+     lleva `canceladaPor:"administrador"` y además `cancelPaga`/`cancelMonto`:
+     es una decisión suya, con media tarifa comprometida en la nómina, y ofrecer
+     "deshacer" sobre ella dejaría la fila activa cargando campos de pago de
+     cancelación — un registro de nómina corrupto que nadie revisa.
+     Solo entra lo que no lleva firma humana: `canceladaPor:"sistema"` (lo que
+     escriben las versiones nuevas) o una fila con motivo de detector y sin
+     `canceladaPor` (lo que escribieron las viejas). */
+  var MOTIVO_DETECTOR="El checkout ya no existe en Hospitable";
   function huerfanasCanceladas(){
     var man=SCHED.shift(hoy,1);
     return (schedules||[]).filter(function(s){
       if(!s||s.estado!=="cancelada") return false;
-      if(s.motivoCancel!=="El checkout ya no existe en Hospitable") return false;
+      if(s.origen==="manual"||s.origen==="visita") return false;
+      var porSistema = s.canceladaPor==="sistema" || (!s.canceladaPor && s.motivoCancel===MOTIVO_DETECTOR);
+      if(!porSistema) return false;
       var f=String(s.fecha||"").slice(0,10);
       return f===hoy||f===man;
     });
   }
+  /* Al devolver una fila a la ruta hay que borrarle TODO el rastro de la
+     cancelación, no solo el motivo: si se queda con `cancelPaga`/`cancelMonto`,
+     el cierre de nómina la lee como cancelación pagada aunque esté activa. */
+  function limpiarCancelacion(x){
+    var u=Object.assign({},x,{estado:x.estadoPrev||(x.notificadoEn?"confirmada":"pendiente")});
+    ["canceladaEn","canceladaHora","canceladaPor","motivoCancel","cancelMotivo","cancelPaga","cancelMonto","estadoPrev"].forEach(function(k){ delete u[k]; });
+    return u;
+  }
+  /* Avisar a quien se quedó sin la limpieza. `enviarRuta` no sirve para esto:
+     arma sus destinatarios con las filas que SOBREVIVEN, así que a un técnico al
+     que se le quitó su única parada del día no lo alcanza nunca — se quedaría sin
+     saber que ya no va, y aparecería en la puerta junto al técnico correcto. */
+  function avisarSinParadas(lista, f, emails){
+    var quedan={};
+    (lista||[]).forEach(function(x){
+      if(!x||String(x.fecha||"").slice(0,10)!==f||x.estado==="cancelada") return;
+      quedan[String(x.vendorEmail||"").toLowerCase()]=1;
+    });
+    var sueltos=(emails||[]).filter(function(e){ return e&&!quedan[e]; });
+    sueltos.forEach(function(em){
+      var v=(vendors||[]).find(function(x){ return String(x.email||"").toLowerCase()===em; });
+      if(!v) return;
+      try{ notifyTemplate([v.notifEmail||v.email], "limpiezaCancelada", {tecnico:vendorDisplay(v), propiedad:"Tu ruta del "+fmtDate(f), fecha:fmtDate(f), hora:""}); }catch(_){}
+    });
+    return sueltos;
+  }
+  /* ── Volver a la versión que el equipo tiene en su correo ────────────────
+     Por cada propiedad del día se conserva la fila que se ENVIÓ y se descarta el
+     reemplazo que el motor puso encima, aunque el reemplazo también se haya
+     enviado (la corrida automática reparte y notifica en el mismo paso, así que
+     casi siempre lo está). A quien recibió la ruta equivocada le sale un correo
+     de corrección. Lo que un administrador puso a mano nunca se toca. */
+  function volverAEnviada(f){
+    var v=rutaVersiones(schedules, f);
+    var conf=v.conflictos.filter(svRecuperable);
+    if(!conf.length){ aviso("No hay una versión anterior de esa ruta guardada en los datos.", false); return; }
+    var quedan={}, descartar={}, reenviar={};
+    conf.forEach(function(g){
+      quedan[g.enviada.id]=1;
+      g.filas.forEach(function(x){
+        if(x.id===g.enviada.id) return;
+        if(x.origen==="manual"||x.origen==="visita") return;
+        /* Una cancelación del administrador se queda como está: ni se restaura ni
+           se borra, porque su registro de pago tiene que sobrevivir. */
+        if(x.estado==="cancelada"&&x.canceladaPor==="administrador") return;
+        descartar[x.id]=1;
+        if(x.notificadoEn) reenviar[String(x.vendorEmail||"").toLowerCase()]=1;
+      });
+    });
+    var out=(schedules||[]).filter(function(x){ return x && !descartar[x.id]; }).map(function(x){
+      if(!x||!quedan[x.id]||x.estado!=="cancelada") return x;
+      return limpiarCancelacion(x);
+    });
+    /* El técnico que recupera su ruta también necesita saber que volvió a valer. */
+    conf.forEach(function(g){ if(g.enviada.notificadoEn) reenviar[String(g.enviada.vendorEmail||"").toLowerCase()]=1; });
+    var ems=Object.keys(reenviar).filter(Boolean);
+    /* Primero los que se quedaron sin ninguna parada: a esos `enviarRuta` no
+       llega, y son justo los que hay que frenar. */
+    var sueltos=avisarSinParadas(out, f, ems);
+    var conRuta=ems.filter(function(e){ return sueltos.indexOf(e)<0; });
+    var r=conRuta.length?enviarRuta(f,{lista:out, auto:true, cambio:true, soloEmails:conRuta}):null;
+    if(r) out=r.lista;
+    onSvSchedules(out, "Vuelta a la ruta que se envió por correo");
+    var nd=Object.keys(descartar).length;
+    var avisoTxt=[];
+    if(r) avisoTxt.push("ruta corregida a "+r.tecnicos+" técnico"+(r.tecnicos===1?"":"s"));
+    if(sueltos.length) avisoTxt.push("cancelación avisada a "+sueltos.length);
+    aviso("Ruta del "+fmtDate(f)+" devuelta a la versión que se envió por correo: "+conf.length+" limpieza"+(conf.length===1?"":"s")+" recuperada"+(conf.length===1?"":"s")
+      +(nd?" · "+nd+" reemplazo"+(nd===1?"":"s")+" descartado"+(nd===1?"":"s"):"")
+      +(avisoTxt.length?" · correo: "+avisoTxt.join(" y "):"")+".");
+    bitacora("programacion","Restauración de la ruta del "+f+" a la última versión enviada — "+conf.length+" recuperada(s), "+nd+" reemplazo(s) descartado(s)"+(avisoTxt.length?", correo: "+avisoTxt.join(" y "):"")+".");
+  }
+
+  function pedirRestaurar(v){ setRestaurar(v); }
+  /* Restaurar una versión: se reemplazan SOLO las filas de ese día y se avisa a
+     quien quede afectado. La restauración es en sí un cambio, así que genera su
+     propia versión — se puede deshacer volviendo a la anterior. */
+  function hacerRestaurar(v){
+    var antes=svFilasDe(schedules, fecha);
+    var out=svRestaurar(schedules, fecha, v.filas);
+    /* A quién hay que escribirle: al que tenía paradas antes y al que las tiene
+       ahora. Los dos conjuntos, porque un cambio de técnico afecta a los dos. */
+    var afectados={};
+    antes.forEach(function(x){ if(x.notificadoEn&&x.estado!=="cancelada") afectados[String(x.vendorEmail||"").toLowerCase()]=1; });
+    (v.filas||[]).forEach(function(x){ if(x.notificadoEn&&x.estado!=="cancelada") afectados[String(x.vendorEmail||"").toLowerCase()]=1; });
+    var ems=Object.keys(afectados).filter(Boolean);
+    var sueltos=avisarSinParadas(out, fecha, ems);
+    var conRuta=ems.filter(function(e){ return sueltos.indexOf(e)<0; });
+    var r=conRuta.length?enviarRuta(fecha,{lista:out, auto:true, cambio:true, soloEmails:conRuta}):null;
+    if(r) out=r.lista;
+    var d=new Date(v.ts||0);
+    var hh=("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2);
+    onSvSchedules(out, "Restaurada la versión de las "+hh+" ("+(v.motivo||"cambio")+")");
+    setRestaurar(null); setVerHist(true);
+    var partes=[];
+    if(r) partes.push("ruta corregida a "+r.tecnicos+" técnico"+(r.tecnicos===1?"":"s"));
+    if(sueltos.length) partes.push("cancelación avisada a "+sueltos.length);
+    aviso("Ruta del "+fmtDate(fecha)+" restaurada a la versión de las "+hh+(partes.length?" · correo: "+partes.join(" y "):"")+".");
+    bitacora("programacion","Restauración de versión — ruta del "+fecha+" devuelta a la versión de las "+hh+" ("+(v.motivo||"")+")"+(partes.length?"; correo: "+partes.join(" y "):"")+".");
+  }
+
   function restaurarHuerfanas(){
     var caidas=huerfanasCanceladas();
     if(!caidas.length) return;
-    var vuelven={}; caidas.forEach(function(s){ vuelven[String(s.fecha).slice(0,10)+"|"+normalize(s.propiedad)]=s.id; });
-    var quitadas=0;
+    /* Dos índices con trabajos distintos, y la distinción importa:
+       · `vuelvenId` dice QUÉ FILAS se restauran — por identidad, nunca por
+         propiedad. Restaurar por propiedad+fecha alcanzaba también a una
+         cancelación del administrador que compartiera esa clave, y
+         `limpiarCancelacion` le borraba `cancelPaga`/`cancelMonto`: la media
+         tarifa que se le debe al técnico desaparecía del cierre sin rastro.
+         Dos filas de la misma propiedad y fecha son alcanzables en este mismo
+         build — "Pasar a mañana" crea una con `cubreCheckout` que convive con el
+         checkout propio del día siguiente.
+       · `porClave` sirve solo para encontrar los reemplazos a descartar, que sí
+         es una pregunta sobre la propiedad y el día. */
+    var vuelvenId={}; caidas.forEach(function(s){ vuelvenId[s.id]=1; });
+    var vuelven={}; caidas.forEach(function(s){
+      var k=String(s.fecha).slice(0,10)+"|"+normalize(s.propiedad);
+      (vuelven[k]=vuelven[k]||{})[s.id]=1;
+    });
+
+    /* El relleno que el motor puso encima se descarta AUNQUE YA SE HAYA ENVIADO.
+       Es el caso normal, no la excepción: la corrida automática reparte y manda
+       el correo en el mismo paso, así que el relleno del incidente casi siempre
+       llega notificado. Conservarlo por eso dejaría a la propiedad con dos
+       técnicos el mismo día — el error exacto que esta función existe para
+       evitar, y del tipo que nadie descubre hasta que los dos se encuentran en
+       la puerta. Lo que un administrador puso a mano no se toca. */
+    var quitadas=[], reenviar={};
     var out=(schedules||[]).filter(function(s){
       if(!s) return false;
       if(s.estado==="cancelada") return true;
       var k=String(s.fecha||"").slice(0,10)+"|"+normalize(s.propiedad);
-      /* Solo se descarta el relleno automático que aún no salió por correo. */
-      if(vuelven[k]&&vuelven[k]!==s.id&&!s.notificadoEn&&s.origen!=="manual"&&s.origen!=="visita"){ quitadas++; return false; }
+      if(vuelven[k]&&!vuelven[k][s.id]&&s.origen!=="manual"&&s.origen!=="visita"){
+        quitadas.push(s);
+        /* A quien recibió la ruta equivocada hay que corregirle el correo. */
+        if(s.notificadoEn){ (reenviar[String(s.fecha).slice(0,10)]=reenviar[String(s.fecha).slice(0,10)]||{})[String(s.vendorEmail||"").toLowerCase()]=1; }
+        return false;
+      }
       return true;
     }).map(function(s){
-      if(!s||s.estado!=="cancelada"||!vuelven[String(s.fecha).slice(0,10)+"|"+normalize(s.propiedad)]) return s;
-      if(s.motivoCancel!=="El checkout ya no existe en Hospitable") return s;
-      var u=Object.assign({},s,{estado:s.estadoPrev||(s.notificadoEn?"confirmada":"pendiente")});
-      delete u.canceladaEn; delete u.motivoCancel; delete u.estadoPrev;
-      return u;
+      if(!s||!vuelvenId[s.id]||s.estado!=="cancelada") return s;
+      return limpiarCancelacion(s);
     });
-    onSvSchedules(out);
-    aviso("Ruta restaurada: "+caidas.length+" limpieza"+(caidas.length===1?"":"s")+" vuelve"+(caidas.length===1?"":"n")+" a su estado anterior"+(quitadas?" · se quitaron "+quitadas+" que el motor había puesto encima":"")+".");
-    bitacora("programacion","Restauración manual — "+caidas.length+" limpieza(s) canceladas por el detector de huérfanas devueltas a su estado anterior"+(quitadas?"; "+quitadas+" limpieza(s) automáticas de relleno descartadas":"")+".");
+
+    /* Quien ya tenía la ruta buena también necesita saber que volvió a valer. */
+    caidas.forEach(function(s){
+      if(!s.notificadoEn) return;
+      var f=String(s.fecha).slice(0,10);
+      (reenviar[f]=reenviar[f]||{})[String(s.vendorEmail||"").toLowerCase()]=1;
+    });
+
+    var avisados=[], frenados=0;
+    Object.keys(reenviar).sort().forEach(function(f){
+      var ems=Object.keys(reenviar[f]).filter(Boolean);
+      if(!ems.length) return;
+      /* Los que se quedaron sin paradas ese día reciben la cancelación aparte. */
+      var sueltos=avisarSinParadas(out, f, ems);
+      frenados+=sueltos.length;
+      var conRuta=ems.filter(function(e){ return sueltos.indexOf(e)<0; });
+      if(!conRuta.length) return;
+      var r=enviarRuta(f,{lista:out, auto:true, cambio:true, soloEmails:conRuta});
+      if(r){ out=r.lista; avisados.push(fmtDate(f)+" a "+r.tecnicos+" técnico"+(r.tecnicos===1?"":"s")); }
+    });
+
+    onSvSchedules(out, "Restauradas las limpiezas que el sistema dio de baja");
+    var txt="Ruta restaurada: "+caidas.length+" limpieza"+(caidas.length===1?"":"s")+" vuelve"+(caidas.length===1?"":"n")+" a su estado anterior"
+      +(quitadas.length?" · se quitaron "+quitadas.length+" que el motor había puesto encima":"")
+      +(avisados.length?" · ruta corregida: "+avisados.join(" · "):"")
+      +(frenados?" · cancelación avisada a "+frenados+" técnico"+(frenados===1?"":"s"):"")+".";
+    aviso(txt);
+    bitacora("programacion","Restauración manual — "+caidas.length+" limpieza(s) devueltas a su estado anterior"
+      +(quitadas.length?"; descartadas "+quitadas.length+" de relleno ("+quitadas.map(function(x){ return x.propiedad+" "+x.fecha; }).join(" | ")+")":"")
+      +(avisados.length?"; correo de corrección enviado: "+avisados.join(" · "):"")+".");
   }
 
   /* ─── Traer reservas de Hospitable (checkouts + check-ins + habitaciones) */
@@ -13401,7 +13767,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
       var borrador=fechas.length-1;
       if(borrador>0) extra+=" Los otros "+borrador+" día"+(borrador===1?"":"s")+" quedan en borrador hasta su víspera.";
     }
-    onSvSchedules(lista);
+    onSvSchedules(lista, comoSeCorrio||"Reparto del motor");
     aviso(plan.resumen+extra);
     bitacora("programacion",(comoSeCorrio||"Programación manual desde el app")+" — "+plan.resumen+extra);
   }
@@ -13528,7 +13894,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
     });
     if(!r.nuevas.length){ setBusy(""); aviso("Sin limpiezas nuevas para hoy."); return; }
     var nuevas=r.nuevas.map(function(x){ return Object.assign({}, x, {id:"sc_"+Date.now()+Math.floor(Math.random()*999)}); });
-    onSvSchedules((schedules||[]).concat(nuevas));
+    onSvSchedules((schedules||[]).concat(nuevas), "Profundas agregadas");
     setBusy("");
     aviso(nuevas.length+" limpieza"+(nuevas.length===1?"":"s")+" nueva"+(nuevas.length===1?"":"s")+" agregada"+(nuevas.length===1?"":"s")+" a hoy.");
   }
@@ -13547,7 +13913,13 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
     var soloEmails=o.soloEmails;
     var filtro=null;
     if(soloEmails&&soloEmails.length){ filtro={}; soloEmails.forEach(function(e){ filtro[String(e||"").toLowerCase()]=1; }); }
-    var delDia=base.filter(function(s){ return String(s.fecha).slice(0,10)===f; });
+    /* Una limpieza cancelada no es una parada: no se lista en el correo y no se
+       vuelve a confirmar. Sin este filtro, restaurar una versión que contenga una
+       cancelación del administrador la devolvía como confirmada y notificada
+       conservando `cancelPaga`/`cancelMonto` — una limpieza activa cargando
+       campos de pago de cancelación, y el técnico recibiendo como parada algo que
+       ya se había dado de baja. */
+    var delDia=base.filter(function(s){ return String(s.fecha).slice(0,10)===f && s.estado!=="cancelada"; });
     if(!delDia.length){ if(!o.auto) aviso("No hay nada programado ese día.", false); return null; }
     var porTec={};
     delDia.forEach(function(s){ var k=String(s.vendorEmail||"").toLowerCase(); if(!porTec[k])porTec[k]=[]; porTec[k].push(s); });
@@ -13577,6 +13949,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
     });
     var out=base.map(function(s){
       if(String(s.fecha).slice(0,10)!==f) return s;
+      if(s.estado==="cancelada") return s;
       if(filtro&&!filtro[String(s.vendorEmail||"").toLowerCase()]) return s;
       return Object.assign({},s,{estado:"confirmada",notificadoEn:hoy});
     });
@@ -13589,7 +13962,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
   /* El botón de siempre: envía y guarda. */
   function notificar(f, soloEmails){
     var r=enviarRuta(f, {soloEmails:soloEmails});
-    if(r) onSvSchedules(r.lista);
+    if(r) onSvSchedules(r.lista, soloEmails&&soloEmails.length?"Cambios enviados por correo":"Ruta enviada al equipo");
   }
 
   /* ─── Ausencias: aprobar genera el reajuste; el admin lo confirma */
@@ -13611,7 +13984,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
       return Object.assign({},s,{vendorEmail:m.aEmail, vendorId:m.aVendorId||(v&&v.id)||"",
         orden:m.orden||s.orden, motivo:"reajuste por ausencia · "+(m.motivo||""), estado:"confirmada", reajustada:true});
     });
-    onSvSchedules(upd);
+    onSvSchedules(upd, "Reajuste por ausencia de "+(vendorNameByEmail(vendors, aus.vendorEmail)||"un técnico"));
     onSvAusencias((ausencias||[]).map(function(x){ return x.id===aus.id?Object.assign({},x,{estado:"aprobada",resueltaEn:hoy}):x; }));
     /* Aviso solo a quien le cambió la programación. */
     var tocados={};
@@ -13646,7 +14019,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
     if(to<0||to>=mias.length) return;
     var arr=mias.slice(); var it=arr.splice(from,1)[0]; arr.splice(to,0,it);
     var ord={}; arr.forEach(function(s,i){ ord[s.id]=i+1; });
-    onSvSchedules((schedules||[]).map(function(s){ return ord[s.id]?Object.assign({},s,{orden:ord[s.id]}):s; }));
+    onSvSchedules((schedules||[]).map(function(s){ return ord[s.id]?Object.assign({},s,{orden:ord[s.id]}):s; }), "Reordenada la ruta de "+(vendorNameByEmail(vendors,email)||"un técnico"));
     marcarCambio(fecha,[email]);
   }
   function mover(sched, aEmail){
@@ -13657,7 +14030,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
       return s.id===sched.id
         ? Object.assign({},s,{vendorEmail:aEmail, vendorId:v.id, orden:cuantas+1, motivo:"movida por el administrador", ajustadaPorAdmin:true})
         : s;
-    }));
+    }), sched.propiedad+" movida a "+vendorDisplay(v));
     marcarCambio(String(sched.fecha).slice(0,10),[emailVigente(sched),aEmail]);
   }
   /* ─── Cancelar una limpieza.
@@ -13689,7 +14062,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
         estado:"cancelada", canceladaEn:hoy, canceladaHora:hora, canceladaPor:"administrador",
         cancelPaga:paga, cancelMonto:monto, cancelMotivo:motivo||""
       }) : x;
-    }));
+    }), "Cancelada "+sched.propiedad+(paga?" · con media tarifa":""));
     /* Con pago: el trabajo aparece de inmediato en el dashboard con su etiqueta. */
     if(paga && monto>0 && onUpsert){
       onUpsert({
@@ -13724,7 +14097,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
 
   function quitar(sched){
     if(!window.confirm("¿Quitar "+sched.propiedad+" de la programación del "+fmtDate(sched.fecha)+"?")) return;
-    onSvSchedules((schedules||[]).filter(function(s){ return s.id!==sched.id; }));
+    onSvSchedules((schedules||[]).filter(function(s){ return s.id!==sched.id; }), "Quitada "+sched.propiedad);
     marcarCambio(String(sched.fecha).slice(0,10),[emailVigente(sched)]);
   }
   function agregarManual(){
@@ -13742,10 +14115,33 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
       vendorId:v.id, vendorEmail:String(v.email||"").toLowerCase(),
       orden:cuantas+1, estado:"confirmada", origen:"manual",
       motivo:"agregada por el administrador", generadoEn:hoy
-    }]));
+    }]), "Agregada "+mForm.propiedad+" a "+vendorDisplay(v));
     setManual(false); setMForm({fecha:"",propiedad:"",vendorId:"",tipo:"Limpieza"});
     marcarCambio(mForm.fecha,[String(v.email||"").toLowerCase()]);
     aviso("Limpieza agregada.");
+  }
+
+  useEffect(function(){
+    if(!verHist||bitEv!==null) return;
+    var vivo=true;
+    apiCall("getBitacora",{limit:400}).then(function(r){
+      if(vivo) setBitEv((r&&r.eventos)||[]);
+    }).catch(function(){ if(vivo){ setBitEv([]); setBitErr("No se pudo leer la bitácora del servidor."); } });
+    return function(){ vivo=false; };
+  },[verHist]);
+
+  /* Eventos de la bitácora que hablan de este día. El texto los nombra por su
+     fecha ISO, así que basta con buscarla. */
+  function bitDelDia(f){
+    return (bitEv||[]).filter(function(e){
+      var d=String(e.detalle||"");
+      if(d.indexOf(f)<0) return false;
+      return e.tipo==="programacion"||e.tipo==="correo";
+    }).map(function(e){
+      var iso=String(e.cuando||"").replace(" ","T");
+      var t=Date.parse(iso+"-06:00");
+      return {ts:isNaN(t)?0:t, texto:d, autor:e.usuario||"", cuando:e.cuando};
+    }).filter(function(e){ return e.ts; });
   }
 
   /* ─── Datos del día mostrado */
@@ -13904,7 +14300,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
   function asignarPendiente(x, email){
     var s=nuevaAsignacion(x, email, (porTec[email]||[]).length+1);
     if(!s) return;
-    onSvSchedules((schedules||[]).concat([s]));
+    onSvSchedules((schedules||[]).concat([s]), "Asignada "+x.propiedad+" a "+(vendorNameByEmail(vendors,email)||"un técnico"));
     setAsigSel(function(p){ var u=Object.assign({},p); delete u[x.key]; return u; });
     marcarCambio(x.fecha,[email]);
     var v=tecs.find(function(t2){ return String(t2.email||"").toLowerCase()===email; });
@@ -13924,7 +14320,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
       if(s) nuevas.push(s);
     });
     if(!nuevas.length){ aviso("Ningún técnico disponible para repartirlos.", false); return; }
-    onSvSchedules((schedules||[]).concat(nuevas));
+    onSvSchedules((schedules||[]).concat(nuevas), nuevas.length+" pendiente"+(nuevas.length===1?"":"s")+" repartida"+(nuevas.length===1?"":"s"));
     setAsigSel({});
     marcarCambio(fecha, nuevas.map(function(n){ return n.vendorEmail; }));
     aviso(nuevas.length+" limpieza"+(nuevas.length===1?"":"s")+" repartida"+(nuevas.length===1?"":"s")+" entre los que van más livianos hoy.");
@@ -13946,6 +14342,205 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
   return (
     <div style={{maxWidth:760,margin:"0 auto",padding:"18px 16px 90px",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:13}}>
 
+      {/* Historial de versiones del día */}
+      {(function(){
+        var hist=(schedVers&&schedVers[fecha])||[];
+        var bits=verHist?bitDelDia(fecha):[];
+        /* El panel se abre aunque todavía no haya versiones: la bitácora sola ya
+           cuenta la historia del día, y esconderlo haría creer que no pasó nada. */
+        if(hist.length<2 && !svFilasDe(schedules,fecha).length) return null;
+        var actual=svFilasDe(schedules, fecha);
+        var hActual=svHuella(actual);
+        var orden=hist.slice().sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
+        return (
+          <div style={{background:"#fff",border:"1px solid "+C.gray,borderRadius:14,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"}}>
+            <button onClick={function(){setVerHist(!verHist);}} style={{width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+                <div>
+                  <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase"}}>Historial</div>
+                  <div style={{fontSize:14,fontWeight:600,color:C.black,marginTop:3}}>{hist.length>1?hist.length+" versiones de esta ruta":"Historial de esta ruta"}</div>
+                  <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>Cada cambio queda guardado con hora y autor. Puedes volver a cualquier versión.</div>
+                </div>
+                <span style={{color:C.taupe,fontSize:13,flexShrink:0}}>{verHist?"▾":"▸"}</span>
+              </div>
+            </button>
+
+            {verHist&&(
+              <div style={{marginTop:13}}>
+                {bitEv===null&&<div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6}}>Leyendo la bitácora…</div>}
+                {bitErr&&<div style={{fontSize:11.5,color:C.attentionText,lineHeight:1.6,marginBottom:8}}>{bitErr}</div>}
+                {(function(){
+                  /* Dos clases de entrada en una sola línea de tiempo:
+                     · versión — tiene la foto del día, se puede restaurar.
+                     · registro — la bitácora del servidor, con hora exacta y
+                       autor, desde antes de que existiera este historial. No
+                       tiene foto, así que se lee pero no se restaura.
+                     Se muestran juntas porque la pregunta de quien mira no es
+                     "¿qué guardó el sistema?" sino "¿qué le pasó a esta ruta?". */
+                  var items=orden.map(function(v,i){ return {k:"v", ts:v.ts||0, v:v, i:i}; });
+                  /* Un registro a menos de 2 minutos de una versión es la misma
+                     acción contada dos veces: gana la versión, que sí restaura. */
+                  bits.forEach(function(b){
+                    var dup=items.some(function(x){ return x.k==="v" && Math.abs((x.ts||0)-b.ts)<120000; });
+                    if(!dup) items.push({k:"b", ts:b.ts, b:b});
+                  });
+                  items.sort(function(a,b){ return b.ts-a.ts; });
+                  if(!items.length) return <div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6}}>Todavía no hay cambios registrados para este día.</div>;
+                  return items.map(function(it,i){
+                    var ultimo=i===items.length-1;
+                    var d=new Date(it.ts||0);
+                    var hh=("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2);
+                    var iso=d.toISOString().slice(0,10);
+                    var mismoDia=iso===SCHED.hoyGT();
+                    var esV=it.k==="v";
+                    var v=it.v, b=it.b;
+                    var esActual=esV&&svHuella(v.filas)===hActual;
+                    var previa=esV?orden[it.i+1]:null;
+                    var cambio=previa?svResumenCambio(previa.filas, v.filas, vendors):null;
+                    var tecs={}; if(esV)(v.filas||[]).forEach(function(x){ if(x.estado!=="cancelada") tecs[String(x.vendorEmail||"").toLowerCase()]=1; });
+                    var nTec=Object.keys(tecs).filter(Boolean).length;
+                    return (
+                      <div key={esV?v.id:("b"+i)} style={{display:"flex",gap:12,paddingBottom:ultimo?0:14}}>
+                        <div style={{flexShrink:0,width:14,display:"flex",flexDirection:"column",alignItems:"center",paddingTop:4}}>
+                          <span style={{width:esActual?11:9,height:esActual?11:9,borderRadius:"50%",
+                            background:esActual?C.peach:(esV?"#fff":C.divider),
+                            border:"1.5px solid "+(esActual?C.peach:(esV?C.divider:C.divider)),flexShrink:0}}/>
+                          {!ultimo&&<span style={{flex:1,width:1,background:C.divider,marginTop:4,minHeight:24}}/>}
+                        </div>
+                        <div style={{flex:1,minWidth:0,paddingBottom:2}}>
+                          <div style={{display:"flex",gap:8,alignItems:"baseline",flexWrap:"wrap"}}>
+                            <span className="t-num" style={{fontSize:12.5,fontWeight:700,color:esV?C.black:C.earth,letterSpacing:".04em"}}>{hh}</span>
+                            {!mismoDia&&<span style={{fontSize:10.5,color:C.taupe}}>{fmtDate(iso)}</span>}
+                            {esActual&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:"var(--sa-pill)",background:"var(--accent-tint,#FCEFEB)",border:"1px solid "+C.peach,color:C.black}}>Versión actual</span>}
+                            {!esV&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"2px 8px",borderRadius:"var(--sa-pill)",background:C.surfaceWarm,border:"1px solid "+C.gray,color:C.earth}}>Registro</span>}
+                          </div>
+                          <div style={{fontSize:12,color:esV?C.black:C.earth,marginTop:3,lineHeight:1.55,textWrap:"pretty"}}>{esV?v.motivo:b.texto}</div>
+                          <div style={{fontSize:10.5,color:C.taupe,marginTop:2}}>
+                            {esV
+                              ? (v.autor||"Sistema")+" · "+v.n+" limpieza"+(v.n===1?"":"s")+(nTec?" · "+nTec+" técnico"+(nTec===1?"":"s"):"")
+                              : (b.autor||"Sistema")+" · sin foto para restaurar"}
+                          </div>
+                          {cambio&&cambio.texto!=="sin cambios visibles"&&(
+                            <div style={{fontSize:10.5,color:C.earth,marginTop:4,lineHeight:1.55}}>
+                              {cambio.texto}
+                              {cambio.detalle.length>0&&<div style={{color:C.taupe,marginTop:2}}>{cambio.detalle.join(" · ")}</div>}
+                            </div>
+                          )}
+                          {esV&&!esActual&&(
+                            <button onClick={function(){ pedirRestaurar(v); }} style={{marginTop:7,padding:"6px 13px",minHeight:34,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Restaurar esta versión</button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+                {hist.length<2&&bits.length>0&&(
+                  <div style={{marginTop:11,background:C.surfaceWarm,borderRadius:10,padding:"10px 12px",fontSize:11,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>
+                    Los registros anteriores a este historial se leen pero no se pueden restaurar: quedaron guardados como relato, no como foto de la ruta. De aquí en adelante cada cambio guarda su versión completa.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Confirmación de restauración — se ve qué cambia antes de tocar la ruta */}
+      {restaurar&&(function(){
+        var v=restaurar;
+        var actual=svFilasDe(schedules, fecha);
+        var c=svResumenCambio(actual, v.filas, vendors);
+        var yaSalio=actual.some(function(x){ return x.notificadoEn; });
+        return (
+          <Overlay>
+            <div onClick={function(e){e.stopPropagation();}} style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:500,maxHeight:"88vh",overflowY:"auto",boxShadow:"var(--sa-shadow-lg,0 28px 80px rgba(62,63,63,.10))"}}>
+              <div style={{padding:"20px 22px 0"}}>
+                <span style={{display:"inline-block",padding:"5px 12px",borderRadius:"var(--sa-pill)",background:C.surfaceWarm,color:C.earth,fontSize:10.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",border:"1px solid "+C.gray}}>Restaurar versión</span>
+                <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,color:C.black,lineHeight:1.2,marginTop:12}}>{v.motivo}</div>
+                <div style={{fontSize:11.5,color:C.taupe,marginTop:4}}>{v.autor||"Sistema"} · {new Date(v.ts).toLocaleString("es-GT",{dateStyle:"medium",timeStyle:"short"})}</div>
+              </div>
+              <div style={{margin:"16px 22px 0",background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"13px 15px"}}>
+                <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:6}}>Qué cambia en la ruta de {fecha===hoy?"hoy":(fecha===SCHED.shift(hoy,1)?"mañana":fmtDate(fecha))}</div>
+                <div style={{fontSize:12.5,color:C.black,lineHeight:1.6}}>{c.texto}</div>
+                {c.detalle.length>0&&<div style={{fontSize:11.5,color:C.earth,marginTop:5,lineHeight:1.6}}>{c.detalle.join(" · ")}</div>}
+                {c.quitadas.length>0&&<div style={{fontSize:11.5,color:C.earth,marginTop:5,lineHeight:1.6,textWrap:"pretty"}}><b style={{color:C.black}}>Se quitan:</b> {c.quitadas.join(" · ")}</div>}
+              </div>
+              {yaSalio&&(
+                <div style={{margin:"11px 22px 0",background:"#F7E7E4",borderRadius:12,padding:"11px 14px",fontSize:11.5,color:C.attentionText,lineHeight:1.6,textWrap:"pretty"}}>
+                  Esta ruta ya salió por correo. Al restaurar, se le avisa del cambio a cada técnico afectado — y a quien se quede sin paradas, de su cancelación.
+                </div>
+              )}
+              <div style={{padding:"18px 22px 22px",display:"flex",gap:9,flexWrap:"wrap"}}>
+                <button onClick={function(){hacerRestaurar(v);}} style={{flex:"1 1 200px",padding:"14px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Restaurar esta versión</button>
+                <button onClick={function(){setRestaurar(null);}} style={{padding:"14px 18px",minHeight:48,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cancelar</button>
+              </div>
+            </div>
+          </Overlay>
+        );
+      })()}
+
+      {/* Recuperar una ruta — el historial vive en los datos, no en un respaldo */}
+      {(function(){
+        var v=rutaVersiones(schedules, fecha);
+        var conf=v.conflictos.filter(svRecuperable);
+        /* El panel se abre solo si hay algo que accionar. Antes también abría con
+           `v.canceladas`, que no filtra nada e incluye las bajas deliberadas del
+           administrador: en un día con una cancelación con media tarifa el card
+           aparecía prometiendo devolverlas y sin ningún botón debajo — y encima
+           invitando a deshacer justo lo que no se debe. Las bajas del detector ya
+           las cubre el aviso rojo, que sí usa lista blanca. */
+        if(!conf.length) return null;
+        return (
+          <div style={{background:"#fff",border:"1.5px solid "+C.gray,borderRadius:14,padding:"14px 16px"}}>
+            <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase"}}>Recuperar la ruta</div>
+            <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:19,color:C.black,marginTop:3,lineHeight:1.25}}>
+              {fecha===hoy?"Hoy":(fecha===SCHED.shift(hoy,1)?"Mañana":fmtDate(fecha))} tiene una versión anterior
+            </div>
+            <div style={{fontSize:11.5,color:C.earth,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>
+              Este día se rehizo después de haberse enviado. Abajo está lo que el equipo tiene en su correo y lo que el motor puso encima.
+            </div>
+
+            <div style={{display:"flex",flexDirection:"column",gap:7,margin:"11px 0"}}>
+                {conf.slice(0,10).map(function(g,i){
+                  var otras=g.filas.filter(function(x){ return x.id!==g.enviada.id; });
+                  return (
+                    <div key={i} style={{background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:11,padding:"10px 12px"}}>
+                      <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{g.propiedad}</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:3,marginTop:6}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,fontSize:11}}>
+                          <span style={{flexShrink:0,fontSize:8.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",padding:"2px 8px",borderRadius:"var(--sa-pill)",background:"#E8F2ED",color:"#3d6b52"}}>Se envió</span>
+                          <span style={{color:C.black,fontWeight:600,minWidth:0}}>{vendorNameByEmail(vendors, g.enviada.vendorEmail)||g.enviada.vendorEmail||"Sin técnico"}</span>
+                          <span style={{color:C.taupe,fontSize:10.5}}>{g.enviada.estado==="cancelada"?"dada de baja":"activa"}</span>
+                        </div>
+                        {(g.porAdmin||[]).map(function(x,k){ return (
+                          <div key={"a"+k} style={{display:"flex",alignItems:"center",gap:8,fontSize:11}}>
+                            <span style={{flexShrink:0,fontSize:8.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",padding:"2px 8px",borderRadius:"var(--sa-pill)",background:C.surfaceWarm,color:C.earth,border:"1px solid "+C.gray}}>Cancelada por ti</span>
+                            <span style={{color:C.earth,minWidth:0}}>{vendorNameByEmail(vendors, x.vendorEmail)||x.vendorEmail||"Sin técnico"}</span>
+                            <span style={{color:C.taupe,fontSize:10.5}}>{x.cancelPaga?"con media tarifa · no se toca":"no se toca"}</span>
+                          </div>
+                        ); })}
+                        {otras.filter(function(x){ return !(x.estado==="cancelada"&&x.canceladaPor==="administrador"); }).map(function(x,k){ return (
+                          <div key={k} style={{display:"flex",alignItems:"center",gap:8,fontSize:11}}>
+                            <span style={{flexShrink:0,fontSize:8.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",padding:"2px 8px",borderRadius:"var(--sa-pill)",background:"#F7E7E4",color:C.attentionText}}>Reemplazo</span>
+                            <span style={{color:C.earth,minWidth:0}}>{vendorNameByEmail(vendors, x.vendorEmail)||x.vendorEmail||"Sin técnico"}</span>
+                            <span style={{color:C.taupe,fontSize:10.5}}>{x.origen==="manual"?"puesta a mano · se conserva":(x.estado==="cancelada"?"dada de baja":"activa")}</span>
+                          </div>
+                        ); })}
+                      </div>
+                    </div>
+                  );
+                })}
+                {conf.length>10&&<div style={{fontSize:11,color:C.earth}}>y {conf.length-10} más…</div>}
+            </div>
+
+            <button onClick={function(){ if(window.confirm("Se recupera la ruta del "+fmtDate(fecha)+" tal como se envió por correo, y se descarta lo que el motor puso encima.\n\n¿Continuar?")) volverAEnviada(fecha); }}
+                style={{padding:"12px 18px",minHeight:46,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+              Volver a la ruta que se envió
+            </button>
+          </div>
+        );
+      })()}
+
       {/* Ruta cancelada por error — se puede devolver */}
       {(function(){
         var caidas=huerfanasCanceladas();
@@ -13957,7 +14552,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
               {caidas.length} limpieza{caidas.length===1?"":"s"} cancelada{caidas.length===1?"":"s"} automáticamente
             </div>
             <div style={{fontSize:11.5,color:C.earth,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>
-              El detector las dio de baja porque no encontró su checkout en Hospitable. Si las reservas venían incompletas, la baja fue equivocada: nada se borró y puedes devolverlas a como estaban.
+              El detector las dio de baja porque no encontró su checkout en Hospitable. Si las reservas venían incompletas, la baja fue equivocada: nada se borró y puedes devolverlas a como estaban. Se quitará lo que el motor puso encima y le llegará un correo de corrección a quien haya recibido la ruta equivocada.
             </div>
             <div style={{display:"flex",flexDirection:"column",gap:5,margin:"10px 0"}}>
               {caidas.slice(0,10).map(function(x,i){ return (
@@ -13998,7 +14593,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
             </div>
             <div style={{padding:"18px 22px 22px",display:"flex",gap:9,flexWrap:"wrap"}}>
               <button onClick={function(){
-                onSvSchedules(huerfanas.lista);
+                onSvSchedules(huerfanas.lista, huerfanas.caidas.length+" limpieza(s) dadas de baja: su checkout desapareció");
                 bitacora("programacion", huerfanas.caidas.length+" limpieza(s) dada(s) de baja: su checkout ya no existe en Hospitable — "+huerfanas.caidas.map(function(x){ return x.propiedad+" ("+x.fecha+")"; }).join(" · "));
                 aviso(huerfanas.caidas.length+" limpieza"+(huerfanas.caidas.length===1?"":"s")+" dada"+(huerfanas.caidas.length===1?"":"s")+" de baja. Puedes deshacerlo desde el aviso de arriba.");
                 setHuerfanas(null);
