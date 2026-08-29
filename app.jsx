@@ -12251,12 +12251,13 @@ function horaGT(){ var n=new Date(); return new Date(n.getTime()+(n.getTimezoneO
    por el app, así que `notificadoEn` puede seguir vacío aunque el correo ya salió.
    El panel del admin ya compensaba esto; la vista del técnico no, y por eso a las
    8 pm leía «sin confirmar» una ruta que le habían confirmado a las 6. */
+/* Confirmada = su correo salió. Sin atajos por hora: antes daba por confirmada
+   la ruta de mañana pasadas las 6:00 pm aunque el correo no hubiera salido, que
+   es exactamente la mentira que hizo perder un día de trabajo. */
 function schedConfirmada(s, hoy){
   if(!s) return false;
   if(s.notificadoEn) return true;
-  var f=String(s.fecha||"").slice(0,10);
-  if(f<=hoy) return true;
-  return f===SCHED.shift(hoy,1) && horaGT()>=18;
+  return String(s.fecha||"").slice(0,10)<=hoy;
 }
 function cierresIndex(reps){
   var ix={};
@@ -12818,7 +12819,10 @@ function ConciliacionGate({reservas, schedules, props, vendors, adminVendor, hoy
   var esAdmin = !adminVendor || adminVendor.isAdmin;
   var manana  = SCHED.shift(hoy,1);
   var faltantes = React.useMemo(function(){
-    return checkoutsSinRuta({reservas:reservas, schedules:schedules, props:props, hoy:hoy, dias:1});
+    /* Mismo horizonte que la alerta de Programación: hoy, y mañana solo pasadas
+       las 6:00 pm. Un popup forzado por un checkout de dentro de tres días es
+       una interrupción que no pide ninguna acción. */
+    return checkoutsSinRuta({reservas:reservas, schedules:schedules, props:props, hoy:hoy, dias:horaGT()>=18?1:0});
   },[reservas, schedules, props, hoy]);
   var firma = faltantes.map(function(x){ return x.fecha+"|"+normalize(x.propiedad); }).sort().join(",");
   const [abierto,setAbierto]=useState(false);
@@ -12923,7 +12927,10 @@ function ConciliacionGate({reservas, schedules, props, vendors, adminVendor, hoy
    Esto barre todo el horizonte de una vez y grita en la cabecera. */
 function checkoutsSinRuta(o){
   var reservas=o.reservas||[], schedules=o.schedules||[], props=o.props||[];
-  var hoy=o.hoy, dias=o.dias||3, out=[];
+  /* `dias:0` significa "solo hoy" y es un valor legítimo: no puede caer en el
+     default por ser falsy, o el horizonte se dispara a tres días justo cuando se
+     pidió acortarlo. */
+  var hoy=o.hoy, dias=(o.dias==null?3:o.dias), out=[];
   var hasta=SCHED.shift(hoy,dias);
   /* Lo que YA tiene ruta ese día — incluidas las canceladas a propósito: una
      limpieza que el administrador canceló no es un olvido. */
@@ -13131,12 +13138,46 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
       +(cerradosTxt.length?" · se respetaron las rutas ya enviadas del "+cerradosTxt.map(fmtDate).join(" y "):"")+".";
     return {conservar:conservar, nuevas:nuevas, resumen:resumen, sinAsignar:r.sinAsignar||[], postergadas:r.postergadas||[], desdeCero:desdeCero, incluirHoy:!!incluirHoy};
   }
-  /* Guardar es el acto oficial: de aquí en adelante el equipo ve el reparto. */
-  function aplicarPlan(plan, comoSeCorrio){
+  /* Guardar es el acto oficial. Con `enviar` además sale el correo: el equipo
+     solo ve una limpieza cuando su ruta está confirmada, así que repartir sin
+     enviar deja el reparto en borrador —visible para el admin, invisible para
+     el técnico— y eso es exactamente lo que se quiere en las corridas manuales.
+     La corrida automática sí envía: es lo que reemplaza al botón. */
+  function aplicarPlan(plan, comoSeCorrio, enviar){
     if(!plan) return;
-    onSvSchedules(plan.conservar.concat(plan.nuevas));
-    aviso(plan.resumen);
-    bitacora("programacion",(comoSeCorrio||"Programación manual desde el app")+" — "+plan.resumen);
+    var lista=plan.conservar.concat(plan.nuevas);
+    var extra="";
+    if(enviar){
+      /* SOLO LA VÍSPERA. El motor planifica 3 días para balancear bien, pero se
+         envía únicamente el primero: mañana en la corrida de las 6:00 pm, hoy en
+         la de las 6:00 am. Enviar +2 y +3 no solo contradice lo prometido — los
+         congela, porque `notificadoEn` los vuelve intocables y el motor ya no
+         puede rebalancearlos cuando entren reservas en las próximas 48 horas.
+         Los días lejanos se quedan en borrador hasta su propia víspera. */
+      var fechas=[];
+      plan.nuevas.forEach(function(x){ var f=String(x.fecha).slice(0,10); if(f>=hoy && fechas.indexOf(f)<0) fechas.push(f); });
+      fechas.sort();
+      var f=fechas[0];
+      if(f){
+        /* `cambio` cuando ese día ya había salido: es una actualización, no una
+           ruta nueva que contradice la de anoche. Y en ese caso el correo va solo
+           a quien le cambió algo — al resto no se le mueve el piso por nada. */
+        var yaSalio=(plan.conservar||[]).some(function(x){ return String(x.fecha).slice(0,10)===f && x.notificadoEn; });
+        var afectados=yaSalio ? plan.nuevas.filter(function(x){ return String(x.fecha).slice(0,10)===f; })
+          .map(function(x){ return String(x.vendorEmail||"").toLowerCase(); })
+          .filter(function(e,i,a){ return e && a.indexOf(e)===i; }) : null;
+        var r=enviarRuta(f, {lista:lista, auto:true, cambio:yaSalio, soloEmails:afectados});
+        if(r){
+          lista=r.lista;
+          extra=" Correo "+(yaSalio?"de actualización ":"")+"enviado: "+fmtDate(f)+" a "+r.tecnicos+" técnico"+(r.tecnicos===1?"":"s")+".";
+        }
+      }
+      var borrador=fechas.length-1;
+      if(borrador>0) extra+=" Los otros "+borrador+" día"+(borrador===1?"":"s")+" quedan en borrador hasta su víspera.";
+    }
+    onSvSchedules(lista);
+    aviso(plan.resumen+extra);
+    bitacora("programacion",(comoSeCorrio||"Programación manual desde el app")+" — "+plan.resumen+extra);
   }
   function generar(desdeCero, incluirHoy){
     setBusy("gen");
@@ -13208,7 +13249,16 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
     autoHecho.current=true;
     var t=setTimeout(function(){
       var p=calcularPlan(false, !tarde&&pend.some(function(x){ return x.fecha===hoy; }));
-      if(p.nuevas.length) setPlan(Object.assign({}, p, {auto:true, motivo:"Corrida automática de las "+(tarde?"6:00 pm":"6:00 am")}));
+      if(!p.nuevas.length) return;
+      /* La corrida automática reparte Y ENVÍA. No pide visto bueno y no deja un
+         botón pendiente: si dependiera de que alguien confirme, el equipo
+         amanece sin ruta — el problema que vino a resolver.
+         · 6:00 pm → sale la ruta de mañana.
+         · 6:00 am → si entraron reservas de noche, se reparten y sale un correo
+           de actualización a los técnicos afectados.
+         El humano sigue pudiendo entrar antes de las 6 y mover lo que quiera:
+         mientras la ruta no se ha enviado, el técnico no la ve. */
+      aplicarPlan(p, "Corrida automática de las "+(tarde?"6:00 pm":"6:00 am"), true);
     }, 900);
     return function(){ clearTimeout(t); };
   },[activo]);
@@ -13260,11 +13310,19 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
   /* ─── Notificar: correo con plantilla + aviso en la app */
   /* soloEmails: reenvío dirigido a quienes les cambió la ruta. El resto del
      equipo ya tiene la versión buena y no necesita otro correo. */
-  function notificar(f, soloEmails){
+  /* ── El envío de una ruta ─────────────────────────────────────────────────
+     Recibe la lista sobre la que trabajar en vez de leer el estado, porque la
+     corrida automática reparte y envía en el mismo tick: `schedules` todavía no
+     tiene las filas nuevas. Devuelve la lista ya marcada como confirmada para
+     que quien llama guarde UNA sola vez. */
+  function enviarRuta(f, o){
+    o=o||{};
+    var base=o.lista||schedules||[];
+    var soloEmails=o.soloEmails;
     var filtro=null;
     if(soloEmails&&soloEmails.length){ filtro={}; soloEmails.forEach(function(e){ filtro[String(e||"").toLowerCase()]=1; }); }
-    var delDia=(schedules||[]).filter(function(s){ return String(s.fecha).slice(0,10)===f; });
-    if(!delDia.length){ aviso("No hay nada programado ese día.", false); return; }
+    var delDia=base.filter(function(s){ return String(s.fecha).slice(0,10)===f; });
+    if(!delDia.length){ if(!o.auto) aviso("No hay nada programado ese día.", false); return null; }
     var porTec={};
     delDia.forEach(function(s){ var k=String(s.vendorEmail||"").toLowerCase(); if(!porTec[k])porTec[k]=[]; porTec[k].push(s); });
     var n=0;
@@ -13274,7 +13332,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
       if(!v) return;
       var lista=porTec[em].slice().sort(function(x,y){ return (x.orden||0)-(y.orden||0); });
       try{
-        notifyTemplate([v.notifEmail||v.email], filtro?"programacionCambio":"programacion", {
+        notifyTemplate([v.notifEmail||v.email], (filtro||o.cambio)?"programacionCambio":"programacion", {
           tecnico: vendorDisplay(v), fecha: fmtDate(f), dia: schedDiaNombre(f),
           hora: SCHED.HORA_INI+" a "+SCHED.HORA_FIN,
           total: String(lista.length),
@@ -13291,15 +13349,21 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
       }catch(_){}
       n++;
     });
-    onSvSchedules((schedules||[]).map(function(s){
+    var out=base.map(function(s){
       if(String(s.fecha).slice(0,10)!==f) return s;
       if(filtro&&!filtro[String(s.vendorEmail||"").toLowerCase()]) return s;
       return Object.assign({},s,{estado:"confirmada",notificadoEn:hoy});
-    }));
+    });
     setTocados(function(p){ var u=Object.assign({},p); delete u[f]; return u; });
     setTecCambio(function(p){ var u=Object.assign({},p); delete u[f]; return u; });
-    aviso((filtro?"Cambios del ":"Programación del ")+fmtDate(f)+" enviada a "+n+" técnico"+(n===1?"":"s")+".");
-    bitacora("correo",(filtro?"Cambios de la ruta del ":"Ruta del ")+f+" enviada a mano desde el app a "+n+" técnico"+(n===1?"":"s")+".");
+    if(!o.auto) aviso((filtro?"Cambios del ":"Programación del ")+fmtDate(f)+" enviada a "+n+" técnico"+(n===1?"":"s")+".");
+    bitacora("correo",((filtro||o.cambio)?"Cambios de la ruta del ":"Ruta del ")+f+(o.auto?" enviada automáticamente":" enviada a mano desde el app")+" a "+n+" técnico"+(n===1?"":"s")+".");
+    return {lista:out, tecnicos:n};
+  }
+  /* El botón de siempre: envía y guarda. */
+  function notificar(f, soloEmails){
+    var r=enviarRuta(f, {soloEmails:soloEmails});
+    if(r) onSvSchedules(r.lista);
   }
 
   /* ─── Ausencias: aprobar genera el reajuste; el admin lo confirma */
@@ -13645,7 +13709,12 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
   var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"};
 
   /* Se recalcula en cada render: si el administrador corre el motor, desaparece solo. */
-  var faltantes = checkoutsSinRuta({reservas:reservas, schedules:schedules, props:props, hoy:hoy, dias:3});
+  /* ── Horizonte de la alerta ───────────────────────────────────────────────
+     Solo lo que ya no da tiempo de arreglar solo: HOY, y MAÑANA a partir de las
+     6:00 pm (que es cuando la ruta de mañana debía haber salido). Un checkout
+     del 30 no es un problema el 28 — la corrida de su propia víspera lo va a
+     tomar, y sacarlo en rojo tres días antes convierte la alerta en ruido. */
+  var faltantes = checkoutsSinRuta({reservas:reservas, schedules:schedules, props:props, hoy:hoy, dias:horaGT()>=18?1:0});
   var faltaHoy  = faltantes.some(function(x){ return x.fecha===hoy; });
 
   return (
@@ -13775,7 +13844,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
           <div style={{fontSize:11,color:C.earth,marginTop:10,lineHeight:1.6,textWrap:"pretty"}}>
             {faltantes.some(function(x){return !x.conocida;})
               ? "Las marcadas «Sin registrar» tienen reserva pero no existen en el portafolio: hay que darlas de alta en Propiedades para que el motor las pueda programar."
-              : "Al repartir verás primero cómo queda; nada se le envía a nadie hasta que lo confirmes."}
+              : "Al repartir verás primero cómo queda; nada se le envía a nadie hasta que lo confirmes. Solo aparecen aquí los checkouts de hoy" + (horaGT()>=18 ? " y de mañana." : "; los de mañana entran a las 6:00 pm.")}
           </div>
         </div>
         );
@@ -13787,7 +13856,7 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
           <div>
             <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:20,color:C.black,lineHeight:1.2}}>Programación</div>
             <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>
-              El reparto se calcula al abrir esta pestaña y te lo mostramos para aprobar: nada se le envía a nadie sin tu confirmación. Programa los próximos 3 días. Las reservas de Hospitable se sincronizan solas cada 3 horas. Horario de limpieza: {SCHED.HORA_INI} a {SCHED.HORA_FIN}.
+              A las 6:00 pm se reparte la ruta de mañana y sale el correo, sin que tengas que hacer nada. A las 6:00 am se agregan las reservas que entraron de noche y se avisa del cambio. Puedes entrar antes y mover lo que quieras: el técnico no ve su ruta hasta que el correo sale. Las reservas de Hospitable se sincronizan solas cada 3 horas. Horario de limpieza: {SCHED.HORA_INI} a {SCHED.HORA_FIN}.
             </div>
           </div>
           <div style={{textAlign:"right",flexShrink:0}}>
@@ -14961,6 +15030,15 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
   var emails = vendorEmailSet(vendor);
   var mias = (schedules||[]).filter(function(s){
     if(!s) return false;
+    /* Una ruta futura sin correo enviado es un borrador: el administrador la
+       rebalancea o la rehace, y el equipo no debe mirar algo que va a cambiar.
+       Con una excepción que es una función, no un descuido: quien trabaja fuera
+       de la ciudad tiene `avisoDias:3` y necesita el adelanto para organizar el
+       viaje. A esa gente el borrador SÍ se le muestra, dentro de su ventana y
+       rotulado como tentativo. Lo de hoy y lo pasado se ve siempre. */
+    var sf=String(s.fecha||"").slice(0,10);
+    var limBorrador = parseInt(vendor.avisoDias,10)===3 ? SCHED.shift(hoy,3) : hoy;
+    if(sf>limBorrador && !s.notificadoEn) return false;
     if(s.vendorId && String(s.vendorId)===String(vendor.id)) return true;
     return emails.indexOf(String(s.vendorEmail||"").toLowerCase())>=0;
   }).sort(function(a,b){
@@ -15015,7 +15093,7 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
             <div style={{fontSize:15,fontWeight:600,color:C.black,lineHeight:1.3}}>{idx!=null?(idx+1)+". ":""}{s.propiedad}</div>
             <div style={{fontSize:11.5,color:C.earth,marginTop:4}}>{(s.habitaciones||1)} habitación{(s.habitaciones||1)===1?"":"es"}{SCHED.esProfunda(s.tipo)?"":" · "+s.tipo}</div>
             {SCHED.esProfunda(s.tipo)&&(
-              <div style={{display:"inline-block",marginTop:7,background:C.peach,color:"#fff",fontSize:10.5,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",padding:"5px 12px",borderRadius:"var(--sa-pill)"}}>Limpieza profunda</div>
+              <div style={{display:"inline-block",marginTop:7,background:BADGE["Limpieza profunda"].bg,color:BADGE["Limpieza profunda"].tx,fontSize:10.5,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase",padding:"5px 12px",borderRadius:"var(--sa-pill)"}}>Limpieza profunda</div>
             )}
             <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{horaOk(s.hora,SCHED.HORA_INI)} a {horaOk(s.horaFin,SCHED.HORA_FIN)}</div>
           </div>
@@ -15067,8 +15145,8 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
       <div>
         <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:21,color:C.black,lineHeight:1.2}}>Tu programación</div>
         <div style={{fontSize:11.5,color:C.earth,marginTop:4,lineHeight:1.6,textWrap:"pretty"}}>
-          {esTarde
-            ? <>Tu ruta de mañana ya está confirmada — la tienes aquí abajo{deManana.length?" y también te llegó por correo":""}.</>
+          {esTarde&&deManana.length
+            ? <>Tu ruta de mañana ya está confirmada — la tienes aquí abajo y también te llegó por correo.</>
             : <>Las limpiezas van de {SCHED.HORA_INI} a {SCHED.HORA_FIN}. La del día siguiente te llega confirmada cada tarde a las 6:00 pm{parseInt(vendor.avisoDias,10)===3?", y tu ruta te la adelantamos con tres días para que puedas organizar el viaje":""}.</>}
         </div>
       </div>
@@ -15112,7 +15190,7 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
           <div style={{fontSize:12.5,fontWeight:600,color:C.black,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
             {deHoy.length} limpieza{deHoy.length===1?"":"s"} hoy
             {deHoy.filter(function(s){return SCHED.esProfunda(s.tipo);}).length>0&&(
-              <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"3px 9px",borderRadius:"var(--sa-pill)"}}>
+              <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:BADGE["Limpieza profunda"].tx,background:BADGE["Limpieza profunda"].bg,padding:"3px 9px",borderRadius:"var(--sa-pill)"}}>
                 {deHoy.filter(function(s){return SCHED.esProfunda(s.tipo);}).length===1?"1 profunda":deHoy.filter(function(s){return SCHED.esProfunda(s.tipo);}).length+" profundas"}
               </span>
             )}
@@ -15123,15 +15201,13 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
       {view==="hoy"&&deHoy.map(function(s,i){ return <Tarjeta key={s.id||i} s={s} idx={i}/>; })}
 
       {/* Mañana, a la vista, desde las 6 pm */}
-      {view==="hoy"&&esTarde&&(
+      {view==="hoy"&&esTarde&&deManana.length>0&&(
         <div style={{marginTop:4,display:"flex",flexDirection:"column",gap:9}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,padding:"0 4px"}}>
             <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>Mañana · {fmtDate(manana)}</div>
             <div style={{fontSize:11,color:C.taupe}}>{deManana.length} limpieza{deManana.length===1?"":"s"}</div>
           </div>
-          {deManana.length===0
-            ? <div style={{textAlign:"center",padding:"20px 16px",color:C.earth,fontSize:12.5,background:C.surfaceWarm,borderRadius:14,lineHeight:1.7}}>No tienes limpiezas mañana.<div style={{fontSize:11,color:C.taupe,marginTop:5}}>Si crees que es un error, avísale al administrador.</div></div>
-            : deManana.map(function(s,i){ return <Tarjeta key={s.id||i} s={s} idx={i}/>; })}
+          {deManana.map(function(s,i){ return <Tarjeta key={s.id||i} s={s} idx={i}/>; })}
         </div>
       )}
 
@@ -15158,7 +15234,7 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
                 <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#B4553C",background:"#FCF4F1",padding:"3px 8px",borderRadius:"var(--sa-pill)",flexShrink:0}}>Entrada</span>
               )}
               {d.lista.some(function(s){return SCHED.esProfunda(s.tipo);})&&(
-                <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"3px 8px",borderRadius:"var(--sa-pill)",flexShrink:0}}>Profunda</span>
+                <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:BADGE["Limpieza profunda"].tx,background:BADGE["Limpieza profunda"].bg,padding:"3px 8px",borderRadius:"var(--sa-pill)",flexShrink:0}}>Profunda</span>
               )}
               <span style={{fontSize:16,fontWeight:600,color:C.black,fontVariantNumeric:"tabular-nums",flexShrink:0}}>{d.lista.length}</span>
               <span style={{color:C.taupe,fontSize:12,flexShrink:0}}>{abierto?"▾":"▸"}</span>
