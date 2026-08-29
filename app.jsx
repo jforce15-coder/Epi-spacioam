@@ -11738,18 +11738,43 @@ function BitacoraPanel(){
    Se guardan en la ficha de la propiedad:
      sinProfundas:true · profundaTecnico:"correo" · tarifaEspecial:100
    ═══════════════════════════════════════════════════════════════════════════ */
+/* Una propiedad puede tener las profundas apagadas por dos caminos históricos:
+   la regla `sinProfundas` y una pausa con alcance "solo profundas". Son lo mismo
+   dicho de dos formas, y tener el interruptor en dos bloques distintos fue lo que
+   hizo creer que Mónaco estaba pausado cuando solo tenía la regla.
+   Desde ahora el interruptor vive SOLO en «Propiedades en pausa»; `sinProfundas`
+   se sigue leyendo (el motor lo respeta) y se muestra ahí como lo que es. */
+function sinProfundasActivo(p){
+  if(!p) return false;
+  if(p.sinProfundas) return true;
+  return !!(p.pausa&&p.pausa.activa&&p.pausa.soloProfundas);
+}
+/* La pausa efectiva de una propiedad, normalizando la regla vieja a una pausa
+   indefinida de solo profundas — así aparece en el bloque que la gobierna. */
+function pausaEfectiva(p){
+  if(!p) return null;
+  if(p.pausa&&p.pausa.activa) return p.pausa;
+  if(p.sinProfundas) return {activa:true, desde:"", hasta:"", soloProfundas:true, motivo:"", heredada:true};
+  return null;
+}
+
 function ReglasPropCfg({props, vendors, onSvP}){
   const [abierto,setAbierto]=useState(false);
   const [q,setQ]=useState("");
   const [edit,setEdit]=useState("");
+  const [sel,setSel]=useState({});
+  const [loteTec,setLoteTec]=useState("");
+  const [loteTarifa,setLoteTarifa]=useState("");
 
   var tecs=schedTecnicos(vendors||[]);
-  function tieneRegla(p){ return !!(p&&(p.sinProfundas||p.profundaTecnico||(parseFloat(p.tarifaEspecial)>0))); }
+  function tieneRegla(p){ return !!(p&&(p.profundaTecnico||(parseFloat(p.tarifaEspecial)>0))); }
   var conRegla=(props||[]).filter(tieneRegla);
 
-  function set(nombre, patch){
+  /* Un solo camino de escritura para una propiedad o para diez. */
+  function setMany(nombres, patch){
+    var set={}; (nombres||[]).forEach(function(n){ set[n]=1; });
     onSvP&&onSvP((props||[]).map(function(p){
-      if(p.name!==nombre) return p;
+      if(!set[p.name]) return p;
       var u=Object.assign({},p,patch);
       Object.keys(patch).forEach(function(k){
         if(u[k]===""||u[k]===false||u[k]==null||u[k]===0) delete u[k];
@@ -11757,14 +11782,16 @@ function ReglasPropCfg({props, vendors, onSvP}){
       return u;
     }));
   }
+  function set(nombre, patch){ setMany([nombre], patch); }
+
   function resumen(p){
     var t=[];
-    if(p.sinProfundas) t.push("Sin profundas automáticas");
-    else if(p.profundaTecnico){
+    if(p.profundaTecnico){
       var v=tecs.find(function(x){ return String(x.email||"").toLowerCase()===String(p.profundaTecnico).toLowerCase(); });
       t.push("Profundas · "+(v?vendorDisplay(v):p.profundaTecnico));
     }
     if(parseFloat(p.tarifaEspecial)>0) t.push("Tarifa Q"+p.tarifaEspecial);
+    if(sinProfundasActivo(p)) t.push("Profundas en pausa");
     return t.length?t.join(" · "):"Reglas generales";
   }
 
@@ -11779,6 +11806,22 @@ function ReglasPropCfg({props, vendors, onSvP}){
   });
   if(q.trim()) lista=lista.filter(function(p){ return normalize(p.name||"").indexOf(normalize(q))>=0; });
 
+  var marcadas=Object.keys(sel).filter(function(n){ return sel[n]; });
+  var todasFiltradas=lista.length>0&&lista.every(function(p){ return sel[p.name]; });
+  function toggle(n){ setSel(function(prev){ var u=Object.assign({},prev); if(u[n]) delete u[n]; else u[n]=1; return u; }); }
+  function toggleTodas(){
+    if(todasFiltradas){ setSel({}); return; }
+    var u={}; lista.forEach(function(p){ u[p.name]=1; }); setSel(u);
+  }
+  function aplicarLote(){
+    var patch={};
+    if(loteTec!=="") patch.profundaTecnico=loteTec==="__ninguno"?"":loteTec;
+    if(loteTarifa!=="") patch.tarifaEspecial=loteTarifa==="__quitar"?"":loteTarifa;
+    if(!Object.keys(patch).length) return;
+    setMany(marcadas, patch);
+    setSel({}); setLoteTec(""); setLoteTarifa("");
+  }
+
   return (
     <div style={CARD}>
       <button onClick={function(){setAbierto(!abierto);}} style={{width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
@@ -11786,7 +11829,7 @@ function ReglasPropCfg({props, vendors, onSvP}){
           <div>
             <div style={{fontSize:14,fontWeight:600,color:C.black}}>Reglas por propiedad</div>
             <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>
-              Profundas automáticas, técnico fijo para las profundas y tarifa propia del apartamento.
+              Técnico fijo para las profundas y tarifa propia del apartamento. Puedes marcar varias y aplicar lo mismo a todas.
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:9,flexShrink:0}}>
@@ -11798,42 +11841,46 @@ function ReglasPropCfg({props, vendors, onSvP}){
 
       {abierto&&(
         <div style={{marginTop:13,display:"flex",flexDirection:"column",gap:9}}>
+          <div style={{fontSize:11,color:C.taupe,lineHeight:1.6,textWrap:"pretty",background:C.surfaceWarm,borderRadius:9,padding:"9px 11px"}}>
+            Para apagar las profundas de un apartamento usa «Propiedades en pausa», abajo, con la opción «Solo profundas». Antes ese interruptor también vivía aquí y se prestaba a confusión.
+          </div>
           <input value={q} onChange={function(e){setQ(e.target.value);}} placeholder="Buscar propiedad…" style={IN}/>
+
+          {lista.length>0&&(
+            <button onClick={toggleTodas} style={{alignSelf:"flex-start",padding:"6px 12px",minHeight:34,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+              {todasFiltradas?"Quitar la selección":"Seleccionar las "+lista.length}
+            </button>
+          )}
+
           {lista.length===0&&<div style={{fontSize:12,color:C.taupe,lineHeight:1.6}}>Ninguna propiedad con ese nombre.</div>}
+
           <div style={{display:"flex",flexDirection:"column",gap:7,maxHeight:420,overflowY:"auto"}}>
             {lista.map(function(p){
               var ab=edit===p.name;
               var reg=tieneRegla(p);
+              var on=!!sel[p.name];
               return (
-                <div key={p.id||p.name} style={{background:reg?C.surfaceWarm:"#fff",border:"1px solid "+(reg?C.gray:C.line),borderRadius:10,padding:"11px 12px"}}>
+                <div key={p.id||p.name} style={{background:on?"var(--accent-tint,#FCEFEB)":(reg?C.surfaceWarm:"#fff"),border:"1px solid "+(on?C.peach:(reg?C.gray:C.line)),borderRadius:10,padding:"11px 12px"}}>
                   <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-                    <div style={{minWidth:0}}>
-                      <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{p.name}</div>
-                      <div style={{fontSize:11,color:reg?C.earth:C.taupe,marginTop:3}}>{resumen(p)}</div>
+                    <div style={{display:"flex",gap:10,alignItems:"center",minWidth:0,flex:1}}>
+                      <button onClick={function(){toggle(p.name);}} aria-label="Marcar" style={{flexShrink:0,width:22,height:22,borderRadius:7,border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",padding:0}}>{on&&<Icon name="check" size={13} stroke="#fff"/>}</button>
+                      <div style={{minWidth:0}}>
+                        <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{p.name}</div>
+                        <div style={{fontSize:11,color:reg?C.earth:C.taupe,marginTop:3}}>{resumen(p)}</div>
+                      </div>
                     </div>
                     <button onClick={function(){setEdit(ab?"":p.name);}} style={{flexShrink:0,padding:"7px 13px",minHeight:36,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{ab?"Listo":"Ajustar"}</button>
                   </div>
                   {ab&&(
                     <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid "+C.line,display:"flex",flexDirection:"column",gap:12}}>
                       <div>
-                        <span style={LBL}>Limpiezas profundas</span>
-                        <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-                          {[[false,"Automáticas"],[true,"No programar"]].map(function(it){
-                            var sel=!!p.sinProfundas===it[0];
-                            return <button key={String(it[0])} onClick={function(){ set(p.name,{sinProfundas:it[0]}); }} style={{flex:1,minWidth:130,padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{it[1]}</button>;
-                          })}
-                        </div>
-                        {p.sinProfundas&&<div style={{fontSize:11,color:C.taupe,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>El motor no le montará profundas. Se puede seguir agregando una a mano cuando haga falta.</div>}
+                        <span style={LBL}>Quién hace las profundas aquí</span>
+                        <select value={p.profundaTecnico||""} onChange={function(e){ set(p.name,{profundaTecnico:e.target.value}); }} style={IN}>
+                          <option value="">Cualquiera del equipo (reparto normal)</option>
+                          {tecs.map(function(v){ return <option key={v.id} value={String(v.email||"").toLowerCase()}>{vendorDisplay(v)}</option>; })}
+                        </select>
+                        {sinProfundasActivo(p)&&<div style={{fontSize:11,color:C.taupe,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>Ahora mismo esta propiedad tiene las profundas en pausa, así que el motor no le montará ninguna.</div>}
                       </div>
-                      {!p.sinProfundas&&(
-                        <div>
-                          <span style={LBL}>Quién hace las profundas aquí</span>
-                          <select value={p.profundaTecnico||""} onChange={function(e){ set(p.name,{profundaTecnico:e.target.value}); }} style={IN}>
-                            <option value="">Cualquiera del equipo (reparto normal)</option>
-                            {tecs.map(function(v){ return <option key={v.id} value={String(v.email||"").toLowerCase()}>{vendorDisplay(v)}</option>; })}
-                          </select>
-                        </div>
-                      )}
                       <div>
                         <span style={LBL}>Tarifa de esta propiedad (Q)</span>
                         <input type="number" inputMode="numeric" value={p.tarifaEspecial||""} placeholder="Vacío = la tarifa del técnico"
@@ -11848,6 +11895,35 @@ function ReglasPropCfg({props, vendors, onSvP}){
               );
             })}
           </div>
+
+          {/* Aplicar a varias a la vez */}
+          {marcadas.length>0&&(
+            <div style={{background:C.black,borderRadius:14,padding:"13px 15px",display:"flex",flexDirection:"column",gap:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline",flexWrap:"wrap"}}>
+                <span style={{fontSize:12.5,fontWeight:700,color:"#fff"}}>{marcadas.length} propiedad{marcadas.length===1?"":"es"} marcada{marcadas.length===1?"":"s"}</span>
+                <button onClick={function(){setSel({});}} style={{padding:"5px 11px",minHeight:32,borderRadius:"var(--sa-pill)",border:"1px solid rgba(255,255,255,.35)",background:"transparent",color:"#fff",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Limpiar</button>
+              </div>
+              <div>
+                <span style={{fontSize:9.5,fontWeight:700,color:"rgba(255,255,255,.72)",letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6}}>Quién hace las profundas</span>
+                <select value={loteTec} onChange={function(e){setLoteTec(e.target.value);}} style={Object.assign({},IN,{border:"none"})}>
+                  <option value="">Sin cambio</option>
+                  <option value="__ninguno">Cualquiera del equipo</option>
+                  {tecs.map(function(v){ return <option key={v.id} value={String(v.email||"").toLowerCase()}>{vendorDisplay(v)}</option>; })}
+                </select>
+              </div>
+              <div>
+                <span style={{fontSize:9.5,fontWeight:700,color:"rgba(255,255,255,.72)",letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6}}>Tarifa (Q)</span>
+                <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                  <input type="number" inputMode="numeric" value={loteTarifa==="__quitar"?"":loteTarifa} placeholder="Sin cambio"
+                    onChange={function(e){setLoteTarifa(e.target.value);}} style={Object.assign({},IN,{border:"none",flex:"1 1 130px",width:"auto"})}/>
+                  <button onClick={function(){setLoteTarifa(loteTarifa==="__quitar"?"":"__quitar");}} style={{padding:"0 14px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1px solid rgba(255,255,255,.35)",background:loteTarifa==="__quitar"?"#fff":"transparent",color:loteTarifa==="__quitar"?C.black:"#fff",fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif",flexShrink:0}}>Quitar tarifa</button>
+                </div>
+              </div>
+              <button onClick={aplicarLote} disabled={loteTec===""&&loteTarifa===""} style={{padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:(loteTec===""&&loteTarifa==="")?"rgba(255,255,255,.28)":"#fff",color:(loteTec===""&&loteTarifa==="")?"rgba(255,255,255,.7)":C.black,fontSize:12.5,fontWeight:700,cursor:(loteTec===""&&loteTarifa==="")?"not-allowed":"pointer",fontFamily:"Montserrat,sans-serif"}}>
+                Aplicar a las {marcadas.length}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -11863,23 +11939,38 @@ function ReglasPropCfg({props, vendors, onSvP}){
    ═══════════════════════════════════════════════════════════════════════════ */
 function PausasCfg({props, onSvP, hoy}){
   const [abierto,setAbierto]=useState(false);
-  const [nueva,setNueva]=useState(null);   /* {propiedad, modo, desde, hasta, motivo} */
+  const [nueva,setNueva]=useState(null);   /* {modo, alcance, desde, hasta, motivo} */
+  const [sel,setSel]=useState({});
+  const [q,setQ]=useState("");
 
-  var pausadas=(props||[]).filter(function(p){ return p.pausa&&p.pausa.activa; });
-  var vigentes=pausadas.filter(function(p){ return SCHED.enPausa(p,hoy); });
+  /* La regla vieja `sinProfundas` se lee como una pausa de solo profundas: así
+     Mónaco aparece aquí sin tener que migrar nada a mano. */
+  var pausadas=(props||[]).filter(function(p){ return !!pausaEfectiva(p); });
+  var vigentes=pausadas.filter(function(p){ return SCHED.enPausa(p,hoy)||sinProfundasActivo(p); });
 
-  function guardar(nombre, pausa){
+  function guardar(nombres, pausa){
+    var set={}; (nombres||[]).forEach(function(n){ set[n]=1; });
     onSvP&&onSvP((props||[]).map(function(p){
-      if(p.name!==nombre) return p;
+      if(!set[p.name]) return p;
       var u=Object.assign({},p);
-      if(pausa) u.pausa=pausa; else delete u.pausa;
+      if(pausa){
+        u.pausa=pausa;
+        /* `sinProfundas` es la puerta que el motor revisa primero. Se mantiene en
+           sincronía con la pausa para que las dos lecturas digan lo mismo. */
+        if(pausa.soloProfundas) u.sinProfundas=true; else delete u.sinProfundas;
+      } else {
+        delete u.pausa;
+        delete u.sinProfundas;
+      }
       return u;
     }));
   }
   function crear(){
-    if(!nueva||!nueva.propiedad) return;
+    if(!nueva) return;
+    var elegidas=Object.keys(sel).filter(function(n){ return sel[n]; });
+    if(!elegidas.length) return;
     var porFechas=nueva.modo==="fechas";
-    guardar(nueva.propiedad,{
+    guardar(elegidas,{
       activa:true,
       desde:porFechas?(nueva.desde||""):"",
       hasta:porFechas?(nueva.hasta||""):"",
@@ -11887,10 +11978,11 @@ function PausasCfg({props, onSvP, hoy}){
       soloProfundas:(nueva.alcance||"todo")==="prof",
       creadaEn:hoy
     });
-    setNueva(null);
+    setNueva(null); setSel({}); setQ("");
   }
   function textoPausa(p){
-    var d=p.pausa.desde, h=p.pausa.hasta;
+    var pa=pausaEfectiva(p)||{};
+    var d=pa.desde, h=pa.hasta;
     if(!d&&!h) return "Indefinida";
     if(d&&h) return fmtDate(d)+" al "+fmtDate(h);
     if(d) return "Desde el "+fmtDate(d);
@@ -11900,8 +11992,17 @@ function PausasCfg({props, onSvP, hoy}){
   var CARD={background:"#fff",borderRadius:14,border:"1px solid "+C.gray,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"};
   var LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6};
   var IN={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:9,padding:"10px 12px",fontSize:12.5,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",minHeight:44,color:C.black};
-  var disponibles=(props||[]).filter(function(p){ return !(p.pausa&&p.pausa.activa); })
+
+  var disponibles=(props||[]).filter(function(p){ return !pausaEfectiva(p); })
     .slice().sort(function(a,b){ return String(a.name||"")<String(b.name||"")?-1:1; });
+  var filtradas=q.trim()?disponibles.filter(function(p){ return normalize(p.name||"").indexOf(normalize(q))>=0; }):disponibles;
+  var elegidas=Object.keys(sel).filter(function(n){ return sel[n]; });
+  var todasFiltradas=filtradas.length>0&&filtradas.every(function(p){ return sel[p.name]; });
+  function toggle(n){ setSel(function(prev){ var u=Object.assign({},prev); if(u[n]) delete u[n]; else u[n]=1; return u; }); }
+  function toggleTodas(){
+    if(todasFiltradas){ var u=Object.assign({},sel); filtradas.forEach(function(p){ delete u[p.name]; }); setSel(u); return; }
+    var u2=Object.assign({},sel); filtradas.forEach(function(p){ u2[p.name]=1; }); setSel(u2);
+  }
 
   return (
     <div style={CARD}>
@@ -11910,7 +12011,7 @@ function PausasCfg({props, onSvP, hoy}){
           <div>
             <div style={{fontSize:14,fontWeight:600,color:C.black}}>Propiedades en pausa</div>
             <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>
-              Fuera del reparto automático — estancias largas, remodelación, apartamentos fuera de servicio.
+              Fuera del reparto automático — estancias largas, remodelación, apartamentos fuera de servicio. Aquí también se apagan las profundas.
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:9,flexShrink:0}}>
@@ -11924,45 +12025,63 @@ function PausasCfg({props, onSvP, hoy}){
         <div style={{marginTop:13,display:"flex",flexDirection:"column",gap:9}}>
           {pausadas.length===0&&<div style={{fontSize:12,color:C.taupe,lineHeight:1.6}}>Ninguna propiedad está en pausa. Todas entran al reparto automático.</div>}
           {pausadas.map(function(p){
-            var activa=SCHED.enPausa(p,hoy);
+            var pa=pausaEfectiva(p)||{};
+            var activa=SCHED.enPausa(p,hoy)||sinProfundasActivo(p);
             return (
               <div key={p.id||p.name} style={{background:C.surfaceWarm,borderRadius:10,padding:"12px 13px"}}>
                 <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",flexWrap:"wrap"}}>
                   <div style={{minWidth:0}}>
                     <div style={{fontSize:12.5,fontWeight:600,color:C.black}}>{p.name}</div>
-                    <div style={{fontSize:11,color:C.earth,marginTop:3}}>
-                      {textoPausa(p)}
-                      {p.pausa.soloProfundas&&<span style={{color:C.earth}}> · solo profundas</span>}
-                      {!activa&&<span style={{color:C.taupe}}> · no aplica hoy</span>}
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginTop:5}}>
+                      <span style={{fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",padding:"3px 9px",borderRadius:"var(--sa-pill)",background:pa.soloProfundas?BADGE["Limpieza profunda"].bg:C.black,color:pa.soloProfundas?BADGE["Limpieza profunda"].tx:"#fff"}}>{pa.soloProfundas?"Solo profundas":"Todo el reparto"}</span>
+                      <span style={{fontSize:11,color:C.earth}}>{textoPausa(p)}</span>
+                      {!activa&&<span style={{fontSize:11,color:C.taupe}}>· no aplica hoy</span>}
                     </div>
-                    {p.pausa.motivo&&<div style={{fontSize:11,color:C.taupe,marginTop:3,lineHeight:1.5}}>“{p.pausa.motivo}”</div>}
+                    {pa.motivo&&<div style={{fontSize:11,color:C.taupe,marginTop:4,lineHeight:1.5}}>“{pa.motivo}”</div>}
                   </div>
-                  <button onClick={function(){guardar(p.name,null);}} style={{flexShrink:0,padding:"7px 13px",minHeight:36,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Reactivar</button>
+                  <div style={{display:"flex",gap:7,flexShrink:0,flexWrap:"wrap"}}>
+                    <button onClick={function(){ guardar([p.name], Object.assign({},pa,{activa:true,soloProfundas:!pa.soloProfundas,creadaEn:pa.creadaEn||hoy})); }} style={{padding:"7px 12px",minHeight:36,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{pa.soloProfundas?"Pausar todo":"Solo profundas"}</button>
+                    <button onClick={function(){guardar([p.name],null);}} style={{padding:"7px 13px",minHeight:36,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.black,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Reactivar</button>
+                  </div>
                 </div>
               </div>
             );
           })}
 
           {!nueva
-            ? <button onClick={function(){setNueva({propiedad:"",modo:"indef",alcance:"todo",desde:hoy,hasta:"",motivo:""});}} style={{width:"100%",padding:"11px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>+ Pausar una propiedad</button>
+            ? <button onClick={function(){setNueva({modo:"indef",alcance:"prof",desde:hoy,hasta:"",motivo:""});setSel({});setQ("");}} style={{width:"100%",padding:"11px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>+ Pausar propiedades</button>
             : <div style={{display:"flex",flexDirection:"column",gap:11,borderTop:"1px solid "+C.line,paddingTop:13}}>
                 <div>
-                  <span style={LBL}>Propiedad</span>
-                  <select value={nueva.propiedad} onChange={function(e){setNueva(Object.assign({},nueva,{propiedad:e.target.value}));}} style={IN}>
-                    <option value="">Elegir…</option>
-                    {disponibles.map(function(p){ return <option key={p.id||p.name} value={p.name}>{p.name}</option>; })}
-                  </select>
+                  <span style={LBL}>Propiedades {elegidas.length>0?"· "+elegidas.length+" marcada"+(elegidas.length===1?"":"s"):""}</span>
+                  <input value={q} onChange={function(e){setQ(e.target.value);}} placeholder="Buscar propiedad…" style={IN}/>
+                  {filtradas.length>0&&(
+                    <button onClick={toggleTodas} style={{marginTop:7,padding:"6px 12px",minHeight:34,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+                      {todasFiltradas?"Quitar la selección":"Seleccionar las "+filtradas.length}
+                    </button>
+                  )}
+                  <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:5,maxHeight:260,overflowY:"auto"}}>
+                    {filtradas.length===0&&<div style={{fontSize:12,color:C.taupe,lineHeight:1.6}}>Ninguna propiedad disponible con ese nombre.</div>}
+                    {filtradas.map(function(p){
+                      var on=!!sel[p.name];
+                      return (
+                        <button key={p.id||p.name} onClick={function(){toggle(p.name);}} style={{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",background:on?"var(--accent-tint,#FCEFEB)":"#fff",border:"1px solid "+(on?C.peach:C.line),borderRadius:10,padding:"9px 11px",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
+                          <span style={{flexShrink:0,width:20,height:20,borderRadius:6,border:"1.5px solid "+(on?C.black:C.gray),background:on?C.black:"#fff",display:"flex",alignItems:"center",justifyContent:"center"}}>{on&&<Icon name="check" size={12} stroke="#fff"/>}</span>
+                          <span style={{fontSize:12,fontWeight:600,color:C.black,minWidth:0}}>{p.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div>
                   <span style={LBL}>Qué se pausa</span>
                   <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-                    {[["todo","Todo el reparto"],["prof","Solo profundas"]].map(function(it){
-                      var sel=(nueva.alcance||"todo")===it[0];
-                      return <button key={it[0]} onClick={function(){setNueva(Object.assign({},nueva,{alcance:it[0]}));}} style={{flex:1,minWidth:140,padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{it[1]}</button>;
+                    {[["prof","Solo profundas"],["todo","Todo el reparto"]].map(function(it){
+                      var s2=(nueva.alcance||"prof")===it[0];
+                      return <button key={it[0]} onClick={function(){setNueva(Object.assign({},nueva,{alcance:it[0]}));}} style={{flex:1,minWidth:140,padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s2?C.black:C.gray),background:s2?C.black:"#fff",color:s2?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{it[1]}</button>;
                     })}
                   </div>
                   <div style={{fontSize:11,color:C.taupe,marginTop:6,lineHeight:1.55,textWrap:"pretty"}}>
-                    {(nueva.alcance||"todo")==="prof"
+                    {(nueva.alcance||"prof")==="prof"
                       ? "La limpieza de checkout se sigue programando normal. Solo se deja de montar la profunda — es lo que aplica a las estancias largas."
                       : "La propiedad sale de todo: ni limpieza de checkout ni profunda. Es para remodelación o apartamento fuera de servicio."}
                   </div>
@@ -11971,8 +12090,8 @@ function PausasCfg({props, onSvP, hoy}){
                   <span style={LBL}>Duración</span>
                   <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
                     {[["indef","Indefinida"],["fechas","Por fechas"]].map(function(it){
-                      var sel=nueva.modo===it[0];
-                      return <button key={it[0]} onClick={function(){setNueva(Object.assign({},nueva,{modo:it[0]}));}} style={{flex:1,minWidth:120,padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(sel?C.black:C.gray),background:sel?C.black:"#fff",color:sel?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{it[1]}</button>;
+                      var s3=nueva.modo===it[0];
+                      return <button key={it[0]} onClick={function(){setNueva(Object.assign({},nueva,{modo:it[0]}));}} style={{flex:1,minWidth:120,padding:"0 15px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+(s3?C.black:C.gray),background:s3?C.black:"#fff",color:s3?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{it[1]}</button>;
                     })}
                   </div>
                 </div>
@@ -11987,8 +12106,8 @@ function PausasCfg({props, onSvP, hoy}){
                   Lo ya programado no se borra: quítalo del día si corresponde.
                 </div>
                 <div style={{display:"flex",gap:9,flexWrap:"wrap"}}>
-                  <button onClick={crear} disabled={!nueva.propiedad||(nueva.modo==="fechas"&&!nueva.desde)} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"none",background:(!nueva.propiedad||(nueva.modo==="fechas"&&!nueva.desde))?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Pausar</button>
-                  <button onClick={function(){setNueva(null);}} style={{padding:"12px 18px",minHeight:46,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cancelar</button>
+                  <button onClick={crear} disabled={!elegidas.length||(nueva.modo==="fechas"&&!nueva.desde)} style={{flex:1,minWidth:150,padding:"12px",minHeight:46,borderRadius:"var(--sa-pill)",border:"none",background:(!elegidas.length||(nueva.modo==="fechas"&&!nueva.desde))?C.gray:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>{elegidas.length>1?"Pausar las "+elegidas.length:"Pausar"}</button>
+                  <button onClick={function(){setNueva(null);setSel({});}} style={{padding:"12px 18px",minHeight:46,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Cancelar</button>
                 </div>
               </div>}
         </div>
@@ -13056,6 +13175,31 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
      no hay zona, edificio ni habitaciones. */
   var resUtiles = (reservas||[]).filter(function(x){ return x && x.propiedad; }).length;
 
+  /* Una limpieza automática se cae si su checkout desapareció de Hospitable. El
+     servidor ya lo hace en sus dos corridas; esto lo repite del lado del
+     navegador para que una sincronización manual no deje la ruta contradiciendo
+     a las reservas que acaba de traer. */
+  function cancelarHuerfanas(lista, reservasNuevas){
+    var man=SCHED.shift(hoy,1), salidas={};
+    (reservasNuevas||[]).forEach(function(r){
+      var co=String(r&&r.checkOut||"").slice(0,10);
+      if(co) salidas[co+"|"+normalize(r.propiedad)]=1;
+    });
+    var caidas=[];
+    var out=(lista||[]).map(function(s){
+      if(!s) return s;
+      var f=String(s.fecha||"").slice(0,10);
+      if(f!==hoy&&f!==man) return s;
+      if(s.origen==="manual"||s.origen==="visita"||s.estado==="cancelada") return s;
+      if(SCHED.esProfunda(s.tipo)) return s;
+      var k=(s.cubreCheckout?String(s.cubreCheckout).slice(0,10):f)+"|"+normalize(s.propiedad);
+      if(salidas[k]) return s;
+      caidas.push(s);
+      return Object.assign({},s,{estado:"cancelada",canceladaEn:hoy,motivoCancel:"El checkout ya no existe en Hospitable"});
+    });
+    return {lista:out, caidas:caidas};
+  }
+
   /* ─── Traer reservas de Hospitable (checkouts + check-ins + habitaciones) */
   async function sincronizar(silencioso){
     setBusy("sync");
@@ -13066,6 +13210,11 @@ function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, re
       if(!list.length){ if(!silencioso) aviso("Hospitable no devolvió reservas para los próximos 21 días.", false); }
       else {
         onSvReservas(list);
+        var h=cancelarHuerfanas(schedules, list);
+        if(h.caidas.length){
+          onSvSchedules(h.lista);
+          bitacora("programacion", h.caidas.length+" limpieza(s) cancelada(s): su checkout ya no existe en Hospitable — "+h.caidas.map(function(x){ return x.propiedad+" ("+x.fecha+")"; }).join(" · "));
+        }
         /* Las habitaciones vienen con la propiedad: se guardan para el motor. */
         if(onSvP && r.propiedades && r.propiedades.length){
           var ix={}; r.propiedades.forEach(function(p){ ix[normalize(p.nombre)]=p; });
