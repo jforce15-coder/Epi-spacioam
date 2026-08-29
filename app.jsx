@@ -9070,6 +9070,8 @@ var ICONS = {
   clip:"M21 11.5l-8.6 8.6a5 5 0 01-7-7l8.5-8.5a3.3 3.3 0 014.7 4.7l-8.5 8.5a1.7 1.7 0 01-2.4-2.4l7.8-7.8",
   bell:"M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0",
   wifi:"M2.5 8.5a15 15 0 0119 0M5.5 12.2a10.5 10.5 0 0113 0M8.6 15.9a6 6 0 016.8 0M12 19.8v.05",
+  /* Historial: reloj con la flecha que vuelve atrás. */
+  history:"M3.5 5.5v4.2h4.2M3.9 9.7A8.5 8.5 0 1112 20.5M12 8.2V12l3 1.8",
 };
 function Icon({name, size, stroke, width, style}) {
   var d = ICONS[name] || "";
@@ -13811,46 +13813,50 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
     setPlan(Object.assign({}, p, {motivo:"Checkouts de hoy pasados a mañana"}));
   }
 
-  /* ── La corrida de las 6:00 pm y la de las 6:00 am ────────────────────────
-     El motor de reparto vive aquí, en el navegador, no en el servidor. Así que
-     "corre a las 6:00 pm" solo se cumple si alguien tiene la app abierta a esa
-     hora — y el 28 de agosto nadie la tuvo: el día entero quedó sin rutas.
-     Esto lo arregla desde este lado: al entrar un administrador después de la
-     hora de corte, si la ventana está descubierta el reparto se calcula solo y
-     se presenta para aprobar. No se guarda a espaldas de nadie, pero tampoco
-     hay que acordarse de apretar un botón.
-     Lo definitivo es portar el motor a Apps Script; mientras tanto, esto cierra
-     el hueco cada vez que alguien abre Programación. */
+  /* ── Red de seguridad, NO un segundo motor ────────────────────────────────
+     Esto empezó como el motor de reparto: cuando vivía solo en el navegador,
+     "corre a las 6:00 pm" únicamente se cumplía si alguien tenía la app abierta
+     a esa hora. Repartía Y enviaba el correo por su cuenta.
+
+     Ya no. El motor vive en Apps Script (cronProgramar18 a las 6:00 pm y
+     cronRevisar06 a las 6:00 am), y esa duplicación era dañina: el disparador de
+     aquí no es la hora sino abrir Programación, así que un administrador entrando
+     a las 10 am o a las 3 pm mandaba una corrida etiquetada "6:00 am" con correo
+     a los técnicos. Si el cron ya había repartido, el equipo recibía una segunda
+     ruta —posiblemente distinta, porque son dos motores— para el mismo día.
+
+     Un correo de ruta sale por tres razones y ninguna más: el motor de las 6 pm,
+     la revisión de las 6 am, y un botón que aprieta el administrador. Abrir una
+     pestaña no es ninguna de las tres.
+
+     Lo que queda es la parte que sí servía: si al entrar hay checkouts sin ruta
+     —porque el cron falló o no está configurado—, el reparto se calcula y se
+     PRESENTA para aprobar. Nada se guarda y nada se envía hasta que alguien lo
+     confirme. */
   useEffect(function(){
     /* Solo con Programación a la vista. El panel está montado siempre (oculto con
        display:none), así que sin esta guarda el modal saltaría encima de
        Dashboard o Adelantos — y encima del lightbox de conciliación, que se abre
-       200 ms antes con la misma condición. Encadenados quedan en orden: el
-       lightbox avisa, su botón trae aquí, y aquí aparece el reparto. */
+       200 ms antes con la misma condición. */
     if(!activo || autoHecho.current) return;
     var h=horaGT();
     if(h<6) return;                       /* de madrugada no se decide nada */
     var tarde=h>=18;
     var pend=checkoutsSinRuta({reservas:reservas, schedules:schedules, props:props, hoy:hoy, dias:tarde?2:1});
     if(!pend.length) return;
-    /* Pasado el corte, los checkouts de hoy NO se programan solos para hoy: esa
-       es una decisión entre alcanzarlos o pasarlos a mañana, y la toma una
-       persona en el bloque de arriba. La corrida automática se limita a mañana. */
+    /* Pasado el corte, los checkouts de hoy NO se proponen para hoy: esa es una
+       decisión entre alcanzarlos o pasarlos a mañana, y la toma una persona en el
+       bloque de arriba. */
     var utiles=tarde?pend.filter(function(x){ return x.fecha!==hoy; }):pend;
     if(!utiles.length) return;
     autoHecho.current=true;
     var t=setTimeout(function(){
       var p=calcularPlan(false, !tarde&&pend.some(function(x){ return x.fecha===hoy; }));
       if(!p.nuevas.length) return;
-      /* La corrida automática reparte Y ENVÍA. No pide visto bueno y no deja un
-         botón pendiente: si dependiera de que alguien confirme, el equipo
-         amanece sin ruta — el problema que vino a resolver.
-         · 6:00 pm → sale la ruta de mañana.
-         · 6:00 am → si entraron reservas de noche, se reparten y sale un correo
-           de actualización a los técnicos afectados.
-         El humano sigue pudiendo entrar antes de las 6 y mover lo que quiera:
-         mientras la ruta no se ha enviado, el técnico no la ve. */
-      aplicarPlan(p, "Corrida automática de las "+(tarde?"6:00 pm":"6:00 am"), true);
+      setPlan(Object.assign({}, p, {
+        motivo:"Propuesta automática — había checkouts sin ruta al abrir",
+        sinCron:true
+      }));
     }, 900);
     return function(){ clearTimeout(t); };
   },[activo]);
@@ -14342,31 +14348,28 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
   return (
     <div style={{maxWidth:760,margin:"0 auto",padding:"18px 16px 90px",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:13}}>
 
-      {/* Historial de versiones del día */}
-      {(function(){
+      {/* Historial de versiones del día — se abre desde el reloj de «Rutas del día».
+          Antes era una tarjeta más en la columna y quedaba enterrada entre bloques
+          de configuración: nadie la encontraba. */}
+      {verHist&&(function(){
         var hist=(schedVers&&schedVers[fecha])||[];
-        var bits=verHist?bitDelDia(fecha):[];
-        /* El panel se abre aunque todavía no haya versiones: la bitácora sola ya
-           cuenta la historia del día, y esconderlo haría creer que no pasó nada. */
-        if(hist.length<2 && !svFilasDe(schedules,fecha).length) return null;
+        var bits=bitDelDia(fecha);
         var actual=svFilasDe(schedules, fecha);
         var hActual=svHuella(actual);
         var orden=hist.slice().sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
         return (
-          <div style={{background:"#fff",border:"1px solid "+C.gray,borderRadius:14,padding:"15px 16px",boxShadow:"var(--sa-shadow-sm)"}}>
-            <button onClick={function(){setVerHist(!verHist);}} style={{width:"100%",background:"none",border:"none",padding:0,textAlign:"left",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
-                <div>
-                  <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase"}}>Historial</div>
-                  <div style={{fontSize:14,fontWeight:600,color:C.black,marginTop:3}}>{hist.length>1?hist.length+" versiones de esta ruta":"Historial de esta ruta"}</div>
-                  <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>Cada cambio queda guardado con hora y autor. Puedes volver a cualquier versión.</div>
+          <Overlay>
+            <div onClick={function(e){e.stopPropagation();}} style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:560,maxHeight:"88vh",overflowY:"auto",boxShadow:"var(--sa-shadow-lg,0 28px 80px rgba(62,63,63,.10))"}}>
+              <div style={{padding:"20px 22px 0",display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start"}}>
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase"}}>Historial · {fecha===hoy?"hoy":(fecha===SCHED.shift(hoy,1)?"mañana":fmtDate(fecha))}</div>
+                  <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,color:C.black,lineHeight:1.2,marginTop:8}}>{hist.length>1?hist.length+" versiones de esta ruta":"Versiones de esta ruta"}</div>
+                  <div style={{fontSize:11.5,color:C.earth,marginTop:5,lineHeight:1.6,textWrap:"pretty"}}>Cada cambio queda guardado con hora y autor. Puedes volver a cualquier versión.</div>
                 </div>
-                <span style={{color:C.taupe,fontSize:13,flexShrink:0}}>{verHist?"▾":"▸"}</span>
+                <button onClick={function(){setVerHist(false);}} aria-label="Cerrar" style={{flexShrink:0,width:36,height:36,borderRadius:"50%",border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}><Icon name="x" size={16}/></button>
               </div>
-            </button>
-
-            {verHist&&(
-              <div style={{marginTop:13}}>
+              <div style={{padding:"0 22px 22px"}}>
+              <div style={{marginTop:15}}>
                 {bitEv===null&&<div style={{fontSize:11.5,color:C.taupe,lineHeight:1.6}}>Leyendo la bitácora…</div>}
                 {bitErr&&<div style={{fontSize:11.5,color:C.attentionText,lineHeight:1.6,marginBottom:8}}>{bitErr}</div>}
                 {(function(){
@@ -14440,8 +14443,9 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
                   </div>
                 )}
               </div>
-            )}
-          </div>
+              </div>
+            </div>
+          </Overlay>
         );
       })()}
 
@@ -14620,6 +14624,11 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
               <div style={{padding:"20px 22px 0"}}>
                 <span style={{display:"inline-block",padding:"5px 12px",borderRadius:"var(--sa-pill)",background:plan.auto?"#E8EEF4":C.surfaceWarm,color:plan.auto?"#3B6691":C.earth,fontSize:10.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase"}}>{plan.auto?"Corrida automática":"Revisa antes de enviar"}</span>
                 <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:24,color:C.black,lineHeight:1.2,marginTop:12}}>{plan.nuevas.length} limpieza{plan.nuevas.length===1?"":"s"} por repartir</div>
+                {plan.sinCron&&(
+                  <div style={{marginTop:10,background:"#F8ECE9",border:"1px solid #E9C9C2",borderRadius:11,padding:"11px 13px",fontSize:11.5,color:C.attentionText,lineHeight:1.6,textWrap:"pretty"}}>
+                    Había checkouts sin ruta al abrir, así que el reparto se calculó solo. Nada se guardó ni se envió. Si esto pasa seguido, revisa que los activadores de las 6:00 pm y 6:00 am estén corriendo en el servidor.
+                  </div>
+                )}
                 <div style={{fontSize:12.5,color:C.earth,marginTop:6,lineHeight:1.65,textWrap:"pretty"}}>
                   Así queda el reparto. Nada se le ha enviado a nadie todavía — al confirmar, esta pasa a ser la ruta oficial.
                 </div>
@@ -14795,15 +14804,6 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
           <div style={{fontSize:12,color:C.earth,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>{schedErr}</div>
         </div>
       )}
-
-      {/* Día doble — pago al doble por feriado */}
-      <DiaDoblePanel schedules={schedules} reps={reps} vendors={vendors} onUpsert={onUpsert} hoy={hoy} onAviso={aviso} onLog={bitacora}/>
-
-      {/* Códigos de acceso — se llenan aquí (validez de 2 semanas), no en Configuración */}
-      <CodigosProgramacionBlock fecha={fecha} schedules={schedules} props={props} codigos={codigos||{}} onSvCodigos={onSvCodigos} defaultOpen={false}/>
-
-      {/* Intercambios entre técnicos — bitácora minimizada */}
-      <SwapsBitacora swaps={swaps||[]}/>
 
       {/* Ausencias por aprobar */}
       {pendAus.length>0&&(
@@ -15143,6 +15143,12 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
             <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
               <div style={{fontSize:14,fontWeight:600,color:C.black}}>Rutas del día</div>
               {farolActivo&&delDia.length>0&&<Farol estado={farol(delDia)} hechas={hechasDe(delDia)} total={delDia.length} size={14}/>}
+              {/* El historial vive aquí: es la ruta de este día, no una sección aparte. */}
+              <button onClick={function(){setVerHist(true);}} title="Ver versiones de esta ruta" aria-label="Ver versiones de esta ruta"
+                style={{position:"relative",width:34,height:34,borderRadius:"50%",border:"1px solid "+C.gray,background:"#fff",color:C.earth,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0,flexShrink:0}}>
+                <Icon name="history" size={17}/>
+                {(((schedVers&&schedVers[fecha])||[]).length>1)&&<span style={{position:"absolute",top:-1,right:-1,width:8,height:8,borderRadius:"50%",background:C.peach,border:"1.5px solid #fff"}}/>}
+              </button>
             </div>
             <div style={{display:"flex",background:C.surfaceWarm,borderRadius:"var(--sa-pill)",padding:3,gap:3,border:"1px solid "+C.line}}>
               {[["apto","Por apartamento"],["tec","Por técnico"],["zona","Por zona"]].map(function(it){
@@ -15486,6 +15492,14 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
           configuración y vive plegado más abajo. */}
       <ProfundasCfg props={props} reps={reps} schedules={schedules} hoy={hoy} vendors={tecs} onSvSchedules={onSvSchedules}/>
 
+      {/* El mismo pareto del Dashboard Ejecutivo: dónde está el atraso de profundas
+          y desde ahí se programa. Es la pregunta que sigue a "cuánto lleva cada
+          propiedad", así que va pegado al bloque de arriba. */}
+      <ProfundasAnalisis reps={reps} props={props} vendors={vendors} schedules={schedules} onSvSchedules={onSvSchedules}/>
+
+      {/* Intercambios entre técnicos — debajo de las profundas */}
+      <SwapsBitacora swaps={swaps||[]} hoy={hoy}/>
+
       {/* Asignación manual */}
       <div style={CARD}>
         {!manual
@@ -15529,7 +15543,7 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
             <div>
               <div style={{fontSize:14,fontWeight:600,color:C.black}}>Configuración avanzada</div>
               <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>
-                Reglas por propiedad, pausas, anticipación del aviso, importar una ruta, diagnóstico y bitácora.
+                Reglas por propiedad, pausas, día doble, códigos de acceso, anticipación del aviso, importar una ruta, diagnóstico y bitácora.
               </div>
             </div>
             <span style={{color:C.taupe,fontSize:13,flexShrink:0}}>{avanzado?"▾":"▸"}</span>
@@ -15539,6 +15553,9 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
           <div style={{marginTop:13,display:"flex",flexDirection:"column",gap:11}}>
             <ReglasPropCfg props={props} vendors={vendors} onSvP={onSvP}/>
             <PausasCfg props={props} onSvP={onSvP} hoy={hoy}/>
+            {/* Día doble y códigos de acceso se tocan de vez en cuando: viven aquí. */}
+            <DiaDoblePanel schedules={schedules} reps={reps} vendors={vendors} onUpsert={onUpsert} hoy={hoy} onAviso={aviso} onLog={bitacora}/>
+            <CodigosProgramacionBlock fecha={fecha} schedules={schedules} props={props} codigos={codigos||{}} onSvCodigos={onSvCodigos} defaultOpen={false}/>
             <AnticipacionCfg vendors={vendors} onSvV={onSvV}/>
             <ImportarRuta props={props} vendors={vendors} schedules={schedules} onSvSchedules={onSvSchedules} hoy={hoy} onAviso={function(m){ aviso(m); }}/>
             <DiagProgramacion props={props} reservas={reservas} schedules={schedules} vendors={vendors} ausencias={ausencias} reps={reps} hoy={hoy} fechaVista={fecha}/>
@@ -15862,9 +15879,15 @@ function SwapLightbox({vendor, allVendors, swaps, onSvSwaps, allSchedules, onSvS
 }
 
 /* Bitácora de intercambios para el administrador (minimizada en Programación). */
-function SwapsBitacora({swaps}){
+function SwapsBitacora({swaps, hoy}){
   const [abierto,setAbierto] = useState(false);
-  var lista=(swaps||[]).slice().sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
+  /* Solo los últimos 3 días, hoy y lo que viene. Un intercambio de hace un mes ya
+     no se revisa: ensucia la lista y esconde el de ayer, que sí importa. */
+  var desde=SCHED.shift(hoy||SCHED.hoyGT(), -3);
+  var lista=(swaps||[]).filter(function(s){
+    var f=String((s&&(s.fecha||s.fechaRuta))||"").slice(0,10);
+    return f?f>=desde:true;
+  }).sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
   if(!lista.length) return null;
   var activos=lista.filter(function(s){ return s.estado==="pendiente_recibe"||s.estado==="pendiente_origen"; }).length;
   return (
