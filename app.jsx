@@ -2985,7 +2985,7 @@ function AdminApp({pagosReady,reservas,onSvReservas,ausencias,onSvAusencias,swap
       <div style={{display:tab==="dash"?"block":"none"}}><DashView props={props} reservas={reservas||[]} nomAjustes={nomAjustes} onSvNomAjustes={onSvNomAjustes} canNom={canNotif} meEmails={adminVendor?vendorEmailSet(adminVendor):[]} onSvV={onSvV} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} reps={reps} vendors={vendors} alerts={alerts} adelantos={adelantos} pagos={pagos} onSvPagos={onSvPagos} company={company} onMarkPaidBatch={markPaidBatch} onSelect={setDetail} onMarkPaid={markPaid} onRefresh={onRefresh} schedules={schedules||[]} onSvSchedules={onSvSchedules} onUpsert={onUpsert} onDelete={onDelete}/></div>
       <div style={{display:tab==="form"?"block":"none"}}><RepForm  vendors={vendors} props={props} company={company} defaultVendor={adminVendor?adminVendor.email:""} myReps={reps} allReps={reps} onSubmit={function(r){onUpsert(r);setTab("dash");}}/></div>
       <div style={{display:tab==="sched"?"block":"none"}}>
-        <ProgramacionAdmin schedules={schedules||[]} onSvSchedules={onSvSchedules} vendors={vendors||[]} props={props||[]}
+        <ProgramacionAdmin activo={tab==="sched"} schedules={schedules||[]} onSvSchedules={onSvSchedules} vendors={vendors||[]} props={props||[]}
           reservas={reservas||[]} onSvReservas={onSvReservas} ausencias={ausencias||[]} onSvAusencias={onSvAusencias}
           reps={reps} reviews={reviews} rvCasos={rvCasos} onSvP={onSvP} onSvV={onSvV} canNom={canNotif} codigos={codigos||{}} onSvCodigos={onSvCodigos} schedErr={schedErr} onUpsert={onUpsert} onReasignar={setAusPopup} swaps={swaps||[]} onSvSwaps={onSvSwaps}/>
       </div>
@@ -12825,11 +12825,17 @@ function ConciliacionGate({reservas, schedules, props, vendors, adminVendor, hoy
   const [tab,setTab]=useState("hoy");
   const [pegado,setPegado]=useState("");
   const [res,setRes]=useState(null);
+  function cerrar(){
+    setAbierto(false);
+    try{ localStorage.setItem("epi:conc:"+hoy+":"+firma,"1"); }catch(_){}
+  }
   useEffect(function(){
     if(!esAdmin||!firma) return;
     var k="epi:conc:"+hoy+":"+firma;
     try{ if(localStorage.getItem(k)==="1") return; }catch(_){}
-    var t=setTimeout(function(){ setAbierto(true); try{ localStorage.setItem(k,"1"); }catch(_){} },700);
+    /* Se marca como visto al CERRARLO, no al abrirlo: si algo lo tapa o la
+       pestaña se recarga antes de que lo lean, tiene que volver a salir. */
+    var t=setTimeout(function(){ setAbierto(true); },700);
     return function(){ clearTimeout(t); };
   },[esAdmin, firma, hoy]);
   if(!abierto) return null;
@@ -12900,8 +12906,8 @@ function ConciliacionGate({reservas, schedules, props, vendors, adminVendor, hoy
         </div>
 
         <div style={{padding:"16px 20px 20px",display:"flex",gap:9,flexWrap:"wrap"}}>
-          <button onClick={function(){ setAbierto(false); onIrProgramacion&&onIrProgramacion(); }} style={{flex:"1 1 200px",padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Ir a Programación</button>
-          <button onClick={function(){setAbierto(false);}} style={{padding:"13px 18px",minHeight:48,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Después</button>
+          <button onClick={function(){ cerrar(); onIrProgramacion&&onIrProgramacion(); }} style={{flex:"1 1 200px",padding:"13px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Ir a Programación</button>
+          <button onClick={cerrar} style={{padding:"13px 18px",minHeight:48,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Después</button>
         </div>
       </div>
     </Overlay>
@@ -12925,6 +12931,15 @@ function checkoutsSinRuta(o){
   schedules.forEach(function(s){
     if(!s) return;
     var f=String(s.fecha||"").slice(0,10);
+    /* Una limpieza puede cubrir la salida de OTRO día: es el caso del checkout
+       de la tarde que se pasa a la mañana siguiente. Se cuenta contra la fecha
+       del checkout, no contra la fecha en que se va a limpiar. */
+    /* Excluyente, no acumulativo: una limpieza movida está haciendo el trabajo de
+       ESA salida y de ninguna otra. Si contara además su propia fecha, un
+       apartamento que sale hoy (movido) y vuelve a salir mañana daría el checkout
+       de mañana por cubierto con una limpieza que ya está ocupada — y amanecería
+       sin nadie, que es justo lo que este detector existe para evitar. */
+    if(s.cubreCheckout){ cubierto[String(s.cubreCheckout).slice(0,10)+"|"+normalize(s.propiedad)]=1; return; }
     if(f<hoy||f>hasta) return;
     cubierto[f+"|"+normalize(s.propiedad)]=1;
   });
@@ -12947,7 +12962,7 @@ function checkoutsSinRuta(o){
   return out.sort(function(a,b){ return a.fecha<b.fecha?-1:(a.fecha>b.fecha?1:(a.propiedad<b.propiedad?-1:1)); });
 }
 
-function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, swaps, onSvSwaps, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, onSvCodigos, schedErr, onUpsert, onReasignar}) {
+function ProgramacionAdmin({activo, schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, swaps, onSvSwaps, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, onSvCodigos, schedErr, onUpsert, onReasignar}) {
   /* Abre en HOY: la ruta que el equipo está corriendo ahora mismo es la que el
      administrador necesita ver al entrar, no la de mañana. */
   const [dia,      setDia]      = useState(0);      /* 0 = hoy, 1 = mañana, … */
@@ -12959,6 +12974,8 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   const [drag,     setDrag]     = useState(null);
   const [verMotor, setVerMotor] = useState(false);
   const [sim,      setSim]      = useState(null);   /* simulacro: no guarda ni notifica */
+  const [plan,     setPlan]     = useState(null);   /* reparto calculado, esperando confirmación */
+  const autoHecho = useRef(false);                  /* la corrida automática ocurre una vez por sesión */
   const [reabrir,  setReabrir]  = useState({});     /* días ya notificados que se van a rehacer */
   const [tocados,  setTocados]  = useState({});     /* días notificados que el admin ya cambió */
   const [tecCambio,setTecCambio]= useState({});     /* y a QUIÉN le cambió, para reenviar solo a ellos */
@@ -13060,9 +13077,14 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   }
 
   /* ─── Corrida del motor (la misma que corre a las 6pm) */
-  function generar(desdeCero, incluirHoy){
-    desdeCero = (desdeCero === true);   /* onClick manda el evento: solo `true` cuenta */
-    setBusy("gen");
+  /* ── El reparto se calcula aparte de guardarse ──────────────────────────
+     Antes `generar` calculaba y escribía en el mismo paso: no había dónde
+     asomarse al resultado antes de que fuera oficial. Ahora el cálculo es una
+     función pura que devuelve el plan, y guardar es un segundo acto explícito.
+     Eso es lo que permite la previsualización. */
+  function calcularPlan(desdeCero, incluirHoy, reservasAlt){
+    desdeCero = (desdeCero === true);
+    var reservasUso = reservasAlt || reservas;
     /* Desde cero: se descarta todo lo futuro que aún no salió por correo, para que
        el motor reparta sin arrastrar un reparto viejo. Lo enviado nunca se toca. */
     var previas = desdeCero
@@ -13074,7 +13096,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
        ventana desde hoy. Es la misma puerta que usa la revisión de las 6:00 am. */
     var r = SCHED.programar({
       hoy: hoy, dias: incluirHoy?4:3, offset: incluirHoy?0:1,
-      reservas: reservas, props: props, vendors: vendors,
+      reservas: reservasUso, props: props, vendors: vendors,
       ratings: ratings, ausencias: ausencias, existentes: previas,
       historial: reps, pesoRating: 0.7
     });
@@ -13100,8 +13122,6 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
     var nuevas=r.asignaciones
       .filter(function(x){ return !yaHay[String(x.fecha).slice(0,10)+"|"+normalize(x.propiedad)+"|"+String(x.tipo||"")]; })
       .map(function(x){ return Object.assign({}, x, {id:"sc_"+x.key.replace(/[^a-z0-9]/gi,"").slice(0,28)+"_"+Math.floor(Math.random()*1000)}); });
-    onSvSchedules(conservar.concat(nuevas));
-    setBusy("");
     var prof=nuevas.filter(function(x){ return SCHED.esProfunda(x.tipo); }).length;
     var cerradosTxt=Object.keys(cerrados);
     var resumen=(desdeCero?"Reparto rehecho desde cero: ":"")+nuevas.length+" limpiezas programadas para "+(incluirHoy?"hoy y los próximos 3 días":"los próximos 3 días")
@@ -13109,9 +13129,89 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
       +(r.sinAsignar.length?" · "+r.sinAsignar.length+" sin asignar":"")
       +((r.postergadas||[]).length?" · "+r.postergadas.length+" profunda"+(r.postergadas.length===1?"":"s")+" postergada"+(r.postergadas.length===1?"":"s")+" por falta de espacio":"")
       +(cerradosTxt.length?" · se respetaron las rutas ya enviadas del "+cerradosTxt.map(fmtDate).join(" y "):"")+".";
-    aviso(resumen);
-    bitacora("programacion","Programación manual desde el app — "+resumen);
+    return {conservar:conservar, nuevas:nuevas, resumen:resumen, sinAsignar:r.sinAsignar||[], postergadas:r.postergadas||[], desdeCero:desdeCero, incluirHoy:!!incluirHoy};
   }
+  /* Guardar es el acto oficial: de aquí en adelante el equipo ve el reparto. */
+  function aplicarPlan(plan, comoSeCorrio){
+    if(!plan) return;
+    onSvSchedules(plan.conservar.concat(plan.nuevas));
+    aviso(plan.resumen);
+    bitacora("programacion",(comoSeCorrio||"Programación manual desde el app")+" — "+plan.resumen);
+  }
+  function generar(desdeCero, incluirHoy){
+    setBusy("gen");
+    var plan=calcularPlan(desdeCero===true, incluirHoy);
+    aplicarPlan(plan);
+    setBusy("");
+  }
+  /* Propone un reparto y lo deja esperando el visto bueno. Nada se guarda hasta
+     que el administrador confirma: es la prevalidación. */
+  function proponer(desdeCero, incluirHoy, motivo){
+    setBusy("gen");
+    var p=calcularPlan(desdeCero===true, incluirHoy);
+    setBusy("");
+    if(!p.nuevas.length){ aviso("No hay nada nuevo que repartir: todos los checkouts de la ventana ya tienen limpieza."); return; }
+    setPlan(Object.assign({}, p, {motivo:motivo||"Programación manual desde el app"}));
+  }
+
+  /* Pasado el corte, un checkout de hoy sin nadie ya no se alcanza a limpiar.
+     En vez de dejarlo colgado se mueve al día siguiente: se corre el motor con
+     esas salidas fechadas mañana, así el reparto respeta zona, carga y ratings
+     igual que cualquier otra limpieza. */
+  function proponerManana(lista){
+    var mueve={}; (lista||[]).forEach(function(x){ mueve[normalize(x.propiedad)]=1; });
+    var man=SCHED.shift(hoy,1);
+    var alt=(reservas||[]).map(function(r){
+      if(String(r.checkOut||"").slice(0,10)===hoy && mueve[normalize(r.propiedad)]) return Object.assign({}, r, {checkOut:man});
+      return r;
+    });
+    setBusy("gen");
+    var p=calcularPlan(false, false, alt);
+    setBusy("");
+    if(!p.nuevas.length){ aviso("No se pudo mover: no hay técnico disponible mañana para esas propiedades."); return; }
+    /* La reserva real sigue con checkout HOY: solo la planificación se movió. Sin
+       dejar constancia de qué salida cubre cada fila, el detector la seguiría
+       viendo descubierta y volvería a pedir lo mismo toda la tarde. */
+    p=Object.assign({}, p, {nuevas:p.nuevas.map(function(x){
+      return (String(x.fecha).slice(0,10)===man && mueve[normalize(x.propiedad)]) ? Object.assign({}, x, {cubreCheckout:hoy, motivo:"checkout de hoy, movido a mañana"}) : x;
+    })});
+    setPlan(Object.assign({}, p, {motivo:"Checkouts de hoy pasados a mañana"}));
+  }
+
+  /* ── La corrida de las 6:00 pm y la de las 6:00 am ────────────────────────
+     El motor de reparto vive aquí, en el navegador, no en el servidor. Así que
+     "corre a las 6:00 pm" solo se cumple si alguien tiene la app abierta a esa
+     hora — y el 28 de agosto nadie la tuvo: el día entero quedó sin rutas.
+     Esto lo arregla desde este lado: al entrar un administrador después de la
+     hora de corte, si la ventana está descubierta el reparto se calcula solo y
+     se presenta para aprobar. No se guarda a espaldas de nadie, pero tampoco
+     hay que acordarse de apretar un botón.
+     Lo definitivo es portar el motor a Apps Script; mientras tanto, esto cierra
+     el hueco cada vez que alguien abre Programación. */
+  useEffect(function(){
+    /* Solo con Programación a la vista. El panel está montado siempre (oculto con
+       display:none), así que sin esta guarda el modal saltaría encima de
+       Dashboard o Adelantos — y encima del lightbox de conciliación, que se abre
+       200 ms antes con la misma condición. Encadenados quedan en orden: el
+       lightbox avisa, su botón trae aquí, y aquí aparece el reparto. */
+    if(!activo || autoHecho.current) return;
+    var h=horaGT();
+    if(h<6) return;                       /* de madrugada no se decide nada */
+    var tarde=h>=18;
+    var pend=checkoutsSinRuta({reservas:reservas, schedules:schedules, props:props, hoy:hoy, dias:tarde?2:1});
+    if(!pend.length) return;
+    /* Pasado el corte, los checkouts de hoy NO se programan solos para hoy: esa
+       es una decisión entre alcanzarlos o pasarlos a mañana, y la toma una
+       persona en el bloque de arriba. La corrida automática se limita a mañana. */
+    var utiles=tarde?pend.filter(function(x){ return x.fecha!==hoy; }):pend;
+    if(!utiles.length) return;
+    autoHecho.current=true;
+    var t=setTimeout(function(){
+      var p=calcularPlan(false, !tarde&&pend.some(function(x){ return x.fecha===hoy; }));
+      if(p.nuevas.length) setPlan(Object.assign({}, p, {auto:true, motivo:"Corrida automática de las "+(tarde?"6:00 pm":"6:00 am")}));
+    }, 900);
+    return function(){ clearTimeout(t); };
+  },[activo]);
 
   /* Borra el borrador de los próximos días y lo vuelve a repartir de cero. Útil
      cuando un reparto viejo quedó mal balanceado: arrastrarlo condiciona al motor. */
@@ -13551,8 +13651,78 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
   return (
     <div style={{maxWidth:760,margin:"0 auto",padding:"18px 16px 90px",fontFamily:"Montserrat,sans-serif",display:"flex",flexDirection:"column",gap:13}}>
 
+      {/* Prevalidación del reparto — nada es oficial hasta aquí */}
+      {plan&&(function(){
+        var porFecha={}, orden=[];
+        plan.nuevas.forEach(function(x){
+          var f=String(x.fecha).slice(0,10);
+          if(!porFecha[f]){ porFecha[f]=[]; orden.push(f); }
+          porFecha[f].push(x);
+        });
+        orden.sort();
+        var vName={}; (vendors||[]).forEach(function(v){ vName[String(v.email||"").toLowerCase()]=vendorDisplay(v); });
+        return (
+          <Overlay>
+            <div onClick={function(e){e.stopPropagation();}} style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:560,maxHeight:"88vh",overflowY:"auto",boxShadow:"var(--sa-shadow-lg,0 28px 80px rgba(62,63,63,.10))",WebkitOverflowScrolling:"touch"}}>
+              <div style={{padding:"20px 22px 0"}}>
+                <span style={{display:"inline-block",padding:"5px 12px",borderRadius:"var(--sa-pill)",background:plan.auto?"#E8EEF4":C.surfaceWarm,color:plan.auto?"#3B6691":C.earth,fontSize:10.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase"}}>{plan.auto?"Corrida automática":"Revisa antes de enviar"}</span>
+                <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:24,color:C.black,lineHeight:1.2,marginTop:12}}>{plan.nuevas.length} limpieza{plan.nuevas.length===1?"":"s"} por repartir</div>
+                <div style={{fontSize:12.5,color:C.earth,marginTop:6,lineHeight:1.65,textWrap:"pretty"}}>
+                  Así queda el reparto. Nada se le ha enviado a nadie todavía — al confirmar, esta pasa a ser la ruta oficial.
+                </div>
+              </div>
+
+              {orden.map(function(f){
+                var porTec={}, tecs=[];
+                porFecha[f].forEach(function(x){
+                  var k=String(x.vendorEmail||"").toLowerCase()||"—";
+                  if(!porTec[k]){ porTec[k]=[]; tecs.push(k); }
+                  porTec[k].push(x);
+                });
+                tecs.sort(function(a,b){ return porTec[b].length-porTec[a].length; });
+                return (
+                  <div key={f} style={{margin:"16px 22px 0",border:"1px solid "+C.line,borderRadius:14,overflow:"hidden"}}>
+                    <div style={{padding:"10px 14px",background:C.surfaceWarm,display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline"}}>
+                      <span style={{fontSize:12.5,fontWeight:700,color:C.black}}>{f===hoy?"Hoy":(f===SCHED.shift(hoy,1)?"Mañana":fmtDate(f))}</span>
+                      <span style={{fontSize:11,color:C.taupe}}>{porFecha[f].length} limpieza{porFecha[f].length===1?"":"s"} · {tecs.length} técnico{tecs.length===1?"":"s"}</span>
+                    </div>
+                    {tecs.map(function(k){
+                      return (
+                        <div key={k} style={{padding:"10px 14px",borderTop:"1px solid "+C.line,display:"flex",gap:10,alignItems:"flex-start"}}>
+                          <span style={{flex:"0 0 auto",fontSize:12,fontWeight:600,color:C.black,minWidth:118}}>{vName[k]||"Sin técnico"}</span>
+                          <span style={{flex:1,minWidth:0,fontSize:11.5,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>{porTec[k].map(function(x){ return x.propiedad; }).join(" · ")}</span>
+                          <span style={{flex:"0 0 auto",fontSize:11,fontWeight:700,color:C.taupe}}>{porTec[k].length}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+
+              {plan.sinAsignar.length>0&&(
+                <div style={{margin:"14px 22px 0",background:"#F7E7E4",borderRadius:12,padding:"11px 14px",fontSize:11.5,color:C.attentionText,lineHeight:1.6,textWrap:"pretty"}}>
+                  <b>{plan.sinAsignar.length} sin técnico.</b> No hay quien las cubra con las reglas de zona y carga. Quedan visibles en «checkouts sin limpieza asignada» para repartirlas a mano.
+                </div>
+              )}
+
+              <div style={{padding:"18px 22px 22px",display:"flex",gap:9,flexWrap:"wrap"}}>
+                <button onClick={function(){ aplicarPlan(plan, plan.motivo); setPlan(null); }} style={{flex:"1 1 220px",padding:"14px",minHeight:48,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Confirmar y hacer oficial</button>
+                <button onClick={function(){ setPlan(null); }} style={{padding:"14px 18px",minHeight:48,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Descartar</button>
+              </div>
+            </div>
+          </Overlay>
+        );
+      })()}
+
       {/* Checkouts sin ruta — lo primero que se ve al entrar */}
-      {faltantes.length>0&&(
+      {faltantes.length>0&&(function(){
+        var tarde=horaGT()>=18;
+        var deHoy=faltantes.filter(function(x){ return x.fecha===hoy; });
+        /* Pasado el corte, los de hoy ya no son "programa esto": son una decisión
+           entre alcanzarlos hoy o moverlos a mañana. Se sacan del listado normal
+           para no pedir algo que ya no se puede hacer. */
+        var resto=tarde?faltantes.filter(function(x){ return x.fecha!==hoy; }):faltantes;
+        return (
         <div style={{background:"#F7E7E4",border:"1.5px solid #E9C9C2",borderRadius:14,padding:"14px 16px"}}>
           <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",alignItems:"baseline"}}>
             <div>
@@ -13561,31 +13731,55 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
                 {faltantes.length} checkout{faltantes.length===1?"":"s"} sin limpieza programada
               </div>
             </div>
-            <button onClick={function(){generar(false, faltaHoy);}} disabled={busy==="gen"} style={{padding:"9px 15px",minHeight:40,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:700,cursor:busy==="gen"?"wait":"pointer",fontFamily:"Montserrat,sans-serif",flexShrink:0}}>{busy==="gen"?"Corriendo…":(faltaHoy?"Cubrir hoy y correr el motor":"Correr el motor")}</button>
+            {resto.length>0&&<button onClick={function(){proponer(false, !tarde&&deHoy.length>0);}} disabled={busy==="gen"} style={{padding:"9px 15px",minHeight:40,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:700,cursor:busy==="gen"?"wait":"pointer",fontFamily:"Montserrat,sans-serif",flexShrink:0}}>{busy==="gen"?"Calculando…":"Repartir "+resto.length}</button>}
           </div>
-          <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:11}}>
-            {faltantes.slice(0,8).map(function(x,i){
-              var idx=SCHED.dias(hoy,x.fecha);
-              return (
-                <button key={i} onClick={function(){ if(idx>=0&&idx<=3) setDia(idx); }} style={{display:"flex",alignItems:"center",gap:9,width:"100%",textAlign:"left",background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"9px 11px",cursor:(idx>=0&&idx<=3)?"pointer":"default",fontFamily:"Montserrat,sans-serif"}}>
-                  <span style={{flexShrink:0,width:6,height:6,borderRadius:"50%",background:C.peach}}/>
-                  <span style={{flex:1,minWidth:0,fontSize:12,fontWeight:600,color:C.black}}>{x.propiedad}</span>
-                  <span style={{fontSize:10.5,color:C.taupe,flexShrink:0}}>{x.fecha===hoy?"hoy":fmtDate(x.fecha)}</span>
-                  {!x.conocida&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",padding:"2px 7px",borderRadius:"var(--sa-pill)",background:"#F8ECE9",color:C.attentionText,flexShrink:0}}>Sin registrar</span>}
-                </button>
-              );
-            })}
-            {faltantes.length>8&&<div style={{fontSize:11,color:C.earth}}>y {faltantes.length-8} más…</div>}
-          </div>
+
+          {/* Los de hoy, pasada la hora de corte */}
+          {tarde&&deHoy.length>0&&(
+            <div style={{background:"#fff",border:"1px solid "+C.line,borderRadius:12,padding:"12px 13px",marginTop:11}}>
+              <div style={{fontSize:12,fontWeight:700,color:C.black}}>{deHoy.length} {deHoy.length===1?"salió":"salieron"} hoy y ya pasaron las 6:00 pm</div>
+              <div style={{fontSize:11,color:C.earth,marginTop:4,lineHeight:1.55,textWrap:"pretty"}}>Decide si alguien alcanza a entrar hoy o si se limpian mañana antes del próximo huésped.</div>
+              <div style={{display:"flex",flexDirection:"column",gap:5,margin:"9px 0"}}>
+                {deHoy.map(function(x,i){ return (
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:8,fontSize:11.5,color:C.black}}>
+                    <span style={{flexShrink:0,width:5,height:5,borderRadius:"50%",background:C.peach}}/>
+                    <span style={{flex:1,minWidth:0,fontWeight:600}}>{x.propiedad}</span>
+                    {!x.conocida&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",padding:"2px 7px",borderRadius:"var(--sa-pill)",background:"#F8ECE9",color:C.attentionText}}>Sin registrar</span>}
+                  </div>
+                ); })}
+              </div>
+              <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                <button onClick={function(){proponerManana(deHoy);}} disabled={busy==="gen"} style={{flex:"1 1 170px",padding:"11px 14px",minHeight:44,borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Pasar a mañana y repartir</button>
+                <button onClick={function(){proponer(false, true);}} disabled={busy==="gen"} style={{flex:"1 1 150px",padding:"11px 14px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>Programar hoy igual</button>
+              </div>
+            </div>
+          )}
+
+          {resto.length>0&&(
+            <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:11}}>
+              {resto.slice(0,8).map(function(x,i){
+                var idx=SCHED.dias(hoy,x.fecha);
+                return (
+                  <button key={i} onClick={function(){ if(idx>=0&&idx<=3) setDia(idx); }} style={{display:"flex",alignItems:"center",gap:9,width:"100%",textAlign:"left",background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"9px 11px",cursor:(idx>=0&&idx<=3)?"pointer":"default",fontFamily:"Montserrat,sans-serif"}}>
+                    <span style={{flexShrink:0,width:6,height:6,borderRadius:"50%",background:C.peach}}/>
+                    <span style={{flex:1,minWidth:0,fontSize:12,fontWeight:600,color:C.black}}>{x.propiedad}</span>
+                    <span style={{fontSize:10.5,color:C.taupe,flexShrink:0}}>{x.fecha===hoy?"hoy":fmtDate(x.fecha)}</span>
+                    {!x.conocida&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",padding:"2px 7px",borderRadius:"var(--sa-pill)",background:"#F8ECE9",color:C.attentionText,flexShrink:0}}>Sin registrar</span>}
+                  </button>
+                );
+              })}
+              {resto.length>8&&<div style={{fontSize:11,color:C.earth}}>y {resto.length-8} más…</div>}
+            </div>
+          )}
+
           <div style={{fontSize:11,color:C.earth,marginTop:10,lineHeight:1.6,textWrap:"pretty"}}>
             {faltantes.some(function(x){return !x.conocida;})
               ? "Las marcadas «Sin registrar» tienen reserva pero no existen en el portafolio: hay que darlas de alta en Propiedades para que el motor las pueda programar."
-              : (faltaHoy
-                  ? "Suele pasar cuando la reserva entró después de que la ruta ya se envió. El motor las agrega sin tocarle la ruta a quien ya la recibió — y esta vez también reparte lo de hoy."
-                  : "Suele pasar cuando la reserva entró después de que la ruta ya se envió. Correr el motor las agrega sin tocar las rutas que el equipo ya recibió.")}
+              : "Al repartir verás primero cómo queda; nada se le envía a nadie hasta que lo confirmes."}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Cabecera y corridas */}
       <div style={CARD}>
@@ -13593,7 +13787,7 @@ function ProgramacionAdmin({schedules, onSvSchedules, vendors, props, reservas, 
           <div>
             <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:20,color:C.black,lineHeight:1.2}}>Programación</div>
             <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>
-              El motor corre a las 6:00 pm y programa los próximos 3 días. A las 6:00 am revisa si entraron reservas nuevas. Las reservas de Hospitable se sincronizan solas cada 3 horas. Horario de limpieza: {SCHED.HORA_INI} a {SCHED.HORA_FIN}.
+              El reparto se calcula al abrir esta pestaña y te lo mostramos para aprobar: nada se le envía a nadie sin tu confirmación. Programa los próximos 3 días. Las reservas de Hospitable se sincronizan solas cada 3 horas. Horario de limpieza: {SCHED.HORA_INI} a {SCHED.HORA_FIN}.
             </div>
           </div>
           <div style={{textAlign:"right",flexShrink:0}}>
