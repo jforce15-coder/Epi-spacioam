@@ -13852,8 +13852,24 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
     autoHecho.current=true;
     var t=setTimeout(function(){
       var p=calcularPlan(false, !tarde&&pend.some(function(x){ return x.fecha===hoy; }));
-      if(!p.nuevas.length) return;
+      /* La red de seguridad cubre lo urgente y nada más: hoy y mañana. El motor
+         planifica 3 o 4 días para balancear bien, pero proponerle al admin la ruta
+         del +2 y +3 le pide aprobar días que todavía van a cambiar cuando entren
+         reservas —y que tienen su propia víspera para salir. Se recorta el plan al
+         tope y el resto se queda como estaba: en borrador, sin tocar. */
+      var tope=man;
+      var dentro=function(x){ var f=String(x.fecha).slice(0,10); return f<=tope; };
+      var nuevas=p.nuevas.filter(dentro);
+      if(!nuevas.length) return;
+      var prof=nuevas.filter(function(x){ return SCHED.esProfunda(x.tipo); }).length;
+      var sinAsig=(p.sinAsignar||[]).filter(dentro);
       setPlan(Object.assign({}, p, {
+        nuevas:nuevas,
+        sinAsignar:sinAsig,
+        postergadas:(p.postergadas||[]).filter(dentro),
+        resumen:nuevas.length+" limpiezas para hoy y mañana"
+          +(prof?" · "+prof+" profunda"+(prof===1?"":"s"):"")
+          +(sinAsig.length?" · "+sinAsig.length+" sin asignar":"")+".",
         motivo:"Propuesta automática — había checkouts sin ruta al abrir",
         sinCron:true
       }));
