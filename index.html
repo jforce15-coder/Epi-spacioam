@@ -11,7 +11,12 @@
 <meta name="theme-color" content="#FAFAFA" />
 <link rel="stylesheet" href="sa-tokens.css?v=dsv2b1" />
 <style>
-  #__splash{position:fixed;inset:0;background:#FAFAFA;text-align:center;font-family:Montserrat,system-ui,sans-serif;z-index:9999}
+  /* El hueco blanco debajo del loader era el margen que trae el <body> por
+     omisión: el app lo quita al montar, pero durante la carga todavía no existe
+     y dejaba una franja que solo desaparecía al hacer scroll. */
+  html,body{margin:0;padding:0;background:#FAFAFA}
+  html{overflow-x:hidden}
+  #__splash{position:fixed;inset:0;height:100%;min-height:100dvh;background:#FAFAFA;text-align:center;font-family:Montserrat,system-ui,sans-serif;z-index:9999;overflow:hidden}
   /* El logo y el anillo van clavados al centro y los mensajes en un espacio ya
      reservado debajo: así aparecer un texto no mueve nada de arriba. */
   #__splash .mid{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center}

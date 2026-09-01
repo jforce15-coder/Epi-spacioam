@@ -8247,7 +8247,9 @@ function GaleriaAviso({vendor}){
 }
 
 function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codigos,ausencias,onSvAusencias,swaps,onSvSwaps,allSchedules,onSvSchedules,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout,reviews,rvCasos,onSvRvCasos,rvIA,reservas}) {
-  const [view,setView] = useState("jobs");
+  /* Lo primero que abre cualquiera del equipo —limpieza, mantenimiento o
+     proveedor externo— es su ruta: es la pregunta con la que entran al app. */
+  const [view,setView] = useState("sched");
   /* El permiso de galería del día abre el selector de fotos a la galería. Se lee
      en cada render: si el admin lo quita, el siguiente repintado ya lo respeta. */
   GAL_PERMISO = galeriaHoy(vendor);
@@ -8288,8 +8290,9 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codig
         tab={view} setTab={setView}
         navItems={(function(){
     var isInternal = vendor.tipo==="interno";
-    var navItems = [["jobs","Mis trabajos","list"],["new","Nuevo reporte","edit"]];
-    if(isInternal) navItems.push(["sched","Programa","calendar"]);
+    /* El programa va de primero y lo ve todo el mundo: al externo también le
+       llega su ruta por correo la noche anterior, así que tiene dónde verla. */
+    var navItems = [["sched","Programa","calendar"],["jobs","Mis trabajos","list"],["new","Nuevo reporte","edit"]];
     if(isInternal) navItems.push(["hist","Calidad","star"]);
     if(vendor.isSupervisor) navItems.push(["sup","Supervisión","star"]);
     if(vendor.puedeVisitas) navItems.push(["visitas","Visitas","grid"]);
