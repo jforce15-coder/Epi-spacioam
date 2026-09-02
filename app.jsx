@@ -230,11 +230,27 @@ function galCap(camOnly){ return (camOnly && !GAL_PERMISO) ? "environment" : und
    viejo en `reportadoPor`; los nuevos guardan además `vendorId`. Estas funciones
    emparejan un reporte con su técnico por id O por cualquiera de sus correos
    (actual, de notificaciones, o anteriores guardados en `prevEmails`). */
+/* Un correo que viene de una hoja de cálculo trae espacios, mayúsculas y a veces
+   un salto de línea invisible. Comparar sin limpiarlo primero es lo que dejaba a
+   un técnico sin ver su ruta: el motor le asignó "Sucely@… " y su ficha dice
+   "sucely@…". Toda comparación de correo pasa por aquí. */
+function emailKey(x) { return String(x == null ? "" : x).replace(/\s+/g, "").toLowerCase(); }
+/* ¿Esta parada es de este técnico? Por id primero —un cambio de correo no puede
+   dejar a nadie sin ruta— y luego por cualquiera de sus correos. */
+function schedMatchesVendor(s, v) {
+  if (!s || !v) return false;
+  var sid = String(s.vendorId == null ? "" : s.vendorId).trim();
+  var vid = String(v.id == null ? "" : v.id).trim();
+  if (sid && vid && sid === vid) return true;
+  var em = emailKey(s.vendorEmail);
+  if (!em) return false;
+  return vendorEmailSet(v).indexOf(em) >= 0;
+}
 function vendorEmailSet(v) {
   if (!v) return [];
   var arr = [v.email, v.notifEmail].concat(v.prevEmails || []);
   var out = [];
-  arr.forEach(function(e){ if(e){ var le=String(e).toLowerCase().trim(); if(le && out.indexOf(le)<0) out.push(le); } });
+  arr.forEach(function(e){ if(e){ var le=emailKey(e); if(le && out.indexOf(le)<0) out.push(le); } });
   return out;
 }
 function repMatchesVendor(rep, v) {
@@ -2242,12 +2258,7 @@ function App() {
   } else if (!sess) {
     inner = <Login vendors={vendors} adminPin={pin} onLogin={login} sheetsOk={sheetsOk}/>;
   } else if (vcV && sess.role==="admin") {
-    var vcEmails = vendorEmailSet(vcV);
-    var vcSched = (schedules||[]).filter(function(s){
-      if(!s) return false;
-      if(s.vendorId && String(s.vendorId)===String(vcV.id)) return true;
-      return vcEmails.indexOf(String(s.vendorEmail||"").toLowerCase())>=0;
-    });
+    var vcSched = (schedules||[]).filter(function(s){ return schedMatchesVendor(s, vcV); });
     inner = (<>
       <VerComoBanner vendor={vcV} onExit={function(){setVerComo(null);}}/>
       {/* El encabezado pegajoso de adentro se detiene DEBAJO de la barra, no atrás. */}
@@ -2263,13 +2274,7 @@ function App() {
        de supervisión asignados después del login aplican sin re-loguear) */
     var freshV = vendors.find(function(x){return x.id===sess.vendor.id;}) || vendors.find(function(x){return x.email===sess.vendor.email;}) || sess.vendor;
     /* Un técnico no debe recibir la programación de sus compañeros ni en memoria. */
-    var misEmails = vendorEmailSet(freshV);
-    var misSchedules = (schedules||[]).filter(function(s){
-      if(!s) return false;
-      /* Por id primero: un cambio de correo no puede dejar a nadie sin su ruta. */
-      if(s.vendorId && String(s.vendorId)===String(freshV.id)) return true;
-      return misEmails.indexOf(String(s.vendorEmail||"").toLowerCase())>=0;
-    });
+    var misSchedules = (schedules||[]).filter(function(s){ return schedMatchesVendor(s, freshV); });
     var needsOnb = isEpiLimpieza(freshV) && !freshV.notifSetupDone && !onbDone;
     try{ if(localStorage.getItem("epi_onboard_done_"+freshV.id)) needsOnb=false; }catch(_){}
     inner = (<><VendorApp vendor={freshV} allVendors={vendors} allReps={reps} reps={reps.filter(function(r){return repMatchesVendor(r,freshV);})} props={props} company={company} schedules={misSchedules} codigos={codigos} ausencias={ausencias} onSvAusencias={svAusencias} swaps={swaps} onSvSwaps={svSwaps} allSchedules={schedules} onSvSchedules={svSchedules} hospUrlDay={hospUrlDay} hospUrlWeek={hospUrlWeek} adelantos={adelantos} onSvAdelantos={svAdelantos} pagos={pagos} onSvPagos={svPagos} onSubmit={upsert} onUpdate={upsert} onSvV={svV} onSvFeedback={function(fb){ svFeedback((feedback||[]).concat([fb])); }} onLogout={logout} reviews={reviews} rvCasos={rvCasos} onSvRvCasos={svRvCasos} rvIA={rvIA} reservas={reservas}/>{needsOnb&&<OnboardModal vendor={freshV} allVendors={vendors} onSvV={svV} onClose={function(){setOnbDone(true);}}/>}</>);
@@ -15954,7 +15959,10 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
   var manana = SCHED.shift(hoy,1);
   var finSemana = SCHED.shift(hoy,6);
   var emails = vendorEmailSet(vendor);
-  var mias = (schedules||[]).filter(function(s){
+  /* Se parte de allSchedules cuando viene: si el filtro de arriba se equivoca, el
+     técnico igual ve su ruta. Un día sin ruta se paga con un apartamento sucio. */
+  var fuente = (allSchedules && allSchedules.length) ? allSchedules : (schedules||[]);
+  var mias = fuente.filter(function(s){
     if(!s) return false;
     /* Una ruta futura sin correo enviado es un borrador: el administrador la
        rebalancea o la rehace, y el equipo no debe mirar algo que va a cambiar.
@@ -15965,8 +15973,7 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
     var sf=String(s.fecha||"").slice(0,10);
     var limBorrador = parseInt(vendor.avisoDias,10)===3 ? SCHED.shift(hoy,3) : hoy;
     if(sf>limBorrador && !s.notificadoEn) return false;
-    if(s.vendorId && String(s.vendorId)===String(vendor.id)) return true;
-    return emails.indexOf(String(s.vendorEmail||"").toLowerCase())>=0;
+    return schedMatchesVendor(s, vendor);
   }).sort(function(a,b){
     if(a.fecha!==b.fecha) return a.fecha<b.fecha?-1:1;
     return (a.orden||0)-(b.orden||0);
@@ -16107,6 +16114,17 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
         <div style={{textAlign:"center",padding:"38px 20px",color:C.earth,fontSize:13,background:"#fff",borderRadius:14,border:"1px solid "+C.gray,lineHeight:1.7}}>
           {view==="hoy"?"No tienes limpiezas hoy.":"No tienes limpiezas esta semana."}
           <div style={{fontSize:11.5,color:C.taupe,marginTop:6}}>Si crees que es un error, avísale al administrador.</div>
+          {/* Cuando el día SÍ tiene ruta pero ninguna parada es suya, el dato que
+              destraba el problema es a qué correo se le asignó. Se muestra para que
+              el administrador lo corrija en un minuto en vez de adivinar. */}
+          {(function(){
+            var rutaHoy=(allSchedules||[]).filter(function(x){ return x&&String(x.fecha||"").slice(0,10)===hoy; });
+            if(!rutaHoy.length) return null;
+            return <div style={{fontSize:11,color:C.taupe,marginTop:10,paddingTop:10,borderTop:"1px solid "+C.line,lineHeight:1.6}}>
+              Hoy hay {rutaHoy.length} limpieza{rutaHoy.length===1?"":"s"} repartida{rutaHoy.length===1?"":"s"} en el equipo, ninguna a tu nombre.
+              Tu cuenta es <strong style={{color:C.earth}}>{String(vendor.email||"—").toLowerCase()}</strong> — pásasela al administrador.
+            </div>;
+          })()}
         </div>
       )}
 
