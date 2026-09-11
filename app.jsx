@@ -1185,18 +1185,22 @@ var ADV_PAGOS = [];
 var IS_CLAUDE_SANDBOX = false;
 
 /* ─── GOOGLE SHEETS API (used when deployed to Vercel / custom domain) */
-async function apiCall(action, payload) {
+async function apiCall(action, payload, opts) {
   /* Reintentos con espera progresiva — el Apps Script tiene "arranque en frío":
      la primera llamada tras un rato inactivo suele fallar o devolver una página
      de error (no JSON). Antes eso obligaba a recargar varias veces hasta que
      conectaba. Ahora reintentamos hasta 3 veces (con timeout por intento) y solo
-     al agotar los intentos se reporta "sin conexión". */
+     al agotar los intentos se reporta "sin conexión".
+     opts.timeout — las cargas de segundo plano (histórico completo) necesitan
+     más margen que las de arranque. */
+  var TMO = (opts && opts.timeout) || 12000;
+  var TRIES = (opts && opts.tries) || 3;
   var body = JSON.stringify(Object.assign({action:action}, payload||{}));
   var lastErr;
-  for (var attempt=0; attempt<3; attempt++) {
+  for (var attempt=0; attempt<TRIES; attempt++) {
     if (attempt>0) { await new Promise(function(res){ setTimeout(res, attempt*800); }); }
     var ctl = (typeof AbortController!=="undefined") ? new AbortController() : null;
-    var tid = ctl ? setTimeout(function(){ try{ctl.abort();}catch(_){} }, 12000) : null;
+    var tid = ctl ? setTimeout(function(){ try{ctl.abort();}catch(_){} }, TMO) : null;
     var r;
     try {
       r = await fetch(SCRIPT_URL, {
@@ -1526,7 +1530,17 @@ function vendorsMerge(cfg){
   return {list:merged, complete:complete};
 }
 
-async function loadAllData() {
+async function loadAllData(opts) {
+  /* Por defecto, carga RÁPIDA: el arranque tardaba minutos porque pedía la hoja
+     de Reportes completa (con los JSON de fotos) y, dentro de getConfig, tres
+     hojas más — reseñas, casos y versiones. Ahora el arranque pide solo lo que
+     la primera pantalla necesita:
+       · getConfig slim  → sin reseñas, casos ni historial de versiones
+       · getAll light    → sin fotos, facturas ni daños, últimos 180 días
+     El resto entra en segundo plano con loadRestData(), ya con la app arriba.
+     Con opts.full se pide todo de una vez (import/exportes y diagnósticos). */
+  var FULL = !!(opts && opts.full);
+  var WIN  = (opts && opts.days) || 180;
   if (IS_CLAUDE_SANDBOX) {
     var d = ls_loadAll();
     return {
@@ -1556,18 +1570,19 @@ async function loadAllData() {
      respuestas cuando getAll y getConfig llegan a la vez, devolviendo getConfig sin
      "vendors". Pedir config primero (crítico para el login) y luego los reportes
      elimina esa condición de carrera. */
-  var cfg = await apiCall("getConfig") || {};
+  var cfg = await apiCall("getConfig", FULL ? {} : {slim:1}) || {};
   var _v0 = salvageArray(cfg.vendors);
   if (!_v0 || !_v0.length) {
     for (var attempt=0; attempt<2; attempt++) {
       try {
-        var retry = await apiCall("getConfig");
+        var retry = await apiCall("getConfig", FULL ? {} : {slim:1});
         var _vr = retry && salvageArray(retry.vendors);
         if (_vr && _vr.length) { cfg = retry; break; }
       } catch(e){ /* sigue intentando */ }
     }
   }
-  var rd = await apiCall("getAll") || {};
+  var rd = await apiCall("getAll", FULL ? {} : {light:1, days:WIN},
+                         FULL ? {timeout:90000, tries:2} : null) || {};
   var _vMerge = vendorsMerge(cfg);
   var _vFinal = _vMerge.list;
   var _pFinal = salvageArray(cfg.props);
@@ -1599,7 +1614,45 @@ async function loadAllData() {
     ausencias: Array.isArray(cfg.ausencias) ? cfg.ausencias : [],
     swaps: Array.isArray(cfg.swaps) ? cfg.swaps : [],
     formcfg: (cfg.formcfg && typeof cfg.formcfg==="object") ? cfg.formcfg : {},
+    partial: !FULL,
   };
+}
+
+/* ─── SEGUNDA FASE — lo pesado, ya con la pantalla arriba.
+   Trae reseñas, casos de calidad, historial de versiones y el histórico completo
+   de reportes (con fotos). Si falla, la app sigue funcionando con lo del arranque. */
+async function loadRestData() {
+  if (IS_CLAUDE_SANDBOX) return null;
+  var heavy = null, reports = null;
+  try { heavy = await apiCall("getHeavy", {}, {timeout:45000, tries:2}); } catch(e){}
+  try {
+    var rd = await apiCall("getAll", {}, {timeout:120000, tries:2});
+    reports = (rd && rd.reports) ? rd.reports.sort(function(a,b){return (b.createdAt||b.id)-(a.createdAt||a.id);}) : null;
+  } catch(e){}
+  return { heavy: heavy || {}, reports: reports };
+}
+
+/* Une el histórico completo con lo que ya está en memoria: gana la copia local
+   cuando NO es "light" (es decir, cuando se guardó o se hidrató en este equipo). */
+function mergeReps(full, current) {
+  if (!Array.isArray(full)) return current;
+  var byId = {};
+  (current||[]).forEach(function(r){ if(r&&r.id!=null) byId[String(r.id)]=r; });
+  var seen = {};
+  var merged = full.map(function(f){
+    var k = String(f.id); seen[k]=true;
+    var loc = byId[k];
+    return (loc && !loc._light) ? loc : f;
+  });
+  (current||[]).forEach(function(r){ if(r&&r.id!=null&&!seen[String(r.id)]) merged.push(r); });
+  return merged.sort(function(a,b){ return (b.createdAt||b.id)-(a.createdAt||a.id); });
+}
+
+/* Detalle completo de un reporte — para abrir el modal cuando la lista vino light. */
+async function fetchReportFull(id) {
+  if (IS_CLAUDE_SANDBOX) return null;
+  var r = await apiCall("getReport", {id:id}, {timeout:30000, tries:2});
+  return (r && r.report) ? r.report : null;
 }
 
 async function uploadMedia(b64, name, mime, subfolder) {
@@ -1967,7 +2020,9 @@ function App() {
 
     setSyncing(true); setSyncMsg("Conectando…");
 
-    /* Hard timeout: 15s — show app no matter what (carga secuencial + cold start) */
+    /* Hard timeout: 30s — con la carga rápida esto casi nunca se dispara, pero
+       si el Apps Script está en arranque en frío conviene dejar que los reintentos
+       terminen antes de caer al respaldo local. */
     var timeoutId = setTimeout(function(){
       console.warn("Sheets timeout — loading with localStorage fallback");
       VENDORS_SAFE = false;
@@ -1979,7 +2034,7 @@ function App() {
         if(fb.adminpin)                   setPin(fb.adminpin);
       } catch(lsErr){ console.error("localStorage fallback failed:", lsErr); }
       setSheetsOk(false); setReady(true); setSyncing(false);
-    }, 15000);
+    }, 30000);
 
     loadAllData().then(function(d){
       clearTimeout(timeoutId);
@@ -2033,6 +2088,19 @@ function App() {
       setNotifPrefs(d.notifprefs||{}); NOTIF_PREFS=d.notifprefs||{};
       setSheetsOk(!IS_CLAUDE_SANDBOX);
       setReady(true); setSyncing(false);
+      /* Segunda fase, en segundo plano y con la app ya usable: reseñas, casos de
+         calidad, historial de versiones y el histórico completo de reportes con
+         fotos. Si algo de esto falla, no afecta la sesión. */
+      if(d.partial) setTimeout(function(){
+        loadRestData().then(function(rest){
+          if(!rest) return;
+          var h = rest.heavy||{};
+          if(Array.isArray(h.reviews)) setReviews(h.reviews);
+          if(Array.isArray(h.rvCasos)) setRvCasos(h.rvCasos);
+          if(h.schedvers && typeof h.schedvers==="object") setSchedVers(h.schedvers);
+          if(rest.reports) setReps(function(prev){ return withAutoPagador(mergeReps(rest.reports, prev)); });
+        }).catch(function(){});
+      }, 1500);
     }).catch(function(e){
       clearTimeout(timeoutId);
       console.error("Load failed:",e);
@@ -2216,7 +2284,9 @@ function App() {
     setSyncing(true); setSyncMsg("Actualizando…");
     try {
       var d = await loadAllData();
-      setReps(withAutoPagador(d.reports));
+      /* Con carga light, refrescar no debe borrar las fotos que ya están en
+         memoria: se unen en vez de reemplazar. */
+      setReps(function(prev){ return withAutoPagador(d.partial ? mergeReps(d.reports, prev) : d.reports); });
       setVendors(d.vendors);
       VENDORS_SAFE = (d.vendorsComplete !== false);
       setProps(d.props);
@@ -7902,8 +7972,44 @@ function ProgramarMantenimiento({rep, vendors, props, reservas, schedules, onSvS
   );
 }
 
-/* ─── Detail Modal */
-function DetailModal({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,hasLinkedDmg,onExtract,readOnly,reservas,schedules,onSvSchedules}) {
+/* ─── Detail Modal
+   Envoltorio de hidratación: cuando la lista se cargó en modo light (sin fotos,
+   facturas ni daños, para que el arranque sea rápido), el modal pide el detalle
+   completo de ese reporte al abrirse y muestra un skeleton mientras llega. */
+function DetailModal(p) {
+  const [full, setFull] = useState(p.rep && p.rep._light ? null : p.rep);
+  const [err, setErr] = useState("");
+  var id = p.rep && p.rep.id;
+  useEffect(function(){
+    if (!p.rep || !p.rep._light) { setFull(p.rep); return; }
+    var vivo = true;
+    setFull(null); setErr("");
+    fetchReportFull(id).then(function(r){
+      if(!vivo) return;
+      setFull(r ? Object.assign({}, p.rep, r, {_light:false}) : p.rep);
+      if(!r) setErr("");
+    }).catch(function(e){
+      if(!vivo) return;
+      setFull(p.rep);
+      setErr("No se pudieron traer las fotos de este reporte. Reintenta en un momento.");
+    });
+    return function(){ vivo = false; };
+  /* eslint-disable-next-line */
+  },[id]);
+
+  if (!full) return (
+    <Overlay>
+      <div style={{background:"#fff",borderRadius:16,padding:"28px 24px",width:"100%",maxWidth:420,display:"flex",flexDirection:"column",gap:14}}>
+        <div style={{fontSize:11,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.earth}}>Cargando detalle</div>
+        {[62,38,120].map(function(h,i){return <div key={i} style={{height:h,borderRadius:12,background:C.surfaceWarm}}/>;})}
+        <button onClick={p.onClose} style={{alignSelf:"flex-start",padding:"9px 16px",minHeight:40,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:700,cursor:"pointer"}}>Cerrar</button>
+      </div>
+    </Overlay>
+  );
+  return <DetailModalView {...p} rep={full} hydrateErr={err}/>;
+}
+
+function DetailModalView({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,hasLinkedDmg,onExtract,readOnly,reservas,schedules,onSvSchedules,hydrateErr}) {
   const [editing, setEditing] = useState(false);
   var scDM = useScreen();
   /* Auto-fill total from tariff if empty — NUNCA para reportes de daños (no generan pago) */
