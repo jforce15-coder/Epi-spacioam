@@ -1621,15 +1621,24 @@ async function loadAllData(opts) {
 /* ─── SEGUNDA FASE — lo pesado, ya con la pantalla arriba.
    Trae reseñas, casos de calidad, historial de versiones y el histórico completo
    de reportes (con fotos). Si falla, la app sigue funcionando con lo del arranque. */
-async function loadRestData() {
+async function loadRestData(onChunk) {
   if (IS_CLAUDE_SANDBOX) return null;
-  var heavy = null, reports = null;
+  var heavy = null;
   try { heavy = await apiCall("getHeavy", {}, {timeout:45000, tries:2}); } catch(e){}
-  try {
-    var rd = await apiCall("getAll", {}, {timeout:120000, tries:2});
-    reports = (rd && rd.reports) ? rd.reports.sort(function(a,b){return (b.createdAt||b.id)-(a.createdAt||a.id);}) : null;
-  } catch(e){}
-  return { heavy: heavy || {}, reports: reports };
+  /* El histórico con fotos se trae por tramos, del más reciente al más viejo.
+     Cada tramo que llega se integra de una vez: si uno falla, lo ya traído
+     se queda. */
+  var CHUNK = 120, MAX = 40, off = 0, todo = [];
+  for (var i=0; i<MAX; i++) {
+    var rd = null;
+    try { rd = await apiCall("getAll", {offset:off, limit:CHUNK}, {timeout:60000, tries:2}); }
+    catch(e){ break; }
+    var lote = (rd && rd.reports) || [];
+    if (lote.length) { todo = todo.concat(lote); if (onChunk) { try { onChunk(lote); } catch(_){} } }
+    off += CHUNK;
+    if (!rd || rd.done || lote.length < CHUNK) break;
+  }
+  return { heavy: heavy || {}, reports: todo.length ? todo : null };
 }
 
 /* Une el histórico completo con lo que ya está en memoria: gana la copia local
@@ -2092,13 +2101,15 @@ function App() {
          calidad, historial de versiones y el histórico completo de reportes con
          fotos. Si algo de esto falla, no afecta la sesión. */
       if(d.partial) setTimeout(function(){
-        loadRestData().then(function(rest){
+        loadRestData(function(lote){
+          /* Cada tramo del histórico entra apenas llega. */
+          setReps(function(prev){ return withAutoPagador(mergeReps(lote, prev)); });
+        }).then(function(rest){
           if(!rest) return;
           var h = rest.heavy||{};
           if(Array.isArray(h.reviews)) setReviews(h.reviews);
           if(Array.isArray(h.rvCasos)) setRvCasos(h.rvCasos);
           if(h.schedvers && typeof h.schedvers==="object") setSchedVers(h.schedvers);
-          if(rest.reports) setReps(function(prev){ return withAutoPagador(mergeReps(rest.reports, prev)); });
         }).catch(function(){});
       }, 1500);
     }).catch(function(e){
@@ -3029,35 +3040,35 @@ function AdminApp({schedVers,pagosReady,reservas,onSvReservas,ausencias,onSvAuse
       ts: c.fecha ? new Date(String(c.fecha).slice(0,10)+"T12:00:00").getTime() : Date.now(),
       abrir: function(){ setTab("qa"); } });
   });
-  /* c) Propiedades sin profunda en más de 60 días. estadoProfundas ya excluye
-        pausadas y las que tienen las profundas quitadas a propósito. */
+  /* c) Las alertas de limpieza profunda se quitaron a pedido del equipo: el
+        seguimiento de profundas vive en su propio análisis, no en el centro de
+        notificaciones, donde tapaba lo que sí requiere acción. */
+  /* d) Pagos pendientes — UNA notificación por técnico o proveedor, no una por
+        trabajo. Al administrador le importa a quién le debe y cuánto; el
+        desglose trabajo por trabajo ya vive en el dashboard. */
   (function(){
-    try{
-      SCHED.estadoProfundas({
-        hoy:_hoyAl, props:props,
-        historial:(reps||[]).map(function(r){ return {propiedad:r.propiedad, tipo:r.categoria, fecha:r.fecha}; }),
-        programadas:schedules||[]
-      }).filter(function(x){ return x.diasDesde===null || x.diasDesde>60; })
-      .forEach(function(x){
-        notis.push({ id:"prof-"+x.propiedad, tipo:"alerta", subcat:"Limpiezas profundas",
-          texto: x.diasDesde===null ? "Sin ninguna limpieza profunda registrada" : "Sin limpieza profunda en "+x.diasDesde+" días",
-          contexto: x.propiedad,
-          cuando: x.diasDesde===null ? "—" : x.diasDesde+"d",
-          peso: x.diasDesde===null ? 1e9 : x.diasDesde,
-          abrir: function(){ setTab("sched"); } });
-      });
-    }catch(_){}
-  })();
-  /* d) Trabajos con pago pendiente — antes era una barra fija; ahora vive en el
-        centro de notificaciones. Una sola tarjeta con el total. */
-  (function(){
-    var n=(alerts||[]).length; if(!n) return;
-    var maxTs=0; (alerts||[]).forEach(function(r){ var f=String((r&&r.fecha)||"").slice(0,10); var t=f?new Date(f+"T12:00:00").getTime():0; if(t>maxTs) maxTs=t; });
-    notis.push({ id:"pagos-pend", tipo:"alerta", subcat:"Pagos",
-      texto: n+" trabajo"+(n!==1?"s":"")+" con pago pendiente",
-      contexto: "Toca para revisarlos",
-      ts: maxTs||Date.now(),
-      abrir: function(){ setTab("dash"); } });
+    if(!(alerts||[]).length) return;
+    var byTec={};
+    (alerts||[]).forEach(function(r){
+      var v=(vendors||[]).find(function(x){ return repMatchesVendor(r,x); });
+      var nombre = v ? vendorDisplay(v) : (vendorNameByEmail(vendors, r.reportadoPor)||r.reportadoPor||"Sin técnico");
+      var k = v ? String(v.id||nombre) : String(nombre);
+      var f = String((r&&r.fecha)||"").slice(0,10);
+      var ts = f ? new Date(f+"T12:00:00").getTime() : 0;
+      var monto = Number(r.total)||0;
+      var cur=byTec[k];
+      if(!cur) byTec[k]={nombre:nombre, n:1, monto:monto, ts:ts, viejo:daysSince(r.createdAt||r.id)};
+      else { cur.n++; cur.monto+=monto; if(ts>cur.ts) cur.ts=ts; cur.viejo=Math.max(cur.viejo, daysSince(r.createdAt||r.id)); }
+    });
+    Object.keys(byTec).forEach(function(k){
+      var o=byTec[k];
+      notis.push({ id:"pagos-"+k, tipo:"alerta", subcat:"Pagos",
+        texto: o.nombre+" · "+o.n+" trabajo"+(o.n!==1?"s":"")+" por pagar",
+        contexto: "Q"+Math.round(o.monto).toLocaleString()+" · el más viejo lleva "+o.viejo+" día"+(o.viejo===1?"":"s"),
+        ts: o.ts||Date.now(),
+        peso: o.monto,
+        abrir: function(){ setTab("dash"); } });
+    });
   })();
   /* Extraer daños embebidos en un reporte de limpieza → reporte de daños independiente */
   function extractDanios(r) {
@@ -7973,25 +7984,76 @@ function ProgramarMantenimiento({rep, vendors, props, reservas, schedules, onSvS
 }
 
 /* ─── Detail Modal
-   Envoltorio de hidratación: cuando la lista se cargó en modo light (sin fotos,
-   facturas ni daños, para que el arranque sea rápido), el modal pide el detalle
-   completo de ese reporte al abrirse y muestra un skeleton mientras llega. */
+   Envoltorio de hidratación. Con la carga rápida, la lista llega sin fotos: el
+   modal pide el detalle completo de ESE reporte al abrirse.
+
+   No basta con mirar la marca `_light`. Un reporte puede llegar completo y aun
+   así traer el bloque de fotos ilegible (viene como texto sin parsear, o la fila
+   se leyó a medias) — y entonces la app decía "no se subió ninguna foto" de un
+   trabajo que sí las tenía. Por eso la regla es por CONTENIDO: si es limpieza y
+   no se le ve ni una foto, se vuelve a pedir la fila entera antes de afirmar
+   nada. Si tras pedirla sigue sin fotos, entonces sí no hay. */
+var REP_FULL_CACHE = {};
+function repFotosVisibles(r){
+  if(!r) return false;
+  var hay=false;
+  function mira(v){
+    if(hay||!v) return;
+    if(Array.isArray(v)) { v.forEach(mira); return; }
+    if(typeof v==="object") { Object.keys(v).forEach(function(k){ mira(v[k]); }); return; }
+    if(typeof v==="string" && (v.indexOf("http")===0 || v.indexOf("data:")===0)) hay=true;
+  }
+  mira(r.fotosLimpieza); mira(r.fotoAntes); mira(r.fotoDespues); mira(r.danios);
+  /* Cualquier campo cuyo nombre empiece por "foto" — la lista exacta cambia
+     entre formularios y no vale la pena mantenerla duplicada aquí. */
+  Object.keys(r).forEach(function(k){ if(k.indexOf("foto")===0) mira(r[k]); });
+  return hay;
+}
+/* El bloque de fotos de limpieza a veces queda guardado como texto: si se puede
+   leer, se abre aquí mismo en vez de darlo por perdido. */
+function repDesempaca(r){
+  if(!r) return r;
+  var fl=r.fotosLimpieza;
+  if(typeof fl==="string" && fl.charAt(0)==="{"){
+    try{ fl=JSON.parse(fl); }catch(_){ fl=null; }
+  }
+  if(fl && typeof fl==="object" && !Array.isArray(fl)){
+    var o=Object.assign({}, r);
+    Object.keys(fl).forEach(function(k){ if(o[k]==null) o[k]=fl[k]; });
+    o.fotosLimpieza=fl;
+    return o;
+  }
+  return r;
+}
+function repNecesitaDetalle(r){
+  if(!r) return false;
+  if(r._light) return true;
+  if(r._hidratado) return false;
+  return isCleaning(r.categoria) && !repFotosVisibles(r);
+}
 function DetailModal(p) {
-  const [full, setFull] = useState(p.rep && p.rep._light ? null : p.rep);
+  var rep0 = repDesempaca(p.rep);
+  const [full, setFull] = useState(repNecesitaDetalle(rep0) ? null : rep0);
   const [err, setErr] = useState("");
   var id = p.rep && p.rep.id;
   useEffect(function(){
-    if (!p.rep || !p.rep._light) { setFull(p.rep); return; }
+    var base = repDesempaca(p.rep);
+    if (!repNecesitaDetalle(base)) { setFull(base); setErr(""); return; }
+    var cached = REP_FULL_CACHE[String(id)];
+    if (cached) { setFull(cached); setErr(""); return; }
     var vivo = true;
     setFull(null); setErr("");
     fetchReportFull(id).then(function(r){
       if(!vivo) return;
-      setFull(r ? Object.assign({}, p.rep, r, {_light:false}) : p.rep);
-      if(!r) setErr("");
+      var merged = repDesempaca(r ? Object.assign({}, base, r) : base);
+      merged._light=false; merged._hidratado=true;
+      REP_FULL_CACHE[String(id)] = merged;
+      setFull(merged);
     }).catch(function(e){
       if(!vivo) return;
-      setFull(p.rep);
-      setErr("No se pudieron traer las fotos de este reporte. Reintenta en un momento.");
+      var b=Object.assign({}, base, {_hidratado:true});
+      setFull(b);
+      setErr("No se pudieron traer las fotos de este reporte — lo que ves puede estar incompleto. Cierra y vuelve a abrirlo en un momento.");
     });
     return function(){ vivo = false; };
   /* eslint-disable-next-line */
@@ -8007,6 +8069,10 @@ function DetailModal(p) {
     </Overlay>
   );
   return <DetailModalView {...p} rep={full} hydrateErr={err}/>;
+}
+function HydrateWarn({msg}){
+  if(!msg) return null;
+  return <div style={{padding:"10px 14px",borderRadius:10,background:"#F7E7E4",border:"1px solid #E9C9C2",fontSize:12,fontWeight:600,color:C.attentionText,textWrap:"pretty"}}>{msg}</div>;
 }
 
 function DetailModalView({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,onQA,hasLinkedDmg,onExtract,readOnly,reservas,schedules,onSvSchedules,hydrateErr}) {
@@ -8183,6 +8249,7 @@ function DetailModalView({rep,vendors,props,onClose,onMarkPaid,onDelete,onSave,o
           {!editing&&(
             <div style={{display:"flex",flexDirection:"column",gap:18}}>
               {al&&<div style={{background:ALT[al].bg,borderRadius:10,padding:"10px 14px",fontSize:13,fontWeight:600,color:ALT[al].clr}}>⚠ {ALT[al].label}</div>}
+              <HydrateWarn msg={hydrateErr}/>
               <ExecSummary rep={rep} vendors={vendors}/>
               <div><div style={{fontSize:10,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Categoría</div><span style={{padding:"5px 13px",borderRadius:"var(--sa-pill)",fontSize:12,fontWeight:700,background:b.bg,color:b.tx}}>{rep.categoria}</span></div>
               <div><div style={{fontSize:10,color:C.earth,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",marginBottom:8}}>Trabajo realizado</div><div style={{fontSize:14,color:C.black,lineHeight:1.65,background:C.beige,padding:"13px 15px",borderRadius:10}}>{rep.descripcion}</div></div>
