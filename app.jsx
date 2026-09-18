@@ -3845,7 +3845,7 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
 
       {fReps.length===0&&<div style={{textAlign:"center",padding:"52px 20px",color:C.earth,fontSize:14}}>No hay trabajos con estos filtros.<br/><button onClick={reset} style={{marginTop:14,padding:"9px 22px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:13,fontWeight:600,cursor:"pointer"}}>Limpiar filtros</button></div>}
       {fReps.length>0&&(view==="table"
-        ?<TableView reps={shown} total={fReps.length} visible={shown.length} showAll={showAll} onToggleAll={function(){setShowAll(function(p){return !p;});}} onSelect={onSelect} onMarkPaid={onMarkPaid} vendors={vendors}/>
+        ?<TableView reps={shown} total={fReps.length} visible={shown.length} showAll={showAll} onToggleAll={function(){setShowAll(function(p){return !p;});}} onSelect={onSelect} onMarkPaid={onMarkPaid} vendors={vendors} props={props}/>
         :<CalView   reps={fReps} onSelect={onSelect} onMarkPaid={onMarkPaid} vendors={vendors}/>
       )}
     </div>
@@ -3857,7 +3857,7 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
    pantalla angosta cada columna se estrangula y el texto se parte letra por
    letra. En móvil cada trabajo pasa a ser una ficha: propiedad, qué se hizo,
    cuánto y cómo va el pago — en ese orden, que es el orden en que se lee. */
-function MobileJobList({reps,onSelect,onMarkPaid,vendors}) {
+function MobileJobList({reps,onSelect,onMarkPaid,vendors,props}) {
   return (
     <div style={{display:"flex",flexDirection:"column",gap:10}}>
       {reps.map(function(r){
@@ -3900,14 +3900,14 @@ function MobileJobList({reps,onSelect,onMarkPaid,vendors}) {
 }
 
 /* ─── Table View */
-function TableView({reps,total,visible,showAll,onToggleAll,onSelect,onMarkPaid,vendors}) {
+function TableView({reps,total,visible,showAll,onToggleAll,onSelect,onMarkPaid,vendors,props}) {
   var sc = useScreen();
   var verTodos = total>(visible==null?reps.length:visible)
     ? <button onClick={onToggleAll} style={{marginTop:12,width:"100%",padding:"13px",borderRadius:10,border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12.5,fontWeight:600,cursor:"pointer",lineHeight:1.5}}>{showAll?"Mostrar solo las últimas 3 semanas":"Ver todos los "+total+" registros — incluye más de 3 semanas atrás →"}</button>
     : null;
   if (sc.mobile) return (
     <div style={{padding:"14px 12px 100px"}}>
-      <MobileJobList reps={reps} onSelect={onSelect} onMarkPaid={onMarkPaid} vendors={vendors}/>
+      <MobileJobList reps={reps} onSelect={onSelect} onMarkPaid={onMarkPaid} vendors={vendors} props={props}/>
       {verTodos}
     </div>
   );
