@@ -147,21 +147,30 @@ function dupConflictos(reps, nuevo, vendors){
 /* ─── Auto-tariff helper — shared across all form types */
 function autoTarifa(email, vendors) {
   if (!email||!vendors) return {tarifa:"",locked:false};
-  var v = vendors.find(function(x){return x.email===email;});
+  var em = String(email).toLowerCase().trim();
+  /* Se resuelve por TODOS los correos de la persona (actual, de notificaciones y
+     anteriores). Con el `===` de antes, a quien le cambiaron el correo el reporte
+     le salía sin tarifa y quedaba fuera de la sumatoria del pago. */
+  var v = vendors.find(function(x){ return vendorEmailSet(x).indexOf(em)>=0; });
   if (!v) return {tarifa:"",locked:false};
+  var t = parseFloat(v.tarifaLimpieza||0)||0;
+  if (!(t>0)) return {tarifa:"",locked:false};
   var isEPI = v.tipo==="interno"&&(v.categoria==="EPI Limpieza"||v.categoria==="EPI Mantenimiento");
-  if (!isEPI) return {tarifa:"",locked:false};
-  var hasTarifa = v.tarifaLimpieza && parseFloat(v.tarifaLimpieza)>0;
-  return {tarifa: hasTarifa ? String(v.tarifaLimpieza) : "", locked: hasTarifa};
+  /* La tarifa se propone a cualquiera que la tenga registrada; solo queda
+     bloqueada (no editable) para el personal interno de EPI. */
+  return {tarifa: String(t), locked: isEPI};
 }
 
 
 function isCleaning(cat){return CLEAN_CATS.indexOf(cat)>=0;}
 /* Reporte de Daños = solo seguimiento. NUNCA genera pago al técnico. */
 function isDanos(cat){return cat==="Reporte de Daños";}
-function isPayable(r, vendors){
+/* Un trabajo es pagable si tiene monto propio o una tarifa que lo respalde —la de
+   la propiedad o la del técnico—. Un mismo criterio para la tabla, el botón de
+   «marcar pagados», el comprobante y las sumatorias. */
+function isPayable(r, vendors, props){
   if(!r||isDanos(r.categoria)) return false;
-  return !!(r.total||autoTarifa(r.reportadoPor||"",vendors||[]).tarifa);
+  return pgEffTotal(r, vendors||[], props)>0;
 }
 const INTERNAL_CATS = ["Administrativo","EPI Limpieza","EPI Mantenimiento"];
 
@@ -2939,10 +2948,8 @@ function AdminApp({schedVers,pagosReady,reservas,onSvReservas,ausencias,onSvAuse
     });
     setAusPopup(null);
   }
-  /* Registra un comprobante nuevo en el historial y lo abre. */
-  function pushComprobante(pago){
-    var next=[pago].concat(pagos||[]);
-    if(onSvPagos) onSvPagos(next);
+  /* Avisa por correo a cada persona incluida en un comprobante. */
+  function notifyComprobante(pago){
     try{
       var _sem=(pago.rangoDesde||pago.rangoHasta)?(fmtDate(pago.rangoDesde)+(pago.rangoHasta&&pago.rangoHasta!==pago.rangoDesde?" al "+fmtDate(pago.rangoHasta):"")):"";
       (pago.tecnicos||[]).forEach(function(t){
@@ -2950,20 +2957,42 @@ function AdminApp({schedVers,pagosReady,reservas,onSvReservas,ausencias,onSvAuse
         notifyTemplate(resolveNotifRecipients("comprobantePago", vendors, [t.vendorEmail]), "comprobantePago", {tecnico:t.vendorName, semana:_sem, trabajos:(t.trabajos?t.trabajos.length:0)+" trabajos", subtotal:"Q"+(t.subtotal||0).toLocaleString(), descuento:"− Q"+(t.adelanto||0).toLocaleString(), total:"Q"+(t.neto||0).toLocaleString(), folio:pago.folio});
       });
     }catch(_){}
+  }
+  /* Registra un comprobante nuevo en el historial y lo abre. */
+  function pushComprobante(pago){
+    if(onSvPagos) onSvPagos([pago].concat(pagos||[]));
+    notifyComprobante(pago);
     setPagoDetail(pago);
   }
-  /* Pago en LOTE: marca todos como pagados y genera UN comprobante con todos los técnicos. */
+  /* Pago en LOTE: marca todos como pagados y genera UN COMPROBANTE POR TÉCNICO.
+     Antes salía uno solo con todas las personas adentro, y ese papel no se puede
+     entregar ni firmar: cada quien necesita el suyo, con su folio. */
   function markPaidBatch(repsToMark, meta){
     meta=meta||{};
     var updated=(repsToMark||[]).map(function(r){
       var at=autoTarifa(r.reportadoPor||"",vendors);
-      return Object.assign({},r,{paid:true,total:r.total||at.tarifa});
+      return Object.assign({},r,{paid:true,total:r.total||at.tarifa||String(pgEffTotal(r,vendors,props)||"")});
     });
     updated.forEach(function(r){ onUpsert(r); });
     if(!updated.length) return;
     var afterReps=reps.map(function(r){ var u=updated.find(function(x){return x.id===r.id;}); return u||r; });
-    var pago=buildComprobante(updated,{vendors:vendors,adelantos:adelantos,allReps:afterReps,applyAdelanto:true,tipo:"lote",generadoPor:adminName,folio:pgFolio(pagos),rangoDesde:meta.rangoDesde||"",rangoHasta:meta.rangoHasta||""});
-    pushComprobante(pago);
+    /* Un grupo por persona (se ancla por vendorId y por todos sus correos). */
+    var grupos=[], idx={};
+    updated.forEach(function(r){
+      var v=(vendors||[]).find(function(x){ return repMatchesVendor(r,x); });
+      var k=String((v&&v.id)||r.reportadoPor||"—").toLowerCase();
+      if(idx[k]==null){ idx[k]=grupos.length; grupos.push([]); }
+      grupos[idx[k]].push(r);
+    });
+    var hist=pagos||[];
+    var nuevos=grupos.map(function(g){
+      var pago=buildComprobante(g,{vendors:vendors,adelantos:adelantos,allReps:afterReps,applyAdelanto:true,tipo:"lote",generadoPor:adminName,folio:pgFolio(hist),rangoDesde:meta.rangoDesde||"",rangoHasta:meta.rangoHasta||""});
+      hist=[pago].concat(hist);
+      return pago;
+    });
+    if(onSvPagos) onSvPagos(hist);
+    nuevos.forEach(notifyComprobante);
+    setPagoDetail(nuevos[0]);
   }
 
   function markPaid(idOrRep,p) {
@@ -3641,11 +3670,7 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
   var shown  = showAll ? fReps : recientes;
   /* Use auto-tariff as fallback when r.total is not yet saved */
   function effT(r){
-    if(isDanos(r.categoria)) return 0; /* daños = seguimiento, no genera pago */
-    var t=parseFloat(r.total||0);
-    if(t>0) return t;
-    var at=autoTarifa(r.reportadoPor||"",vendors||[]);
-    return at.tarifa?parseFloat(at.tarifa)||0:0;
+    return pgEffTotal(r, vendors||[], props);
   }
   var tot    = fReps.reduce(function(s,r){return s+effT(r);},0);
   var cob    = fReps.filter(function(r){return r.paid;}).reduce(function(s,r){return s+effT(r);},0);
@@ -3806,10 +3831,10 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
         {fReps.filter(function(r){return !r.paid&&isPayable(r,vendors);}).length>0&&(
           <div style={{background:"#E8F2ED",borderRadius:8,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
             <div style={{fontSize:12.5,color:C.green,fontWeight:600}}>
-              {fReps.filter(function(r){return !r.paid&&isPayable(r,vendors);}).length} trabajo{fReps.filter(function(r){return !r.paid;}).length!==1?"s":""} pendientes de pago{selGroup?" de "+selGroup.label:""}
+              {fReps.filter(function(r){return !r.paid&&isPayable(r,vendors,props);}).length} trabajo{fReps.filter(function(r){return !r.paid;}).length!==1?"s":""} pendientes de pago{selGroup?" de "+selGroup.label:""}
             </div>
             <button onClick={function(){
-              var toMark = fReps.filter(function(r){return !r.paid&&isPayable(r,vendors);});
+              var toMark = fReps.filter(function(r){return !r.paid&&isPayable(r,vendors,props);});
               if(onMarkPaidBatch) onMarkPaidBatch(toMark,{rangoDesde:fDesde,rangoHasta:fHasta});
             }} style={{padding:"7px 16px",borderRadius:7,border:"none",background:"#3d6b52",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
               ✓ Marcar todos como pagados
@@ -3838,7 +3863,7 @@ function MobileJobList({reps,onSelect,onMarkPaid,vendors}) {
       {reps.map(function(r){
         var b=BADGE[r.categoria]||BADGE["Mantenimiento"]; var al=alertLvl(r);
         var tec=(function(){var v=(vendors||[]).find(function(x){return repMatchesVendor(r,x);});return v?vendorDisplay(v):(r.reportadoPor||"—");})();
-        var pagable=!isDanos(r.categoria)&&(r.total||autoTarifa(r.reportadoPor||"",vendors).tarifa);
+        var pagable=isPayable(r,vendors,props);
         return (
           <div key={r.id} onClick={function(){onSelect(r);}}
             style={{background:"#fff",border:"1px solid "+(al?ALT[al].clr+"55":C.line),borderLeft:"3px solid "+(al?ALT[al].clr:b.tx),borderRadius:14,padding:"13px 14px",cursor:"pointer",boxShadow:"var(--sa-shadow-xs)"}}>
@@ -4182,7 +4207,7 @@ function ExecDash({reps,vendors,reviews,rvCasos,props,reservas,schedules,onSvSch
     if(!tMap[k]) tMap[k]={label:k,count:0}; tMap[k].count++;
   });
   var tData    = Object.values(tMap).sort(function(a,b){return a.label.localeCompare(b.label);});
-  function execT(r){ return isDanos(r.categoria)?0:(parseFloat(r.total||0)||0); }
+  function execT(r){ return pgEffTotal(r, vendors||[], props); }
   var tFact    = fil.reduce(function(s,r){return s+execT(r);},0);
   var tCobr    = fil.filter(function(r){return r.paid;}).reduce(function(s,r){return s+execT(r);},0);
   var tPend    = fil.filter(function(r){return r.total&&!r.paid&&!isDanos(r.categoria);}).reduce(function(s,r){return s+execT(r);},0);
@@ -4319,7 +4344,7 @@ function PagosLimpieza({reps,vendors}) {
     var owner = (vendors||[]).find(function(v){return repMatchesVendor(r,v);});
     var key = owner ? ("v:"+owner.id) : (r.reportadoPor||"—");
     if (!byVend[key]) byVend[key]={email:(owner&&owner.email)||r.reportadoPor, vendor:owner||null, count:0,totalQ:0,paid:0,pendiente:0};
-    var t = parseFloat(r.total||0);
+    var t = pgEffTotal(r, vendors||[]);
     byVend[key].count++;
     byVend[key].totalQ += t;
     if (r.paid) byVend[key].paid += t; else byVend[key].pendiente += t;
@@ -4490,7 +4515,7 @@ function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendo
   function setF(key,val){setForm(function(p){var u=Object.assign({},p);u[key]=val;return u;});}
 
   async function sub(){
-    if(!form.propiedad||!form.reportadoPor||!form.descripcion)return;
+    if(!cat||!form.propiedad||!form.reportadoPor||!form.descripcion)return;
     setBusy(true);
     try {
       await onSubmit(Object.assign({},form,{id:Date.now(),createdAt:Date.now(),categoria:cat}));
@@ -4519,7 +4544,14 @@ function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendo
           <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
             {allowedCats.map(function(c){var b=BADGE[c]||BADGE["Mantenimiento"];var s=cat===c;return <button key={c} onClick={function(){setCat(c);}} style={{padding:"7px 14px",borderRadius:"var(--sa-pill)",cursor:"pointer",border:"1.5px solid "+(s?b.tx:C.gray),background:s?b.bg:"#fff",color:s?b.tx:C.earth,fontSize:12.5,fontWeight:600,transition:"all .18s"}}>{c}</button>;})}
           </div>
+          {!cat&&<div style={{marginTop:11,display:"flex",alignItems:"center",gap:8,fontSize:11.5,color:C.earth,lineHeight:1.6}}>
+            <span style={{width:6,height:6,borderRadius:"50%",background:C.peach,flexShrink:0}}/>
+            Elige el tipo de trabajo para continuar. Lo demás se desbloquea después.
+          </div>}
         </Card>
+        {/* Nada se llena antes de saber qué trabajo es: la categoría define la tarifa,
+           la evidencia que se pide y a dónde va el reporte. */}
+        <div aria-disabled={!cat} style={{display:"flex",flexDirection:"column",gap:14,opacity:cat?1:.4,pointerEvents:cat?"auto":"none",filter:cat?"none":"grayscale(1)",transition:"opacity var(--sa-dur-2,360ms) var(--sa-ease,cubic-bezier(.22,.61,.36,1))"}}>
         <Card title="Responsable">
           {defaultVendor
             ?<div style={{fontSize:14,fontWeight:600,color:C.black,background:C.surfaceWarm,padding:"11px 14px",borderRadius:10}}>{vendors.find(function(v){return v.email===defaultVendor;})?vendorDisplay(vendors.find(function(v){return v.email===defaultVendor;})):defaultVendor}</div>
@@ -4558,14 +4590,15 @@ function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendo
             <F label="Total cobrado (Q)"><input type="number" placeholder="Ej. 850" value={form.total} onChange={function(e){setF("total",e.target.value);}}/></F>
           </div>
         </Card>
-        <BigBtn onClick={sub} dis={busy||!form.propiedad||!form.reportadoPor||!form.descripcion}>{busy?"Enviando…":"Enviar reporte →"}</BigBtn>
+        <BigBtn onClick={sub} dis={busy||!cat||!form.propiedad||!form.reportadoPor||!form.descripcion}>{busy?"Enviando…":"Enviar reporte →"}</BigBtn>
         {/* Para reclamos a Airbnb: el mismo reporte, en inglés y con la evidencia numerada. */}
         <button onClick={function(){ airbnbClaimPDF(Object.assign({id:Date.now(),createdAt:Date.now(),categoria:cat},form), vendors); }}
-          disabled={!form.propiedad||!form.descripcion}
-          style={{padding:"13px",borderRadius:12,border:"1.5px solid "+C.gray,background:"#fff",color:(!form.propiedad||!form.descripcion)?C.gray:C.black,fontSize:12.5,fontWeight:700,cursor:(!form.propiedad||!form.descripcion)?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>
+          disabled={!cat||!form.propiedad||!form.descripcion}
+          style={{padding:"13px",borderRadius:12,border:"1.5px solid "+C.gray,background:"#fff",color:(!cat||!form.propiedad||!form.descripcion)?C.gray:C.black,fontSize:12.5,fontWeight:700,cursor:(!cat||!form.propiedad||!form.descripcion)?"default":"pointer",fontFamily:"Montserrat,sans-serif"}}>
           Reporte para soporte de Airbnb (en inglés) →
         </button>
         <div style={{fontSize:11,color:C.taupe,textAlign:"center",lineHeight:1.6,marginTop:-4}}>Genera un PDF en inglés con el resumen, los costos y la evidencia numerada, listo para adjuntar a un caso.</div>
+        </div>
       </div>
     </div>
   );
@@ -8433,9 +8466,9 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codig
   GAL_PERMISO = galeriaHoy(vendor);
   useEPIPrefs();   /* repinta al cambiar idioma/moneda desde el menú de usuario */
   const [pagTab,setPagTab] = useState("hist");
-  var tot=reps.reduce(function(s,r){return s+(isDanos(r.categoria)?0:parseFloat(r.total||0));},0);
-  var cob=reps.filter(function(r){return r.paid;}).reduce(function(s,r){return s+parseFloat(r.total||0);},0);
-  var pnd=reps.filter(function(r){return r.total&&!r.paid;});
+  var tot=reps.reduce(function(s,r){return s+pgEffTotal(r,allVendors||[],props);},0);
+  var cob=reps.filter(function(r){return r.paid;}).reduce(function(s,r){return s+pgEffTotal(r,allVendors||[],props);},0);
+  var pnd=reps.filter(function(r){return !r.paid&&pgEffTotal(r,allVendors||[],props)>0;});
   var cleaningReps = reps.filter(function(r){return isCleaning(r.categoria);});
   var pendingCorrections = cleaningReps.filter(qaSinResponder).length;
 
@@ -16441,9 +16474,10 @@ function QuickEditTotal({rep, vendors, onSave}) {
       onMouseEnter={function(e){e.currentTarget.style.background=C.surfaceWarm;}}
       onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}
       title="Toca para editar total">
-      <span style={{fontSize:14,fontWeight:700,color:rep.total?C.black:C.gray}}>
+      <span style={{fontSize:14,fontWeight:700,color:(rep.total||at.tarifa)?C.black:C.gray}}>
         {rep.total?"Q"+rep.total:at.tarifa?"Q"+at.tarifa:"—"}
       </span>
+      {!rep.total&&at.tarifa&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".12em",textTransform:"uppercase",color:C.earth}} title="Tarifa del técnico — sí cuenta para el pago">tarifa</span>}
       <span style={{fontSize:9,color:C.gray}}>✏</span>
     </div>
   );
@@ -18004,7 +18038,7 @@ function last8WeeksSum(reps,email){
   if(!email) return 0;
   var start=mondayOf(new Date()); start.setDate(start.getDate()-7*7); /* covers current + 7 prior weeks */
   var s=0;
-  (reps||[]).forEach(function(r){ if(r.reportadoPor!==email||isDanos(r.categoria)) return; var d=new Date((r.fecha||"")+"T12:00:00"); if(isNaN(d.getTime())) return; if(d>=start) s+=parseFloat(r.total||0)||0; });
+  (reps||[]).forEach(function(r){ if(r.reportadoPor!==email||isDanos(r.categoria)) return; var d=new Date((r.fecha||"")+"T12:00:00"); if(isNaN(d.getTime())) return; if(d>=start) s+=pgEffTotal(r,ADV_VENDORS); });
   return s;
 }
 function maxAdvanceFor(reps,email){ return Math.floor(last8WeeksSum(reps,email)/2); }
@@ -18019,7 +18053,7 @@ function incomeLast8(reps, emails){
     var rp=(r.reportadoPor||"").toLowerCase().trim();
     if(!set[rp]||isDanos(r.categoria)) return;
     var d=new Date((r.fecha||"")+"T12:00:00"); if(isNaN(d.getTime())) return;
-    if(d>=start) s+=parseFloat(r.total||0)||0;
+    if(d>=start) s+=pgEffTotal(r,ADV_VENDORS);
   });
   return s;
 }
@@ -18035,7 +18069,7 @@ function isInternalVendor(v){ return !!v && v.tipo==="interno"; }
 function avgWeekPay(reps,email){
   if(!email) return 0;
   var weeks={};
-  (reps||[]).forEach(function(r){ if(r.reportadoPor!==email||isDanos(r.categoria)) return; var d=new Date((r.fecha||"")+"T12:00:00"); if(isNaN(d.getTime()))return; var k=weekKeyOf(d); weeks[k]=(weeks[k]||0)+(parseFloat(r.total||0)||0); });
+  (reps||[]).forEach(function(r){ if(r.reportadoPor!==email||isDanos(r.categoria)) return; var d=new Date((r.fecha||"")+"T12:00:00"); if(isNaN(d.getTime()))return; var k=weekKeyOf(d); weeks[k]=(weeks[k]||0)+pgEffTotal(r,ADV_VENDORS); });
   var vals=Object.keys(weeks).map(function(k){return weeks[k];}).filter(function(x){return x>0;});
   if(!vals.length) return 0;
   return Math.round(vals.reduce(function(a,b){return a+b;},0)/vals.length);
@@ -18442,10 +18476,14 @@ function pgFolio(list){
   return "CP-"+yr+"-"+String(seq).padStart(4,"0");
 }
 /* Monto pagable de un trabajo (usa la auto-tarifa como respaldo, igual que el dashboard) */
-function pgEffTotal(r, vendors){
-  if(isDanos(r.categoria)) return 0;
+function pgEffTotal(r, vendors, props){
+  if(!r||isDanos(r.categoria)) return 0;
   var t=parseFloat(r.total||0);
   if(t>0) return t;
+  /* Respaldo: tarifa especial de la propiedad y, si no hay, la del técnico. */
+  var v=(vendors||[]).find(function(x){ return repMatchesVendor(r,x); });
+  var esp=parseFloat(tarifaTrabajo(v, r.propiedad, props)||0)||0;
+  if(esp>0) return esp;
   var at=autoTarifa(r.reportadoPor||"",vendors||[]);
   return at.tarifa?(parseFloat(at.tarifa)||0):0;
 }
@@ -18709,7 +18747,7 @@ function nomBuildPago(v, per, opts){
   opts=opts||{};
   var email=nomVendorEmail(v), name=vendorDisplay(v), lineas=[];
   function L(t,m){ lineas.push({concepto:t, monto:nom2(m)}); }
-  var det={email:email,tipo:per.tipo,periodo:per.key,label:per.label,puesto:(v&&v.puesto)||"",
+  var det={email:email,tipo:per.tipo,periodo:per.key,label:per.label,puesto:(v&&v.puesto)||"",inicio:(v&&v.inicioLaboral)||"",
            base:nomBase(v),bonif:nomBonif(v),otras:nomOtras(v),igssMes:nomIgss(v),
            isrMes:nomN(v&&v.isrMensual),otrosMes:nomN(v&&v.otrosDesc),totalMes:nomTotalMes(v)};
   if(per.tipo==="nomina"){
@@ -18829,6 +18867,36 @@ function NomCampo({label, value, onSave}){
   );
 }
 
+/* Campo de texto o fecha editable en línea (planilla) */
+function NomTexto({label, value, tipo, placeholder, onSave}){
+  const [ed,setEd]=useState(false);
+  const [val,setVal]=useState(value==null?"":String(value));
+  useEffect(function(){ if(!ed) setVal(value==null?"":String(value)); },[value,ed]);
+  function commit(){ setEd(false); var nv=String(val).trim(); if(nv!==String(value==null?"":value)) onSave(nv); }
+  var shown = tipo==="date" ? (value?fmtDate(value):"—") : (String(value==null?"":value).trim()||"—");
+  return (
+    <span style={{display:"inline-flex",alignItems:"center",gap:6}}>
+      <span style={{fontSize:8.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.earth}}>{label}</span>
+      {ed
+        ? <input autoFocus type={tipo||"text"} value={val} placeholder={placeholder||""} onChange={function(e){setVal(e.target.value);}} onBlur={commit} onKeyDown={function(e){ if(e.key==="Enter") commit(); if(e.key==="Escape") setEd(false); }} style={{border:"1.5px solid "+C.black,borderRadius:6,padding:"2px 6px",fontSize:12,fontFamily:"Montserrat,sans-serif",outline:"none",background:"#fff",color:C.black,minWidth:tipo==="date"?130:150}}/>
+        : <button onClick={function(){setEd(true);}} title={"Editar "+String(label).toLowerCase()} style={{background:"none",border:"none",padding:0,fontSize:12,fontWeight:600,color:C.black,fontFamily:"Montserrat,sans-serif",cursor:"text",borderBottom:"1px dashed "+C.gray}}>{shown}</button>}
+    </span>
+  );
+}
+/* Antigüedad en palabras, a partir de la fecha de inicio. */
+function nomAntiguedad(iso){
+  if(!iso) return "";
+  var d=new Date(String(iso).slice(0,10)+"T12:00:00");
+  if(isNaN(d.getTime())) return "";
+  var hoy=new Date(), m=(hoy.getFullYear()-d.getFullYear())*12+(hoy.getMonth()-d.getMonth());
+  if(hoy.getDate()<d.getDate()) m--;
+  if(m<0) return "";
+  if(m<1) return "primer mes";
+  if(m<12) return m+" mes"+(m===1?"":"es");
+  var a=Math.floor(m/12), r=m%12;
+  return a+" año"+(a===1?"":"s")+(r?" y "+r+" mes"+(r===1?"":"es"):"");
+}
+
 /* ─── Panel de planilla (solo administrador principal) */
 function NominaAdmin({vendors, pagos, adelantos, onSvPagos, ajustes, onSvAjustes, onSvV}) {
   const [selEmail, setSel]   = useState("");
@@ -18907,7 +18975,12 @@ function NominaAdmin({vendors, pagos, adelantos, onSvPagos, ajustes, onSvAjustes
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:14,flexWrap:"wrap"}}>
                   <div>
                     <div style={{fontSize:15.5,fontWeight:600,color:C.black}}>{vendorDisplay(v)}</div>
-                    <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{v.puesto||"—"} · {v.email}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap",marginTop:6}}>
+                      <NomTexto label="Puesto" value={v.puesto||""} placeholder="Ej. Coordinadora de operaciones" onSave={function(n){ setCampo(v,"puesto",n); }}/>
+                      <NomTexto label="Inicio" tipo="date" value={v.inicioLaboral||""} onSave={function(n){ setCampo(v,"inicioLaboral",n); }}/>
+                      {v.inicioLaboral&&nomAntiguedad(v.inicioLaboral)&&<span style={{fontSize:11,color:C.taupe}}>{nomAntiguedad(v.inicioLaboral)} en el equipo</span>}
+                    </div>
+                    <div style={{fontSize:11.5,color:C.earth,marginTop:5}}>{v.email}</div>
                   </div>
                   <div style={{textAlign:"right"}}>
                     <div style={{fontSize:18,fontWeight:700,color:C.black,fontVariantNumeric:"tabular-nums"}}>{pgMoney(nomQuincena(v)-nomAdvCuota(v,adelantos,pagos))}</div>
