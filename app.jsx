@@ -11711,7 +11711,7 @@ function CodeInput({value, onSave, width, disabled, big}){
   return (
     <div style={{position:"relative",width:width||118,flexShrink:0}}>
       <input value={val} onClick={function(e){e.stopPropagation();}} onChange={change} placeholder="—" inputMode="numeric" disabled={disabled}
-        style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+(saved?C.green:(has?C.black:C.gray)),borderRadius:"var(--sa-pill)",padding:big?"10px 8px":"9px 8px",fontSize:big?17:15,fontWeight:700,letterSpacing:".04em",textAlign:"center",fontFamily:"Montserrat,sans-serif",outline:"none",background:has?C.surfaceWarm:"#fff",color:C.black,minHeight:big?48:44,fontVariantNumeric:"tabular-nums",transition:"border-color .18s"}}/>
+        style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+(saved?C.green:(has?C.black:C.gray)),borderRadius:"var(--sa-pill)",padding:big?"9px 10px":"9px 8px",fontSize:big?15:15,fontWeight:700,letterSpacing:".04em",textAlign:big?"left":"center",fontFamily:"Montserrat,sans-serif",outline:"none",background:has?C.surfaceWarm:"#fff",color:C.black,minHeight:44,fontVariantNumeric:"tabular-nums",transition:"border-color .18s"}}/>
       {saved&&<span style={{position:"absolute",top:"100%",left:0,right:0,marginTop:3,textAlign:"center",fontSize:9.5,fontWeight:700,letterSpacing:".06em",color:C.green,textTransform:"uppercase"}}>Guardado ✓</span>}
     </div>
   );
@@ -13514,9 +13514,9 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
   /* Abre en HOY: la ruta que el equipo está corriendo ahora mismo es la que el
      administrador necesita ver al entrar, no la de mañana. */
   var scPA = useScreen(); var mobPA = scPA.mobile;
-  /* En teléfono la fila de apartamento se apila: el nombre completo arriba y
-     abajo farol · técnico · código, para que ningún dígito quede cortado. */
-  var colsApto = mobPA ? "auto minmax(0,1fr) 112px" : "1fr auto 24% 88px";
+  /* En teléfono cada trabajo se apila en tres renglones: nombre · farol+técnico ·
+     código en fila propia a todo lo ancho, para que ningún dígito quede cortado. */
+  var colsApto = mobPA ? "auto minmax(0,1fr)" : "1fr auto 24% 88px";
   const [dia,      setDia]      = useState(0);      /* 0 = hoy, 1 = mañana, … */
   const [busy,     setBusy]     = useState("");
   const [msg,      setMsg]      = useState(null);
@@ -15616,10 +15616,18 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
                           </div>
                           {(function(){
                             var cfg=codeCfgOf(codigos, f.apto);
-                            if(cfg.mode==="none") return <span style={{fontSize:10.5,color:C.taupe,textAlign:"right"}}>sin código</span>;
                             var perm=cfg.mode==="permanent";
                             var cval = perm ? String(cfg.permCode||"") : ((codigos[quincenaInfo(fecha).key]||{})[normalize(f.apto)]||"");
-                            return <CodeInput value={cval} width={"100%"} big={mobPA} onSave={function(v){ if(perm) onSvCodigos&&onSvCodigos(withCodeMode(codigos,f.apto,"permanent",v)); else onSvCodigos&&onSvCodigos(withCodigoQuincena(codigos,f.apto,fecha,v)); }}/>;
+                            var campo = cfg.mode==="none"
+                              ? <span style={{fontSize:10.5,color:C.taupe,textAlign:mobPA?"left":"right"}}>sin código</span>
+                              : <CodeInput value={cval} width={"100%"} big={mobPA} onSave={function(v){ if(perm) onSvCodigos&&onSvCodigos(withCodeMode(codigos,f.apto,"permanent",v)); else onSvCodigos&&onSvCodigos(withCodigoQuincena(codigos,f.apto,fecha,v)); }}/>;
+                            if(!mobPA) return campo;
+                            return (
+                              <div style={{gridColumn:"1 / -1",display:"grid",gridTemplateColumns:"auto minmax(0,1fr)",alignItems:"center",gap:10}} onClick={function(e){ e.stopPropagation(); }}>
+                                <span style={{fontSize:9,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.taupe}}>Código</span>
+                                {campo}
+                              </div>
+                            );
                           })()}
                         </div>
                         {/* Las mismas acciones que en la vista por técnico: mover, cancelar, quitar. */}
@@ -16253,16 +16261,18 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
             <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{horaOk(s.hora,SCHED.HORA_INI)} a {horaOk(s.horaFin,SCHED.HORA_FIN)}</div>
           </div>
           {codigoVigente(codigos, s.propiedad, s.fecha, s.codigoAcceso)&&(
-            <div style={{textAlign:"right",flexShrink:0,minWidth:0}}>
-              <div style={{fontSize:8.5,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:3}}>Código de acceso</div>
-              <div style={{fontSize:20,fontWeight:700,color:C.black,letterSpacing:".04em",background:C.surfaceWarm,padding:"6px 12px",borderRadius:8,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{codigoVigente(codigos, s.propiedad, s.fecha, s.codigoAcceso)}</div>
-              {codeCfgOf(codigos,s.propiedad).mode!=="permanent"&&<div style={{fontSize:9,color:C.taupe,marginTop:4,letterSpacing:".04em"}}>Vence {fmtDate(quincenaInfo(s.fecha).hasta)}</div>}
+            <div style={{flexBasis:"100%",minWidth:0,marginTop:2,borderTop:"1px solid "+C.line,paddingTop:11,display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"center"}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:8.5,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:4}}>Código de acceso</div>
+                <div style={{fontSize:17,fontWeight:700,color:C.black,letterSpacing:".06em",background:C.surfaceWarm,padding:"8px 12px",borderRadius:8,fontVariantNumeric:"tabular-nums",overflowWrap:"anywhere",lineHeight:1.25}}>{codigoVigente(codigos, s.propiedad, s.fecha, s.codigoAcceso)}</div>
+              </div>
+              {codeCfgOf(codigos,s.propiedad).mode!=="permanent"&&<div style={{fontSize:9,color:C.taupe,letterSpacing:".04em",textAlign:"right",flexShrink:0,alignSelf:"end",paddingBottom:9}}>Vence {fmtDate(quincenaInfo(s.fecha).hasta)}</div>}
             </div>
           )}
           {!codigoVigente(codigos, s.propiedad, s.fecha, s.codigoAcceso)&&codeCfgOf(codigos,s.propiedad).mode!=="none"&&(
-            <div style={{textAlign:"right",flexShrink:0,minWidth:0}}>
-              <div style={{fontSize:8.5,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:3}}>Código de acceso</div>
-              <div style={{fontSize:11.5,fontWeight:600,color:C.attentionText,background:"var(--sa-attention-tint,#FDECE7)",padding:"7px 12px",borderRadius:8,whiteSpace:"nowrap"}}>Pendiente</div>
+            <div style={{flexBasis:"100%",minWidth:0,marginTop:2,borderTop:"1px solid "+C.line,paddingTop:11}}>
+              <div style={{fontSize:8.5,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:4}}>Código de acceso</div>
+              <div style={{fontSize:11.5,fontWeight:600,color:C.attentionText,background:"var(--sa-attention-tint,#FDECE7)",padding:"8px 12px",borderRadius:8}}>Pendiente — lo cargamos antes de tu llegada</div>
             </div>
           )}
         </div>
