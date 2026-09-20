@@ -11644,6 +11644,17 @@ function quincenaRango(fecha){ var q=quincenaInfo(fecha); return fmtDate(q.desde
 function codeCfgOf(codigos, prop){ var c=((codigos||{}).__cfg||{})[normalize(prop)]; return c?Object.assign({mode:"temp",permCode:""},c):{mode:"temp",permCode:""}; }
 /* Código vigente para una propiedad en una fecha: none → sin código; permanente →
    el fijo; si no, el de la quincena; luego el semanal viejo; luego el de la ficha. */
+/* ¿Esta propiedad ya ha tenido códigos cargados alguna vez? Si sí, un período sin
+   código significa "todavía no lo cargan" — NO significa "usa el de la ficha".
+   Mostrar el viejo de la ficha era lo que le entregaba al técnico un código muerto. */
+function tuvoCodigoAlgunaVez(codigos, prop){
+  var k=normalize(prop);
+  return Object.keys(codigos||{}).some(function(key){
+    if(key==="__cfg") return false;
+    var w=codigos[key];
+    return w && typeof w==="object" && String(w[k]||"").trim();
+  });
+}
 function codigoVigente(codigos, prop, fecha, fallback){
   codigos=codigos||{};
   var k=normalize(prop);
@@ -11654,6 +11665,7 @@ function codigoVigente(codigos, prop, fecha, fallback){
   if(c) return c;
   var legacy=codigoSemana(codigos, prop, fecha, "");
   if(legacy) return legacy;
+  if(tuvoCodigoAlgunaVez(codigos, prop)) return "";
   return String(fallback||"").trim();
 }
 function withCodigoQuincena(codigos, prop, fecha, val){
@@ -11683,7 +11695,7 @@ function codigosPendientes(schedules, codigos, fecha){
 
 /* Caja de código estilo píldora con confirmación visual de guardado. El guardado
    es automático; el flash "Guardado ✓" le da tranquilidad al usuario. */
-function CodeInput({value, onSave, width, disabled}){
+function CodeInput({value, onSave, width, disabled, big}){
   const [val,setVal] = useState(value==null?"":String(value));
   const [saved,setSaved] = useState(false);
   const tRef = useRef(null);
@@ -11699,7 +11711,7 @@ function CodeInput({value, onSave, width, disabled}){
   return (
     <div style={{position:"relative",width:width||118,flexShrink:0}}>
       <input value={val} onClick={function(e){e.stopPropagation();}} onChange={change} placeholder="—" inputMode="numeric" disabled={disabled}
-        style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+(saved?C.green:(has?C.black:C.gray)),borderRadius:"var(--sa-pill)",padding:"9px 13px",fontSize:15,fontWeight:700,letterSpacing:".12em",textAlign:"center",fontFamily:"Montserrat,sans-serif",outline:"none",background:has?C.surfaceWarm:"#fff",color:C.black,minHeight:44,fontVariantNumeric:"tabular-nums",transition:"border-color .18s"}}/>
+        style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+(saved?C.green:(has?C.black:C.gray)),borderRadius:"var(--sa-pill)",padding:big?"10px 8px":"9px 8px",fontSize:big?17:15,fontWeight:700,letterSpacing:".04em",textAlign:"center",fontFamily:"Montserrat,sans-serif",outline:"none",background:has?C.surfaceWarm:"#fff",color:C.black,minHeight:big?48:44,fontVariantNumeric:"tabular-nums",transition:"border-color .18s"}}/>
       {saved&&<span style={{position:"absolute",top:"100%",left:0,right:0,marginTop:3,textAlign:"center",fontSize:9.5,fontWeight:700,letterSpacing:".06em",color:C.green,textTransform:"uppercase"}}>Guardado ✓</span>}
     </div>
   );
@@ -13501,6 +13513,10 @@ function checkoutsSinRuta(o){
 function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors, props, reservas, onSvReservas, ausencias, onSvAusencias, swaps, onSvSwaps, reps, reviews, rvCasos, onSvP, onSvV, canNom, codigos, onSvCodigos, schedErr, onUpsert, onReasignar}) {
   /* Abre en HOY: la ruta que el equipo está corriendo ahora mismo es la que el
      administrador necesita ver al entrar, no la de mañana. */
+  var scPA = useScreen(); var mobPA = scPA.mobile;
+  /* En teléfono la fila de apartamento se apila: el nombre completo arriba y
+     abajo farol · técnico · código, para que ningún dígito quede cortado. */
+  var colsApto = mobPA ? "auto minmax(0,1fr) 112px" : "1fr auto 24% 88px";
   const [dia,      setDia]      = useState(0);      /* 0 = hoy, 1 = mañana, … */
   const [busy,     setBusy]     = useState("");
   const [msg,      setMsg]      = useState(null);
@@ -15567,23 +15583,23 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
               );
             }
             return (
-              <div style={{marginTop:11}}>
+              <div style={{marginTop:11,paddingBottom:mobPA?92:0}}>
                 {filas.length===0&&<div style={{padding:"22px 0",textAlign:"center",fontSize:12,color:C.taupe}}>No hay limpiezas programadas este día.</div>}
                 {filas.length>0&&(
                   <div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr auto 24% 88px",gap:10,alignItems:"center",padding:"9px 2px",borderBottom:"1px solid "+C.gray}}>
+                    <div style={{display:"grid",gridTemplateColumns:mobPA?"1fr auto":"1fr auto 24% 88px",gap:10,alignItems:"center",padding:"9px 2px",borderBottom:"1px solid "+C.gray}}>
                       <TH col="apto" label="Apartamento"/>
-                      <span/>
+                      {!mobPA&&<span/>}
                       <TH col="tec" label="Técnico"/>
-                      <span style={{fontSize:9.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.taupe,textAlign:"right"}}>Código</span>
+                      {!mobPA&&<span style={{fontSize:9.5,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.taupe,textAlign:"right"}}>Código</span>}
                     </div>
                     {filas.map(function(f){
                       var cancelada=f.cz.estado==="cancelada";
                       return (
                         <div key={f.s.id} style={{borderBottom:"1px solid "+C.line,background:accion===f.s.id?C.surfaceWarm:"transparent"}}>
-                        <div onClick={function(){ setAccion(accion===f.s.id?null:f.s.id); }} style={{display:"grid",gridTemplateColumns:"1fr auto 24% 88px",gap:10,alignItems:"center",padding:"11px 2px",cursor:"pointer"}}>
-                          <div style={{minWidth:0}}>
-                            <div style={{fontSize:12.5,fontWeight:600,color:cancelada?C.taupe:C.black,textDecoration:cancelada?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.apto}</div>
+                        <div onClick={function(){ setAccion(accion===f.s.id?null:f.s.id); }} style={{display:"grid",gridTemplateColumns:colsApto,gap:mobPA?8:10,rowGap:mobPA?7:0,alignItems:"center",padding:"11px 2px",cursor:"pointer"}}>
+                          <div style={{minWidth:0,gridColumn:mobPA?"1 / -1":"auto"}}>
+                            <div style={{fontSize:mobPA?13.5:12.5,fontWeight:600,color:cancelada?C.taupe:C.black,textDecoration:cancelada?"line-through":"none",overflow:mobPA?"visible":"hidden",textOverflow:"ellipsis",whiteSpace:mobPA?"normal":"nowrap",lineHeight:1.3,textWrap:"pretty"}}>{f.apto}</div>
                             <div style={{display:"flex",gap:6,marginTop:3,flexWrap:"wrap",alignItems:"center"}}>
                               {SCHED.esProfunda(f.s.tipo)&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#fff",background:C.peach,padding:"2px 7px",borderRadius:"var(--sa-pill)"}}>Profunda</span>}
                               {f.s.entradaHoy&&<span style={{fontSize:8.5,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:"#B4553C"}}>Entrada</span>}
@@ -15593,7 +15609,7 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
                           </div>
                           {farolActivo
                             ? <Farol estado={farol([f.s])} size={11}/>
-                            : <span/>}
+                            : <span style={{width:mobPA?0:"auto"}}/>}
                           <div style={{display:"flex",alignItems:"center",gap:7,minWidth:0}}>
                             <span style={{fontSize:12,color:f.tec?C.black:C.orange,fontWeight:f.tec?500:700,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.tec||"sin técnico"}</span>
                             <span style={{marginLeft:"auto",flexShrink:0,display:"flex"}}><Icon name={accion===f.s.id?"chevronUp":"dots"} size={15} stroke={C.taupe}/></span>
@@ -15603,7 +15619,7 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
                             if(cfg.mode==="none") return <span style={{fontSize:10.5,color:C.taupe,textAlign:"right"}}>sin código</span>;
                             var perm=cfg.mode==="permanent";
                             var cval = perm ? String(cfg.permCode||"") : ((codigos[quincenaInfo(fecha).key]||{})[normalize(f.apto)]||"");
-                            return <CodeInput value={cval} width={"100%"} onSave={function(v){ if(perm) onSvCodigos&&onSvCodigos(withCodeMode(codigos,f.apto,"permanent",v)); else onSvCodigos&&onSvCodigos(withCodigoQuincena(codigos,f.apto,fecha,v)); }}/>;
+                            return <CodeInput value={cval} width={"100%"} big={mobPA} onSave={function(v){ if(perm) onSvCodigos&&onSvCodigos(withCodeMode(codigos,f.apto,"permanent",v)); else onSvCodigos&&onSvCodigos(withCodigoQuincena(codigos,f.apto,fecha,v)); }}/>;
                           })()}
                         </div>
                         {/* Las mismas acciones que en la vista por técnico: mover, cancelar, quitar. */}
@@ -16237,9 +16253,16 @@ function VendorSchedule({vendor, schedules, codigos, ausencias, onSvAusencias, r
             <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{horaOk(s.hora,SCHED.HORA_INI)} a {horaOk(s.horaFin,SCHED.HORA_FIN)}</div>
           </div>
           {codigoVigente(codigos, s.propiedad, s.fecha, s.codigoAcceso)&&(
-            <div style={{textAlign:"right",flexShrink:0}}>
+            <div style={{textAlign:"right",flexShrink:0,minWidth:0}}>
               <div style={{fontSize:8.5,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:3}}>Código de acceso</div>
-              <div style={{fontSize:20,fontWeight:700,color:C.black,letterSpacing:".12em",background:C.surfaceWarm,padding:"6px 13px",borderRadius:8,fontVariantNumeric:"tabular-nums"}}>{codigoVigente(codigos, s.propiedad, s.fecha, s.codigoAcceso)}</div>
+              <div style={{fontSize:20,fontWeight:700,color:C.black,letterSpacing:".04em",background:C.surfaceWarm,padding:"6px 12px",borderRadius:8,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{codigoVigente(codigos, s.propiedad, s.fecha, s.codigoAcceso)}</div>
+              {codeCfgOf(codigos,s.propiedad).mode!=="permanent"&&<div style={{fontSize:9,color:C.taupe,marginTop:4,letterSpacing:".04em"}}>Vence {fmtDate(quincenaInfo(s.fecha).hasta)}</div>}
+            </div>
+          )}
+          {!codigoVigente(codigos, s.propiedad, s.fecha, s.codigoAcceso)&&codeCfgOf(codigos,s.propiedad).mode!=="none"&&(
+            <div style={{textAlign:"right",flexShrink:0,minWidth:0}}>
+              <div style={{fontSize:8.5,color:C.taupe,letterSpacing:".14em",textTransform:"uppercase",marginBottom:3}}>Código de acceso</div>
+              <div style={{fontSize:11.5,fontWeight:600,color:C.attentionText,background:"var(--sa-attention-tint,#FDECE7)",padding:"7px 12px",borderRadius:8,whiteSpace:"nowrap"}}>Pendiente</div>
             </div>
           )}
         </div>
