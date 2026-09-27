@@ -31,6 +31,8 @@
   var INICIO = "2026-07-31";
 
   var PROFUNDA_CADA_DIAS = 30;
+  /* Bono de reparto por zona: la favorita pesa el doble que la preferida. */
+  var ZONA_PREF_BONO = 14, ZONA_FAV_BONO = 28;
   var DIAS_HORIZONTE = 3;
 
   /* Minutos de trabajo según habitaciones. Es lo que hace que dos limpiezas
@@ -231,6 +233,22 @@
     return true;
   }
 
+  /* ─── Propiedad nueva ───────────────────────────────────────────────────
+     Los primeros ARRANQUE_MESES desde la fecha de alta (ficha: altaEn) la
+     propiedad no entra al ciclo de profundas: acaba de prepararse y la primera
+     profunda automática llegaría sobre un apartamento recién puesto a punto.
+     La limpieza de checkout sigue normal. Sin altaEn no aplica. */
+  var ARRANQUE_MESES = 2;
+  function finArranque(prop) {
+    var a = String((prop && prop.altaEn) || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(a)) return "";
+    var d = fecha(a); d.setMonth(d.getMonth() + ARRANQUE_MESES); return iso(d);
+  }
+  function enArranque(prop, f) {
+    var fin = finArranque(prop);
+    return !!fin && String(f || "").slice(0, 10) < fin;
+  }
+
   function hayEntrada(reservas, nombre, f) {
     for (var i = 0; i < reservas.length; i++) {
       var r = reservas[i];
@@ -308,6 +326,8 @@
          programa, así que aquí hay que frenar la profunda a mano: si no, se
          montaría justo encima de ella. */
       if (reglas[pk] && enPausa(reglas[pk], porProp[pk].fecha, "profunda")) continue;
+      /* Propiedad nueva: sin profundas automáticas en sus primeros dos meses. */
+      if (reglas[pk] && enArranque(reglas[pk], porProp[pk].fecha)) continue;
       var base = porProp[pk];
       var prev = ultima[pk];
       /* Sin historial: se programa la primera. Con historial: cuando ya pasaron
@@ -489,14 +509,18 @@
          no puede seguir dando ventaja ni servir de punto de partida. */
       var zAsig = zonasDe(v, "zonas");
       var zPref = zonasDe(v, "zonasPref").filter(function (z) { return zAsig.indexOf(z) >= 0; });
+      /* Zona favorita: un escalón arriba de la preferida. Pesa el doble, pero sigue
+         siendo ventaja y no exclusividad — la rotación y la carga pueden ganarle. */
+      var zTop = zonasDe(v, "zonasTop").filter(function (z) { return zAsig.indexOf(z) >= 0; });
       est[em] = {
         v: v, email: em,
         zonas: zAsig,
         pref: zPref,
+        top: zTop,
         maxDia: Math.max(1, parseInt(v.maxDia, 10) || MAX_DIA_DEF),
         puedeProfunda: v.puedeProfunda !== false,
         usados: 0, minutos: 0, paradas: [],
-        base: { zonasBase: zPref.concat(zAsig) },
+        base: { zonasBase: zTop.concat(zPref, zAsig) },
         semana: cargaSemana(em, existentes, f),
         rating: ratingNorm(em, ratings),
         rot: rotacionReciente(em, existentes, o.historial, o.hoy || f),
@@ -611,7 +635,8 @@
         var cnd = pendientes[rj];
         if (!factible(cnd, tr, false)) continue;
         var zc = zonaKey(cnd.zona), nn = [], sc = 0;
-        if (tr.pref.indexOf(zc) >= 0) { sc += 14; nn.push("zona de preferencia"); }
+        if (tr.top.indexOf(zc) >= 0) { sc += ZONA_FAV_BONO; nn.push("zona favorita"); }
+        else if (tr.pref.indexOf(zc) >= 0) { sc += ZONA_PREF_BONO; nn.push("zona de preferencia"); }
         if (cnd.entradaHoy) sc += 12;
         sc -= travelMin(tr.base, cnd) * 1.1;
         if (tr.rot.total >= 5 && zc) {
@@ -766,7 +791,8 @@
 
       /* La preferencia da prioridad DENTRO de sus zonas, sin volverse jaula: el
          bono es moderado para que la rotación pueda ganarle. */
-      if (t.pref.indexOf(z) >= 0) { s += 14; notas.push("zona de preferencia"); }
+      if (t.top.indexOf(z) >= 0) { s += ZONA_FAV_BONO; notas.push("zona favorita"); }
+      else if (t.pref.indexOf(z) >= 0) { s += ZONA_PREF_BONO; notas.push("zona de preferencia"); }
       else { s += 6; notas.push("zona asignada"); }
 
       s -= viaje * 1.1;
@@ -1001,6 +1027,8 @@
       if (enPausa(props[p], hoy, "profunda")) continue;
       /* Ni una a la que se le quitaron las profundas a propósito. */
       if (props[p].sinProfundas) continue;
+      /* Ni una propiedad nueva en sus dos primeros meses. */
+      if (enArranque(props[p], hoy)) continue;
       var key = norm(nombre);
       var u = ultima[key] || "";
       out.push({
@@ -1051,6 +1079,8 @@
     revisionMatutina: revisionMatutina, reajustePorAusencia: reajustePorAusencia,
     rutaTexto: rutaTexto, ratingNorm: ratingNorm, cargaSemana: cargaSemana, RATING_MIN_N: RATING_MIN_N,
     rotacionReciente: rotacionReciente, ROT_DIAS: ROT_DIAS,
-    estadoProfundas: estadoProfundas
+    estadoProfundas: estadoProfundas,
+    ARRANQUE_MESES: ARRANQUE_MESES, finArranque: finArranque, enArranque: enArranque,
+    ZONA_FAV_BONO: ZONA_FAV_BONO, ZONA_PREF_BONO: ZONA_PREF_BONO
   };
 })(typeof window !== "undefined" ? window : this);

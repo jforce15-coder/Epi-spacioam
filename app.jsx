@@ -1297,6 +1297,7 @@ var NOTIF_META = [
   {id:"danoUrgente",        label:"Daño urgente",                 desc:"Se clasificó un daño de urgencia alta"},
   {id:"solicitudAdelanto",  label:"Nueva solicitud de adelanto",  desc:"Un técnico solicitó un adelanto"},
   {id:"adelantoFirma",      label:"Adelanto por firmar",          desc:"El admin inició un adelanto para el técnico"},
+  {id:"adelantoFirmado",    label:"Adelanto firmado",             desc:"El técnico firmó su contrato en Docs · toca depositar"},
   {id:"adelantoDepositado", label:"Adelanto depositado",          desc:"Se activó o depositó un adelanto"},
   {id:"comprobantePago",    label:"Comprobante de pago",          desc:"Se generó el comprobante semanal"},
   {id:"mantenimientoProgramado", label:"Mantenimiento programado", desc:"Se le asignó a un técnico la reparación de un daño"}
@@ -1322,6 +1323,7 @@ var CORREOS_CAT = [
   {id:"danoUrgente",            cat:"Daños",            roles:["adminPrincipal","adminSecundario"], dedicado:true, disparo:"Se clasifica un daño como urgente"},
   {id:"solicitudAdelanto",      cat:"Adelantos y pagos",roles:["adminPrincipal","adminSecundario"], dedicado:true, disparo:"Un técnico solicita un adelanto"},
   {id:"adelantoFirma",          cat:"Adelantos y pagos",roles:["tecnico"], dedicado:true, disparo:"El admin inicia un adelanto"},
+  {id:"adelantoFirmado",        cat:"Adelantos y pagos",roles:["adminPrincipal","adminSecundario"], dedicado:true, disparo:"El técnico firma el contrato en Docs"},
   {id:"adelantoDepositado",     cat:"Adelantos y pagos",roles:["tecnico"], dedicado:true, disparo:"Se deposita/activa el adelanto"},
   {id:"comprobantePago",        cat:"Adelantos y pagos",roles:["tecnico"], dedicado:true, disparo:"Se genera el comprobante semanal"},
   {id:"intercambioSolicitud",   cat:"Intercambios",     roles:["tecnico"], dedicado:true, disparo:"Un técnico propone ceder su ruta"},
@@ -1342,7 +1344,7 @@ var NOTIF_DEFAULTS = {
   correccionDuda:{supervisores:1,adminPrincipal:1,adminSecundarios:1},
   ratingRevision:{adminPrincipal:1,adminSecundarios:1,supervisores:1},
   danoUrgente:{adminPrincipal:1,adminSecundarios:1}, solicitudAdelanto:{adminPrincipal:1,adminSecundarios:1},
-  adelantoFirma:{tecnico:1}, adelantoDepositado:{tecnico:1}, comprobantePago:{tecnico:1},
+  adelantoFirma:{tecnico:1}, adelantoFirmado:{adminPrincipal:1,adminSecundarios:1}, adelantoDepositado:{tecnico:1}, comprobantePago:{tecnico:1},
   mantenimientoProgramado:{tecnico:1},
   ausencia:{adminPrincipal:1,adminSecundarios:1}
 };
@@ -3127,7 +3129,7 @@ function AdminApp({schedVers,pagosReady,reservas,onSvReservas,ausencias,onSvAuse
         tab={tab} setTab={setTab}
         notis={notis}
         sheetsOk={sheetsOk} adminLabel={adminVendor?vendorDisplay(adminVendor):"Admin"}
-        navItems={[["dash","Dashboard","dash"],["form","Formulario","edit"],["sched","Programa","calendar"],["qa","Calidad","star"],["adv","Adelantos","coins"]]}
+        navItems={[["dash","Dashboard","dash"],["form","Formulario","edit"],["sched","Programa","calendar"],["qa","Calidad","star"],["adv","Adelantos","coins",(adelantos||[]).filter(function(a){ return a.status==="por_depositar"||a.status==="pendiente"; }).length]]}
         onConfig={function(){setTab("cfg");}} configActive={tab==="cfg"}
         onLogout={onLogout}
         role="Admin"
@@ -3157,7 +3159,7 @@ function AdminApp({schedVers,pagosReady,reservas,onSvReservas,ausencias,onSvAuse
         {canNotif
           ? <AdvancesAdmin adelantos={adelantos} reps={reps} vendors={vendors} onSvAdelantos={onSvAdelantos}/>
           : (adminVendor
-              ? <AdvanceRequest vendor={adminVendor} reps={(reps||[]).filter(function(r){return repMatchesVendor(r,adminVendor);})} adelantos={(adelantos||[]).filter(function(a){return vendorEmailSet(adminVendor).map(function(e){return String(e).toLowerCase();}).indexOf(String(a.vendorEmail||"").toLowerCase())>=0;})} onSvAdelantos={onSvAdelantos}/>
+              ? <AdvanceRequest vendor={adminVendor} reps={(reps||[]).filter(function(r){return repMatchesVendor(r,adminVendor);})} adelantos={(adelantos||[]).filter(function(a){return vendorEmailSet(adminVendor).map(function(e){return String(e).toLowerCase();}).indexOf(String(a.vendorEmail||"").toLowerCase())>=0;})} allAdelantos={adelantos} onSvAdelantos={onSvAdelantos}/>
               : null)}
       </div>
       <div style={{display:tab==="cfg" ?"block":"none"}}><CfgView  regSol={regSol} onSvRegSol={onSvRegSol} reps={reps} vendors={vendors} props={props} codigos={codigos||{}} onSvCodigos={onSvCodigos} onVerComo={onVerComo} feedback={feedback} onSvFeedback={onSvFeedback} schedules={schedules} adminPin={adminPin} company={company} extCats={extCats||[]} notifPrefs={notifPrefs} canNotif={canNotif} onSvNotifPrefs={onSvNotifPrefs} formCfg={formCfg} onSvFormCfg={onSvFormCfg} onSvV={onSvV} onSvP={onSvP} onSvPin={onSvPin} onSvCo={onSvCo} onSvExtCats={onSvExtCats}/></div>
@@ -3173,6 +3175,13 @@ function AdminApp({schedVers,pagosReady,reservas,onSvReservas,ausencias,onSvAuse
 /* ─── Dashboard container */
 function DashView({props,reservas,nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews,rvCasos,rvIA,reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh,schedules,onSvSchedules,onUpsert,onDelete}) {
   const [sub,setSub] = useState("ops");
+  /* El botón principal de la barra móvil siempre regresa al Dashboard Operativo,
+     aunque se haya quedado abierto otro subtab. */
+  useEffect(function(){
+    function toOps(){ setSub("ops"); }
+    window.addEventListener("epi:dashOps", toOps);
+    return function(){ window.removeEventListener("epi:dashOps", toOps); };
+  },[]);
   return (
     <div>
       {/* La alerta de pagos pendientes se movió al centro de notificaciones (item "pagos-pend"). */}
@@ -7536,6 +7545,10 @@ function ZonasPicker({v, vendors, onSave, props, reps}){
   var todas=SCHED.zonasEnUso(props);
   var asignadas=(v.zonas||[]).map(SCHED.zonaKey);
   var pref=(v.zonasPref||[]).map(SCHED.zonaKey);
+  /* Favorita: un escalón arriba de la preferida (pesa el doble en el reparto).
+     Una favorita también queda en zonasPref, para que todo lo que ya lee la
+     preferencia la siga viendo. */
+  var top=(v.zonasTop||[]).map(SCHED.zonaKey).filter(function(z){ return asignadas.indexOf(z)>=0; });
   function set(campo, lista){ onSave(vendors.map(function(x){ return x.id===v.id?Object.assign({},x,(function(){var o={};o[campo]=lista;return o;})()):x; })); }
   function toggle(z){
     var cur=asignadas.slice(), ix=cur.indexOf(z);
@@ -7544,14 +7557,18 @@ function ZonasPicker({v, vendors, onSave, props, reps}){
       /* Una zona quitada no puede seguir siendo preferida: se guardan los dos
          campos juntos, o el segundo guardado pisa al primero. */
       onSave(vendors.map(function(x){
-        return x.id===v.id ? Object.assign({},x,{zonas:cur, zonasPref:pref.filter(function(p){ return p!==z; })}) : x;
+        return x.id===v.id ? Object.assign({},x,{zonas:cur, zonasPref:pref.filter(function(p){ return p!==z; }), zonasTop:top.filter(function(p){ return p!==z; })}) : x;
       }));
     } else { cur.push(z); set("zonas",cur); }
   }
+  /* Cada toque sobre una zona asignada sube un escalón:
+     asignada → preferida → favorita → asignada. Los dos campos se guardan juntos. */
   function togglePref(z){
-    var cur=pref.slice(), ix=cur.indexOf(z);
-    if(ix>=0) cur.splice(ix,1); else cur.push(z);
-    set("zonasPref",cur);
+    var np=pref.slice(), nt=top.slice();
+    if(nt.indexOf(z)>=0){ nt=nt.filter(function(x){ return x!==z; }); np=np.filter(function(x){ return x!==z; }); }
+    else if(np.indexOf(z)>=0){ nt.push(z); }
+    else { np.push(z); }
+    onSave(vendors.map(function(x){ return x.id===v.id ? Object.assign({},x,{zonasPref:np, zonasTop:nt}) : x; }));
   }
   /* Si alguien tiene guardada una zona que ya no está en el portafolio, se sigue
      mostrando para poder quitarla. */
@@ -7564,19 +7581,20 @@ function ZonasPicker({v, vendors, onSave, props, reps}){
   );
   return (
     <div>
-      <div style={{fontSize:12,color:C.taupe,lineHeight:1.6,marginBottom:8,textWrap:"pretty"}}>Toca una zona para asignarla. Toca de nuevo una asignada para marcarla como preferida por cercanía. Doble toque la quita.</div>
+      <div style={{fontSize:12,color:C.taupe,lineHeight:1.6,marginBottom:8,textWrap:"pretty"}}>Toca una zona para asignarla. Cada toque sobre una asignada sube un nivel: preferida (★) y luego favorita (★★), que pesa el doble en el reparto. Un toque más la regresa a asignada; doble toque la quita.</div>
       <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
         {visibles.map(function(z){
-          var on=asignadas.indexOf(z)>=0, pf=pref.indexOf(z)>=0;
+          var on=asignadas.indexOf(z)>=0, fav=on&&top.indexOf(z)>=0, pf=on&&!fav&&pref.indexOf(z)>=0;
           return (
             <button key={z} onClick={function(){ if(!on) toggle(z); else togglePref(z); }}
               onDoubleClick={function(){ if(on) toggle(z); }}
-              title={pf?"Preferida":on?"Asignada":"Sin asignar"}
-              style={{padding:"5px 10px",borderRadius:"var(--sa-pill)",fontSize:10.5,fontWeight:600,cursor:"pointer",
-                border:"1.5px solid "+(pf?C.peach:on?C.black:C.gray),
-                background:pf?C.peach:on?C.black:"#fff",
-                color:(pf||on)?"#fff":C.taupe}}>
-              {SCHED.zonaLabel(z)}{pf?" ★":""}
+              title={fav?"Favorita":pf?"Preferida":on?"Asignada":"Sin asignar"}
+              style={{display:"inline-flex",alignItems:"center",gap:5,padding:"5px 10px",borderRadius:"var(--sa-pill)",fontSize:10.5,fontWeight:600,cursor:"pointer",
+                border:"1.5px solid "+((fav||pf)?C.peach:on?C.black:C.gray),
+                boxShadow:fav?"0 0 0 2px var(--accent-tint,#FCEFEB)":"none",
+                background:on?C.black:"#fff",
+                color:on?"#fff":C.taupe}}>
+              {SCHED.zonaLabel(z)}{(fav||pf)&&<span aria-hidden="true" style={{color:C.peach,letterSpacing:0}}>{fav?"★★":"★"}</span>}
             </button>
           );
         })}
@@ -7587,8 +7605,8 @@ function ZonasPicker({v, vendors, onSave, props, reps}){
             Ya ha trabajado en {hist.orden.slice(0,5).map(function(z){ return SCHED.zonaLabel(z)+" ("+hist.cuenta[z]+")"; }).join(" · ")}
           </div>
           <button onClick={function(){
-            var top=hist.orden.slice(0,4);
-            onSave(vendors.map(function(x){ return x.id===v.id?Object.assign({},x,{zonas:top,zonasPref:hist.orden.slice(0,2)}):x; }));
+            var top4=hist.orden.slice(0,4);
+            onSave(vendors.map(function(x){ return x.id===v.id?Object.assign({},x,{zonas:top4,zonasPref:hist.orden.slice(0,2),zonasTop:top.filter(function(z){ return hist.orden.slice(0,2).indexOf(z)>=0; })}):x; }));
           }} style={{marginTop:8,padding:"6px 12px",minHeight:34,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:10.5,fontWeight:600,cursor:"pointer"}}>
             Usar su historial como zonas
           </button>
@@ -7597,7 +7615,7 @@ function ZonasPicker({v, vendors, onSave, props, reps}){
       {asignadas.length===0
         ? <div style={{fontSize:10.5,color:C.orange,marginTop:7,fontWeight:600}}>Sin zonas marcadas no recibirá ninguna limpieza automática.</div>
         : <div style={{fontSize:12,color:C.earth,marginTop:7,lineHeight:1.6,textWrap:"pretty"}}>El motor solo le asigna limpiezas en estas zonas. Fuera de ellas, únicamente por asignación manual.</div>}
-      {asignadas.length>0&&<div style={{fontSize:10.5,color:C.earth,marginTop:7}}>{asignadas.length} zona{asignadas.length===1?"":"s"}{pref.length?" · prefiere "+pref.map(SCHED.zonaLabel).join(", "):""}</div>}
+      {asignadas.length>0&&<div style={{fontSize:10.5,color:C.earth,marginTop:7}}>{asignadas.length} zona{asignadas.length===1?"":"s"}{top.length?" · favorita "+top.map(SCHED.zonaLabel).join(", "):""}{pref.filter(function(z){ return top.indexOf(z)<0; }).length?" · prefiere "+pref.filter(function(z){ return top.indexOf(z)<0; }).map(SCHED.zonaLabel).join(", "):""}</div>}
     </div>
   );
 }
@@ -7824,7 +7842,7 @@ function PropsCfg({props,onSave}) {
       <div style={{background:"#fff",borderRadius:12,padding:14,border:"1.5px dashed "+C.gray}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,alignItems:"end"}}>
           <F label="Agregar propiedad"><input placeholder="Ej. Torre Norte – Apto 304" value={newP} onChange={function(e){setNewP(e.target.value);}}/></F>
-          <button onClick={function(){if(!newP)return;onSave(props.concat([{id:"p"+Date.now(),name:newP,cuartos:1,banos:1}]));setNewP("");}} style={{height:44,padding:"0 18px",borderRadius:10,border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>+ Agregar</button>
+          <button onClick={function(){if(!newP)return;onSave(props.concat([{id:"p"+Date.now(),name:newP,cuartos:1,banos:1,altaEn:todayStr()}]));setNewP("");}} style={{height:44,padding:"0 18px",borderRadius:10,border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>+ Agregar</button>
         </div>
       </div>
     </div>
@@ -10165,7 +10183,7 @@ function TutorialSystem({enabled, role}){
     <>
       {/* Botón "?" flotante — sobre la barra inferior en móvil */}
       <button onClick={function(){setHub(true);}} title="Ayuda y tutoriales" aria-label="Ayuda y tutoriales"
-        style={{position:"fixed",right:16,bottom:mobile?84:20,zIndex:9200,width:52,height:52,borderRadius:"50%",border:"none",background:C.peach,color:"#fff",boxShadow:"0 6px 18px rgba(233,130,106,.4)",cursor:"pointer",fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:26,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>?</button>
+        style={{position:"fixed",right:mobile?"auto":20,left:mobile?12:"auto",bottom:mobile?"calc(80px + env(safe-area-inset-bottom))":20,zIndex:9200,width:mobile?44:48,height:mobile?44:48,borderRadius:"50%",border:"1.5px solid "+C.peach,background:"#fff",color:C.black,boxShadow:"var(--sa-shadow-md,0 12px 40px rgba(62,63,63,.07))",cursor:"pointer",fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:mobile?22:24,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>?</button>
       {forced&&<TipsPlayer items={forcedItems} mobile={mobile} forced={true} onClose={function(){ markTipsSeen(); setForced(false); }}/>}
       {hub&&<TipsHub mobile={mobile} role={role} onClose={function(){setHub(false);}} onPick={function(id){ setHub(false); setSingle(id); }} onPlayNew={function(){ setHub(false); setReplay(true); }}/>}
       {replay&&<TipsPlayer items={forcedItems} mobile={mobile} forced={false} onClose={function(){setReplay(false);}}/>}
@@ -10537,7 +10555,12 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
      desde 640. En esa franja el grupo derecho se salía de la pantalla.
      Entre 640 y 1130 las pestañas y los botones van compactos: solo ícono,
      con el nombre en el tooltip. */
-  var compacto = sc.w < 1220;
+  var compacto = sc.w < 1040;      /* solo ícono (nombre en el tooltip) */
+  var medio    = sc.w < 1220;      /* ícono + nombre, más apretado */
+  var NAV_MUTED = "var(--fg-muted,#6F6867)";
+  /* Globo con conteo sobre una pestaña: lo que requiere acción (p. ej. adelantos
+     firmados por depositar). Relleno ink, no peach: lleva texto. */
+  function navBadge(n, top, right){ if(!n) return null; return <span aria-label={n+" pendiente"+(n===1?"":"s")} style={{position:"absolute",top:top,right:right,minWidth:16,height:16,boxSizing:"border-box",padding:"0 4px",borderRadius:"var(--sa-pill)",background:C.black,color:"#fff",border:"1.5px solid #fff",fontSize:9.5,fontWeight:700,fontVariantNumeric:"tabular-nums",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>{n>9?"9+":n}</span>; }
 
   return (
     <>
@@ -10567,9 +10590,12 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
 
         {/* Desktop nav */}
         {!isMobile&&(
-          <nav style={{display:"flex",alignItems:"center",flexShrink:0,boxSizing:"border-box",height:40,background:C.surfaceWarm,borderRadius:"var(--sa-pill)",padding:"0 3px",gap:2,border:"1px solid "+C.line}}>
-            {navItems.map(function(it){ var k=it[0],l=it[1],ic=it[2]; return (
-              <button key={k} title={l} onClick={function(){setTab(k);}} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:compacto?0:7,padding:compacto?"0 12px":"0 13px",borderRadius:"var(--sa-pill)",height:32,minHeight:32,border:"none",fontSize:11.5,fontWeight:600,letterSpacing:".04em",cursor:"pointer",background:tab===k?C.black:"transparent",color:tab===k?"#fff":C.taupe,transition:"all .2s"}}><Icon name={ic} size={compacto?17:15} stroke={tab===k?"#fff":C.taupe}/>{!compacto&&l}</button>
+          <nav className="epi-nav" aria-label="Secciones" style={{display:"flex",alignItems:"center",flexShrink:1,minWidth:0,boxSizing:"border-box",height:44,background:C.surfaceWarm,borderRadius:"var(--sa-pill)",padding:"0 4px",gap:2,border:"1px solid "+C.line}}>
+            {navItems.map(function(it){ var k=it[0],l=it[1],ic=it[2],on=tab===k; return (
+              <button key={k} title={l} aria-current={on?"page":undefined} onClick={function(){setTab(k);}} style={{position:"relative",display:"flex",alignItems:"center",justifyContent:"center",gap:compacto?0:7,padding:compacto?"0 13px":(medio?"0 11px":"0 15px"),borderRadius:"var(--sa-pill)",height:36,minHeight:36,border:"none",fontFamily:"Montserrat,sans-serif",fontSize:medio?11.5:12,fontWeight:on?700:600,letterSpacing:".03em",whiteSpace:"nowrap",cursor:"pointer",background:on?C.black:"transparent",color:on?"#fff":NAV_MUTED,transition:"background-color .18s cubic-bezier(.22,.61,.36,1), color .18s cubic-bezier(.22,.61,.36,1)"}}>
+                <Icon name={ic} size={compacto?18:15} stroke={on?"#fff":NAV_MUTED}/>{!compacto&&l}
+                {navBadge(it[3], 1, compacto?3:-2)}
+              </button>
             ); })}
           </nav>
         )}
@@ -10584,28 +10610,37 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
         </div>
       </header>
 
-      {/* Mobile bottom tab bar — Dashboard aislado y protagónico al centro */}
+      {/* Barra inferior móvil. El botón principal (Dashboard) va a la DERECHA, al
+          alcance del pulgar derecho con el teléfono en una mano; las demás
+          secciones se reparten a su izquierda. La barra es chrome translúcido. */}
       {isMobile&&(function(){
-        function tabBtn(it){ var k=it[0],l=it[1],ic=it[2]; return (
-          <button key={k} onClick={function(){setTab(k);}} style={{flex:1,position:"relative",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,border:"none",background:"transparent",cursor:"pointer",padding:"6px 0"}}>
-            <Icon name={ic} size={20} stroke={tab===k?C.black:C.taupe}/>
-            <span style={{fontSize:9,fontWeight:tab===k?700:500,letterSpacing:".06em",color:tab===k?C.black:C.taupe,textTransform:"uppercase"}}>{l.split(" ")[0]}</span>
-            {tab===k&&<div style={{position:"absolute",top:0,left:"50%",transform:"translateX(-50%)",width:24,height:2,background:C.black,borderRadius:"var(--sa-pill)"}}/>}
+        function tabBtn(it){ var k=it[0],l=it[1],ic=it[2],on=tab===k; return (
+          <button key={k} onClick={function(){setTab(k);}} aria-current={on?"page":undefined} aria-label={l} style={{flex:1,minWidth:0,minHeight:48,position:"relative",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,border:"none",background:"transparent",cursor:"pointer",padding:"4px 0",WebkitTapHighlightColor:"transparent"}}>
+            <span style={{position:"relative",display:"flex",alignItems:"center",justifyContent:"center",width:48,height:28,borderRadius:"var(--sa-pill)",background:on?"var(--color-ink-08,rgba(62,63,63,.08))":"transparent",transition:"background-color .18s cubic-bezier(.22,.61,.36,1)"}}>
+              <Icon name={ic} size={20} stroke={on?C.black:NAV_MUTED}/>
+              {navBadge(it[3], -3, 5)}
+            </span>
+            <span style={{fontSize:9,fontWeight:on?700:500,letterSpacing:".08em",color:on?C.black:NAV_MUTED,textTransform:"uppercase",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.split(" ")[0]}</span>
           </button>
         ); }
-        function bar(children){ return <div style={{position:"fixed",bottom:0,left:0,right:0,zIndex:50,background:"#fff",borderTop:"1px solid "+C.line,display:"flex",alignItems:"stretch",height:60,paddingBottom:"env(safe-area-inset-bottom)"}}>{children}</div>; }
-        var di=navItems.findIndex(function(x){return x[0]==="dash";});
+        function bar(children){ return <nav aria-label="Secciones" style={{position:"fixed",bottom:0,left:0,right:0,zIndex:50,background:"rgba(250,250,250,.94)",backdropFilter:"blur(20px) saturate(120%)",WebkitBackdropFilter:"blur(20px) saturate(120%)",borderTop:"1px solid "+C.line,display:"flex",alignItems:"center",gap:2,height:64,boxSizing:"content-box",padding:"0 6px",paddingBottom:"env(safe-area-inset-bottom)"}}>{children}</nav>; }
+        /* Botón principal: Dashboard Operativo para el administrador; Nuevo reporte
+           para el técnico (lo que más hace en campo). */
+        var mainKey = navItems.some(function(x){return x[0]==="dash";}) ? "dash" : (navItems.some(function(x){return x[0]==="new";}) ? "new" : "");
+        var di=navItems.findIndex(function(x){return x[0]===mainKey;});
         if(di<0) return bar(navItems.map(tabBtn));
         var rest=navItems.filter(function(_,i){return i!==di;});
-        var half=Math.ceil(rest.length/2);
+        var onMain=tab===mainKey;
+        var esDash=mainKey==="dash";
+        var mainLbl=esDash?"Dashboard operativo":navItems[di][1];
         var dashBtn=(
-          <div key="__dash" style={{flex:"0 0 auto",width:76,display:"flex",alignItems:"flex-start",justifyContent:"center"}}>
-            <button onClick={function(){setTab("dash");}} aria-label="Dashboard" style={{marginTop:-20,width:62,height:62,borderRadius:"50%",border:"4px solid #fff",background:C.peach,boxShadow:"0 6px 18px rgba(233,130,106,.35)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",outline:"none"}}>
-              <Icon name="home" size={26} stroke="#fff"/>
+          <div key="__main" style={{flex:"0 0 auto",width:72,height:64,display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
+            <button onClick={function(){ setTab(mainKey); if(esDash){ try{ window.dispatchEvent(new Event("epi:dashOps")); }catch(_){} } }} aria-label={mainLbl} title={mainLbl} aria-current={onMain?"page":undefined} style={{width:56,height:56,marginTop:-18,borderRadius:"50%",border:"4px solid #FAFAFA",background:C.peach,boxShadow:onMain?"0 0 0 2px "+C.black+", 0 8px 20px rgba(233,130,106,.38)":"0 8px 20px rgba(233,130,106,.38)",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",WebkitTapHighlightColor:"transparent",transition:"box-shadow .18s cubic-bezier(.22,.61,.36,1)"}}>
+              <Icon name={esDash?"home":"plus"} size={esDash?24:26} stroke="#fff"/>
             </button>
           </div>
         );
-        return bar([].concat(rest.slice(0,half).map(tabBtn),[dashBtn],rest.slice(half).map(tabBtn)));
+        return bar([].concat(rest.map(tabBtn),[<span key="__sep" aria-hidden="true" style={{width:1,height:28,background:C.line,flexShrink:0}}/>,dashBtn]));
       })()}
 
       <NotiCenter open={notiOpen} onClose={function(){setNotiOpen(false);}} notis={notisVis} onDismiss={dismissNoti} onSnooze={snoozeNoti}/>
@@ -11632,12 +11667,18 @@ function codigoSemana(codigos, propiedad, fecha, fallback){
    "none" (no usa código). Los temporales viven en codigos[<lunes de la quincena>]. */
 function quincenaInfo(fecha){
   var lun; try{ lun=SCHED.lunesDe(String(fecha).slice(0,10)); }catch(e){ lun=String(fecha||"").slice(0,10); }
-  var d1=new Date("2024-01-01T12:00:00"), d2=new Date(lun+"T12:00:00");
-  var weeks=Math.floor((d2-d1)/(7*86400000));
+  /* Todo en UTC puro. Antes se restaban dos fechas en hora LOCAL: en un teléfono
+     con horario de verano (hora de EE. UU., p. ej.) la resta salía una hora corta,
+     Math.floor perdía una semana entera y la quincena caía en la anterior — el
+     móvil mostraba y GUARDABA los códigos en la quincena vieja. */
+  var p=String(lun||"").slice(0,10).split("-");
+  var d1=Date.UTC(2024,0,1), d2=Date.UTC(+p[0],(+p[1])-1,+p[2]);
+  if(isNaN(d2)) d2=d1;
+  var weeks=Math.floor(Math.round((d2-d1)/86400000)/7);
   var block=Math.floor(weeks/2);
-  var start=new Date(d1.getTime()+block*14*86400000);
-  var s=start.toISOString().slice(0,10);
-  var e=new Date(start.getTime()+13*86400000).toISOString().slice(0,10);
+  var start=d1+block*14*86400000;
+  var s=new Date(start).toISOString().slice(0,10);
+  var e=new Date(start+13*86400000).toISOString().slice(0,10);
   return {key:s, desde:s, hasta:e};
 }
 function quincenaRango(fecha){ var q=quincenaInfo(fecha); return fmtDate(q.desde)+" al "+fmtDate(q.hasta); }
@@ -12039,7 +12080,9 @@ function ReglasPropCfg({props, vendors, onSvP}){
   const [loteTarifa,setLoteTarifa]=useState("");
 
   var tecs=schedTecnicos(vendors||[]);
-  function tieneRegla(p){ return !!(p&&(p.profundaTecnico||(parseFloat(p.tarifaEspecial)>0))); }
+  var hoyR=SCHED.hoyGT();
+  function nueva(p){ return !!(SCHED.enArranque&&SCHED.enArranque(p,hoyR)); }
+  function tieneRegla(p){ return !!(p&&(p.profundaTecnico||(parseFloat(p.tarifaEspecial)>0)||nueva(p))); }
   var conRegla=(props||[]).filter(tieneRegla);
 
   /* Un solo camino de escritura para una propiedad o para diez. */
@@ -12064,6 +12107,7 @@ function ReglasPropCfg({props, vendors, onSvP}){
     }
     if(parseFloat(p.tarifaEspecial)>0) t.push("Tarifa Q"+p.tarifaEspecial);
     if(sinProfundasActivo(p)) t.push("Profundas en pausa");
+    else if(nueva(p)) t.push("Nueva · sin profundas hasta el "+fmtDate(SCHED.finArranque(p)));
     return t.length?t.join(" · "):"Reglas generales";
   }
 
@@ -12101,7 +12145,7 @@ function ReglasPropCfg({props, vendors, onSvP}){
           <div>
             <div style={{fontSize:14,fontWeight:600,color:C.black}}>Reglas por propiedad</div>
             <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>
-              Técnico fijo para las profundas y tarifa propia del apartamento. Puedes marcar varias y aplicar lo mismo a todas.
+              Técnico fijo para las profundas, tarifa propia y fecha de alta del apartamento. Puedes marcar varias y aplicar lo mismo a todas.
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:9,flexShrink:0}}>
@@ -12152,6 +12196,17 @@ function ReglasPropCfg({props, vendors, onSvP}){
                           {tecs.map(function(v){ return <option key={v.id} value={String(v.email||"").toLowerCase()}>{vendorDisplay(v)}</option>; })}
                         </select>
                         {sinProfundasActivo(p)&&<div style={{fontSize:11,color:C.taupe,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>Ahora mismo esta propiedad tiene las profundas en pausa, así que el motor no le montará ninguna.</div>}
+                      </div>
+                      <div>
+                        <span style={LBL}>Fecha de alta</span>
+                        <input type="date" value={p.altaEn||""} onChange={function(e){ set(p.name,{altaEn:e.target.value}); }} style={IN}/>
+                        <div style={{fontSize:11,color:C.taupe,marginTop:6,lineHeight:1.6,textWrap:"pretty"}}>
+                          {p.altaEn
+                            ? (nueva(p)
+                                ? <>Propiedad nueva: el motor no le programa profundas hasta el <b style={{color:C.black}}>{fmtDate(SCHED.finArranque(p))}</b>. La limpieza de checkout sigue normal.</>
+                                : <>Ya pasaron sus dos primeros meses: entra al ciclo normal de profundas.</>)
+                            : <>Las propiedades nuevas no reciben profundas durante sus dos primeros meses. Las que llegan de Hospitable la traen puesta; aquí puedes corregirla.</>}
+                        </div>
                       </div>
                       <div>
                         <span style={LBL}>Tarifa de esta propiedad (Q)</span>
@@ -14523,11 +14578,13 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
       var zs=(f.v.zonas||[]).map(SCHED.zonaKey);
       return {f:f, tieneZona:z?zs.indexOf(z)>=0:true,
               prefiere:(f.v.zonasPref||[]).map(SCHED.zonaKey).indexOf(z)>=0,
+              favorita:(f.v.zonasTop||[]).map(SCHED.zonaKey).indexOf(z)>=0,
               carga:f.mias.length+((extra||{})[f.em]||0),
               rating:(ratings[f.em]&&ratings[f.em].score)||0};
     }).sort(function(a,b){
       if(a.tieneZona!==b.tieneZona) return a.tieneZona?-1:1;
       if(a.carga!==b.carga) return a.carga-b.carga;
+      if(a.favorita!==b.favorita) return a.favorita?-1:1;
       if(a.prefiere!==b.prefiere) return a.prefiere?-1:1;
       return b.rating-a.rating;
     });
@@ -15364,7 +15421,7 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
                         style={{flex:1,minWidth:150,fontSize:11.5,padding:"9px 10px",borderRadius:9,border:"1.5px solid "+C.gray,background:"#fff",fontFamily:"Montserrat,sans-serif",color:C.black,minHeight:42}}>
                         <option value="">Elegir técnico…</option>
                         {cands.map(function(c){
-                          return <option key={c.f.v.id} value={c.f.em}>{vendorDisplay(c.f.v)} · {c.carga} hoy{c.tieneZona?(c.prefiere?" · prefiere la zona":""):" · sin la zona"}</option>;
+                          return <option key={c.f.v.id} value={c.f.em}>{vendorDisplay(c.f.v)} · {c.carga} hoy{c.tieneZona?(c.favorita?" · zona favorita":(c.prefiere?" · prefiere la zona":"")):" · sin la zona"}</option>;
                         })}
                       </select>
                       <button onClick={function(){ if(sel) asignarPendiente(x, sel); }} disabled={!sel}
@@ -15478,7 +15535,8 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
                   {abierta&&(
                     <div style={{paddingBottom:13,display:"flex",flexDirection:"column",gap:7}}>
                       <div style={{fontSize:10,color:C.taupe,lineHeight:1.5}}>
-                        {(v.zonasPref||[]).length?"Prefiere "+(v.zonasPref||[]).map(SCHED.zonaLabel).join(", ")+" · ":""}
+                        {(v.zonasTop||[]).length?"Favorita "+(v.zonasTop||[]).map(SCHED.zonaLabel).join(", ")+" · ":""}
+                        {(v.zonasPref||[]).filter(function(z){ return (v.zonasTop||[]).indexOf(z)<0; }).length?"Prefiere "+(v.zonasPref||[]).filter(function(z){ return (v.zonasTop||[]).indexOf(z)<0; }).map(SCHED.zonaLabel).join(", ")+" · ":""}
                         {(v.zonas||[]).length?(v.zonas||[]).map(SCHED.zonaLabel).join(", "):"sin zonas asignadas"}
                         {ratings[em]?" · rating "+ratings[em].score.toFixed(2)+" ("+ratings[em].n+")":" · sin rating aún"}
                       </div>
@@ -19877,6 +19935,168 @@ function PagoComprobanteModal({pago, company, isAdmin, focusEmail, onClose, onSv
   );
 }
 
+/* ═══ CONTRATOS DE ADELANTO · DOCS ══════════════════════════════════════════
+   Todo contrato de adelanto se genera y se firma en Docs (docs.spacioam.com).
+   EPI junta los datos; Docs arma el documento con su membrete, manda el correo
+   de firma desde hola@spacioam.com, guarda la firma y el certificado, y archiva
+   el PDF en Drive. EPI solo lee el estado de la firma.
+   Para no duplicar nada se cargan, en el momento en que hacen falta, los mismos
+   archivos de Docs (emails.js · docs-store.js · sheets-sync.js): el correo, el
+   registro y la hoja CONTRATOS salen idénticos a los que genera Docs.
+   Estados del adelanto: por_firmar → (firma en Docs) → por_depositar → (depósito
+   + comprobante) → activo. No se activa nada sin contrato firmado. */
+var DOCS_HOST = "https://docs.spacioam.com/";
+var __docsLibP = null;
+function docsLib(){
+  if(window.Docs&&window.SpacioSync&&window.SpacioEmails) return Promise.resolve();
+  if(__docsLibP) return __docsLibP;
+  window.SPACIO_DOCS_NO_SEED=true; window.SPACIO_DOCS_ORIGEN="epi";
+  window.SPACIO_MAIL_HOST=DOCS_HOST; window.SPACIO_FIRMA_BASE=DOCS_HOST+"index.html";
+  var files=["emails.js","docs-store.js","sheets-sync.js"];
+  __docsLibP=new Promise(function(res,rej){
+    (function next(i){
+      if(i>=files.length){ if(window.Docs&&window.SpacioSync&&window.SpacioEmails) res(); else rej(new Error("docs_lib")); return; }
+      var sc=document.createElement("script"); sc.src=DOCS_HOST+files[i]+"?epi="+todayStr(); sc.async=false;
+      sc.onload=function(){ next(i+1); }; sc.onerror=function(){ rej(new Error("No cargó "+files[i]+" de Docs")); };
+      document.head.appendChild(sc);
+    })(0);
+  }).catch(function(e){ __docsLibP=null; throw e; });
+  return __docsLibP;
+}
+/* El cuerpo del contrato es el texto de adelanto que ya usa EPI (semanal para
+   técnicos, quincenal o a la liquidación para planilla), en el formato que lee
+   el paginador de Docs: línea en blanco = párrafo, "1. " = lista, **negrita**. */
+function docsCuerpoAdelanto(adv){
+  var nom=String(adv.vendorName||"").trim(), dpi=String(adv.dpiNumber||"").trim();
+  return buildContractText(adv).split("\n").map(function(l){
+    var m=l.match(/^(\d+)\.\s+([^:]+:)\s*(.*)$/);
+    if(m) return m[1]+". **"+m[2]+"** "+m[3];
+    if(nom&&l.indexOf("yo, "+nom+",")>=0) l=l.replace("yo, "+nom+",","yo, **"+nom+"**,");
+    if(dpi&&l.indexOf("número "+dpi+" ")>=0) l=l.replace("número "+dpi+" ","número **"+dpi+"** ");
+    return l;
+  }).join("\n");
+}
+function docsLinkFirma(id){ return DOCS_HOST+"index.html?firmar="+encodeURIComponent(id); }
+/* Crea el contrato en Docs y manda la solicitud de firma. Devuelve el vínculo
+   que se guarda en el adelanto. Si Docs no confirma que guardó el documento,
+   falla: un enlace de firma que no abre es peor que no mandar nada. */
+async function docsCrearAdelanto(adv){
+  await docsLib();
+  var D=window.Docs, S=window.SpacioSync;
+  var nombre=String(adv.vendorName||"").trim(), email=String(adv.vendorEmail||"").trim().toLowerCase();
+  if(!nombre||!email) throw new Error("Falta el nombre o el correo del técnico.");
+  if(!String(adv.dpiNumber||"").trim()) throw new Error("Falta el número de DPI: el contrato lo necesita.");
+  var cuota=advCuota(adv);
+  var doc=D.create({
+    tipo:"emp_adelanto", origen:"epi",
+    firmantes:[{nombre:nombre, email:email}],
+    data:{ fecha:todayStr(), empNombre:nombre, empDPI:String(adv.dpiNumber||"").trim(),
+      adelMonto:String(adv.monto||""), adelFechaDeposito:adv.fechaDeposito||"", adelCuotas:String(adv.cuotas||""),
+      adelPeriodicidad:advIsPlanilla(adv)?"Quincenal":"Semanal", adelCuotaMonto:cuota?String(cuota):"" },
+    edits:{cuerpo:docsCuerpoAdelanto(adv)}, mensaje:""
+  });
+  /* Folio propio de EPI: el contador de Docs vive en cada navegador y el de EPI
+     empezaría desde cero — chocaría con un folio real y pisaría su fila. */
+  doc=D.update(doc.id,function(d){ d.folio="SAM-E"+Date.now().toString(36).toUpperCase(); d.epiAdelantoId=adv.id; return d; })||doc;
+  var w=await S.push("crear",doc);
+  if(!(w&&w.doc&&w.doc.ok)) throw new Error("Docs no confirmó que guardó el contrato. Revisa la conexión e intenta de nuevo.");
+  var m=await S.correo("solicitudFirma",doc);
+  var ok=!!(m&&m.ok);
+  doc=D.update(doc.id,function(d){ return D.log(d, ok?"Solicitud de firma enviada desde EPI a "+email:"El correo de firma no salió desde EPI"+(m&&m.error?" ("+m.error+")":"")); })||doc;
+  try{ S.push("actualizar",doc); }catch(_){}
+  return {id:doc.id, folio:doc.folio, url:docsLinkFirma(doc.id), estado:doc.estado, enviadoEn:Date.now(), correo:ok, correoError:ok?"":((m&&m.error)||"sin respuesta")};
+}
+async function docsLeer(id){
+  await docsLib();
+  var r=await window.SpacioSync.getDoc(id);
+  return r&&r.ok?r.doc:null;
+}
+async function docsRecordar(adv){
+  await docsLib();
+  var d=await docsLeer(adv.docs.id); if(!d) throw new Error("No se encontró el contrato en Docs.");
+  var m=await window.SpacioSync.correo("recordatorioFirma",d);
+  if(!(m&&m.ok)) throw new Error("El recordatorio no salió"+(m&&m.error?" ("+m.error+")":"")+".");
+  return true;
+}
+async function docsCancelar(adv, motivo){
+  await docsLib();
+  var D=window.Docs, S=window.SpacioSync;
+  var d=await docsLeer(adv.docs.id); if(!d) return false;
+  if(d.estado==="firmado") return false;
+  d=D.cancel(d.id, motivo||"Cancelado desde EPI")||d;
+  try{ await S.push("cancelar",d); }catch(_){}
+  try{ S.correo("envioCancelado",d,{motivo:motivo||""}); }catch(_){}
+  return true;
+}
+function docsFirmaTs(d){
+  var f=(d&&d.firmantes||[]).map(function(x){ return x&&x.firma&&x.firma.ts; }).filter(Boolean).sort().pop();
+  return f?new Date(f).getTime():Date.now();
+}
+var DOCS_ESTADO_LBL={enviado:"Enviado a firma", visto:"Abierto por el técnico", parcial:"Firma en curso", firmado:"Firmado", cancelado:"Cancelado en Docs", anulado:"Anulado en Docs", programado:"Envío programado", borrador:"Borrador"};
+/* Revisa en Docs los adelantos que esperan firma. Al firmarse, el adelanto pasa
+   solo a «por depositar» y se avisa a administración. Corre en el app del admin
+   y en el del técnico (lo que se abra primero). */
+function useDocsFirmas(adelantos, onSvAdelantos, vendors, soloEmails){
+  var ref=useRef(adelantos); ref.current=adelantos;
+  var busy=useRef(false);
+  var pend=(adelantos||[]).filter(function(a){ return a.status==="por_firmar"&&a.docs&&a.docs.id&&(!soloEmails||soloEmails.indexOf(String(a.vendorEmail||"").toLowerCase().trim())>=0); });
+  var clave=pend.map(function(a){ return a.id+":"+(a.docs.estado||""); }).join("|");
+  const [ts,setTs]=useState(0);
+  async function revisar(){
+    if(busy.current) return; busy.current=true;
+    try{
+      var lista=(ref.current||[]).filter(function(a){ return a.status==="por_firmar"&&a.docs&&a.docs.id&&(!soloEmails||soloEmails.indexOf(String(a.vendorEmail||"").toLowerCase().trim())>=0); });
+      if(!lista.length) return;
+      var cambios={}, firmados=[];
+      for(var i=0;i<lista.length;i++){
+        var a=lista[i], d=null;
+        try{ d=await docsLeer(a.docs.id); }catch(_){ d=null; }
+        if(!d) continue;
+        var st=String(d.estado||"");
+        if(st==="firmado"){
+          cambios[a.id]={status:"por_depositar", firmadoEn:docsFirmaTs(d), docs:Object.assign({},a.docs,{estado:"firmado", certificado:d.certificado||"", revisadoEn:Date.now()})};
+          firmados.push(a);
+        } else if(st!==(a.docs.estado||"")){
+          cambios[a.id]={docs:Object.assign({},a.docs,{estado:st, revisadoEn:Date.now()})};
+        }
+      }
+      try{ window.SpacioSync&&window.SpacioSync.flush&&window.SpacioSync.flush(); }catch(_){}
+      if(!Object.keys(cambios).length) return;
+      var cur=ref.current||[];
+      /* Se relee la lista actual: solo se toca lo que sigue esperando firma. */
+      await onSvAdelantos(cur.map(function(x){ return cambios[x.id]&&x.status==="por_firmar"?Object.assign({},x,cambios[x.id]):x; }));
+      firmados.forEach(function(a){
+        try{ notifyTemplate(resolveNotifRecipients("adelantoFirmado", vendors||ADV_VENDORS, [a.vendorEmail]), "adelantoFirmado", {tecnico:a.vendorName, monto:"Q"+advQ(a.monto||0), cuota:advCuotaLabel(a), folio:(a.docs&&a.docs.folio)||""}); }catch(_){}
+      });
+    } finally { busy.current=false; setTs(Date.now()); }
+  }
+  useEffect(function(){
+    if(!pend.length) return;
+    revisar();
+    var iv=setInterval(function(){ if(document.visibilityState!=="hidden") revisar(); }, 60000);
+    function onVis(){ if(document.visibilityState==="visible") revisar(); }
+    document.addEventListener("visibilitychange", onVis);
+    return function(){ clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+  },[clave]);
+  return {revisar:revisar, revisadoEn:ts, pendientes:pend.length};
+}
+/* Tarjeta de estado de un contrato en Docs (admin y técnico). */
+function DocsFirmaEstado({adv, compact}){
+  var d=adv.docs||{};
+  var st=d.estado||"enviado";
+  var malo=st==="cancelado"||st==="anulado";
+  var dot=st==="firmado"?C.green:(malo?C.red:C.attention);
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap",fontSize:compact?11:11.5,color:C.earth,lineHeight:1.5}}>
+      <span style={{width:7,height:7,borderRadius:"50%",background:dot,flexShrink:0}}/>
+      <span style={{fontWeight:700,color:malo?C.red:C.black}}>{DOCS_ESTADO_LBL[st]||st}</span>
+      {d.folio&&<span>· {d.folio}</span>}
+      {d.enviadoEn&&<span>· enviado {fmtDate(new Date(d.enviadoEn).toISOString().slice(0,10))}</span>}
+      {d.correo===false&&<span style={{color:C.red,fontWeight:600}}>· el correo no salió</span>}
+    </div>
+  );
+}
+
 /* ─── Contract preview modal */
 function ContractModal({adv,onClose}){
   return (
@@ -19920,7 +20140,6 @@ function AdminReqComplete({adv, vendor, onComplete}){
   const [dpiPhoto,setDpiPhoto] = useState(adv.dpiPhoto||null);
   const [nombre,setNombre] = useState(adv.vendorName||vendorDisplay(vendor)||"");
   const [dpiNum,setDpiNum] = useState(adv.dpiNumber||"");
-  const [firma,setFirma]   = useState(null);
   const [err,setErr]       = useState("");
   const [busy,setBusy]     = useState(false);
   const [preview,setPreview]= useState(false);
@@ -19928,15 +20147,15 @@ function AdminReqComplete({adv, vendor, onComplete}){
   var semanal=parseFloat(adv.cobroSemanal||0)||0;
   var datosOk=!!dpiPhoto && nombre.trim() && dpiNum.trim();
   async function pick(file){ if(!file)return; try{var d=await compress(file); setDpiPhoto(d);}catch(e){} }
-  var draftAdv=Object.assign({},adv,{vendorName:nombre,dpiNumber:dpiNum,dpiPhoto:dpiPhoto,firma:firma});
+  var draftAdv=Object.assign({},adv,{vendorName:nombre,dpiNumber:dpiNum,dpiPhoto:dpiPhoto});
   async function submit(){
     setErr("");
     if(!dpiPhoto)      return setErr("Sube la foto de tu documento (DPI).");
     if(!nombre.trim()) return setErr("Confirma tu nombre completo.");
     if(!dpiNum.trim()) return setErr("Confirma tu número de DPI (CUI).");
-    if(!firma)         return setErr("Firma el contrato para continuar.");
     setBusy(true);
-    try{ await onComplete({dpiPhoto:dpiPhoto,nombre:nombre.trim(),dpiNumber:dpiNum.trim(),firma:firma}); }catch(e){}
+    try{ await onComplete({dpiPhoto:dpiPhoto,nombre:nombre.trim(),dpiNumber:dpiNum.trim()}); }
+    catch(e){ setErr((e&&e.message)||"No se pudo preparar el contrato. Intenta de nuevo."); }
     setBusy(false);
   }
   function StepBadge({n,done,active}){ return <span style={{width:24,height:24,borderRadius:"50%",flexShrink:0,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,background:done?C.green:(active?C.black:C.gray),color:done||active?"#fff":C.earth}}>{done?"✓":n}</span>; }
@@ -19944,7 +20163,7 @@ function AdminReqComplete({adv, vendor, onComplete}){
     <div style={{background:"#fff",border:"1.5px solid "+C.peach+"66",borderRadius:18,boxShadow:"var(--sa-shadow-sm)",padding:"18px 18px 20px",marginBottom:20}}>
       <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".22em",textTransform:"uppercase",marginBottom:6,display:"flex",alignItems:"center",gap:7}}><span style={{width:6,height:6,borderRadius:999,background:C.attention,flexShrink:0,display:"inline-block"}}/>Solicitud del administrador</div>
       <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:21,color:C.black,marginBottom:4}}>Tienes un adelanto por firmar</div>
-      <div style={{fontSize:12,color:C.earth,lineHeight:1.6,marginBottom:14}}>El administrador inició un adelanto para ti. Sube tu DPI y firma el contrato; luego el administrador hará el depósito.</div>
+      <div style={{fontSize:12,color:C.earth,lineHeight:1.6,marginBottom:14}}>El administrador inició un adelanto para ti. Sube tu DPI y confirma tus datos: te enviamos el contrato a tu correo para firmarlo en Docs. Cuando esté firmado, el administrador hará el depósito.</div>
       <div style={{background:C.surfaceWarm,borderRadius:12,padding:"13px 15px",marginBottom:16,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
         <AdvStat label="Monto" value={"Q"+(adv.monto||0).toLocaleString()}/>
         <AdvStat label="Cuotas" value={adv.cuotas||"—"}/>
@@ -19977,17 +20196,16 @@ function AdminReqComplete({adv, vendor, onComplete}){
             </div>
           </div>
         )}
-        {/* Firma */}
+        {/* Firma — en Docs */}
         {datosOk&&(
           <div>
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:11}}><StepBadge n={3} done={!!firma} active={!firma}/><span style={{fontSize:13,fontWeight:700,color:C.black}}>Firma y envía</span></div>
-            <button onClick={function(){setPreview(true);}} style={{width:"100%",padding:"11px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",marginBottom:13,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}><Icon name="file" size={15} stroke={C.black}/>Leer el contrato</button>
-            <SignaturePad onChange={setFirma}/>
-            <div style={{fontSize:12,color:C.earth,lineHeight:1.6,marginTop:10}}>Al firmar aceptas el contrato de adelanto y autorizas el descuento semanal automático.</div>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:11}}><StepBadge n={3} done={false} active={true}/><span style={{fontSize:13,fontWeight:700,color:C.black}}>Firma en Docs</span></div>
+            <button onClick={function(){setPreview(true);}} style={{width:"100%",padding:"11px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",marginBottom:11,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}><Icon name="file" size={15} stroke={C.black}/>Leer el contrato</button>
+            <div style={{fontSize:12,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>Al continuar te enviamos el contrato a <b style={{color:C.black}}>{adv.vendorEmail||vendor.email}</b>. Lo abres, lo lees completo y lo firmas desde tu teléfono.</div>
           </div>
         )}
         {err&&<Err msg={err}/>}
-        <BigBtn onClick={submit} dis={busy||!firma}>{busy?"Enviando…":"Firmar y enviar →"}</BigBtn>
+        <BigBtn onClick={submit} dis={busy||!datosOk}>{busy?"Preparando el contrato…":"Continuar a la firma →"}</BigBtn>
       </div>
       {preview&&<ContractModal adv={draftAdv} onClose={function(){setPreview(false);}}/>}
     </div>
@@ -19995,24 +20213,31 @@ function AdminReqComplete({adv, vendor, onComplete}){
 }
 
 /* ─── Vendor: request an advance (EPI Limpieza only) */
-function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
+function AdvanceRequest({vendor, reps, adelantos, allAdelantos, onSvAdelantos}){
   var emails = vendorEmailSet(vendor);
+  /* Se escribe siempre sobre la lista COMPLETA: si se guardara la filtrada, se
+     borrarían los adelantos del resto del equipo. */
+  var base = allAdelantos||adelantos||[];
   var mine = (adelantos||[]).filter(function(a){return emails.indexOf((a.vendorEmail||"").toLowerCase().trim())>=0;});
-  var vigentes = mine.filter(function(a){return a.status==="activo"||a.status==="pendiente"||a.status==="pendiente_tecnico"||a.status==="por_depositar";});
+  var vigentes = mine.filter(function(a){return a.status==="activo"||a.status==="pendiente"||a.status==="pendiente_tecnico"||a.status==="por_firmar"||a.status==="por_depositar";});
+  var firmasDocs = useDocsFirmas(base, onSvAdelantos, ADV_VENDORS, emails.map(function(e){ return String(e).toLowerCase().trim(); }));
+  const [enviado,setEnviado] = useState(null);
   /* Solicitudes que el ADMIN inició para este técnico y que él debe completar (DPI + firma). */
   var adminReqs = mine.filter(function(a){return a.status==="pendiente_tecnico";});
   async function completeAdminReq(adv, data){
-    var dpiUrl=data.dpiPhoto, firmaUrl=data.firma;
+    var dpiUrl=data.dpiPhoto;
     if(!IS_CLAUDE_SANDBOX){
       try{ dpiUrl=await uploadMedia(data.dpiPhoto,"dpi-"+adv.id+".jpg","image/jpeg","adelantos"); }catch(_){}
-      try{ firmaUrl=await uploadMedia(data.firma,"firma-"+adv.id+".png","image/png","adelantos"); }catch(_){}
     }
     var updated=Object.assign({}, adv, {
-      dpiPhoto:dpiUrl, vendorName:(data.nombre||adv.vendorName), dpiNumber:(data.dpiNumber||adv.dpiNumber),
-      firma:firmaUrl, firmadoEn:Date.now(), status:"por_depositar",
+      dpiPhoto:dpiUrl, vendorName:(data.nombre||adv.vendorName), dpiNumber:(data.dpiNumber||adv.dpiNumber), firma:null,
     });
     updated.contractText=buildContractText(updated);
-    return onSvAdelantos((adelantos||[]).map(function(a){return a.id===adv.id?updated:a;}));
+    /* El contrato se crea y se firma en Docs; si Docs falla, no se toca nada. */
+    updated.docs=await docsCrearAdelanto(updated);
+    updated.status="por_firmar";
+    await onSvAdelantos(base.map(function(a){return a.id===adv.id?updated:a;}));
+    setEnviado({url:updated.docs.url, email:updated.vendorEmail, correo:updated.docs.correo});
   }
   var maxTotal = maxAdvanceForVendor(reps, vendor);
   var sum8 = incomeLast8(reps, emails);
@@ -20028,7 +20253,6 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
   const [monto,setMonto]   = useState("");
   const [cuotas,setCuotas] = useState(8);
   const [fecha,setFecha]   = useState(todayStr());
-  const [firma,setFirma]   = useState(null);
   const [err,setErr]       = useState("");
   const [busy,setBusy]     = useState(false);
   const [preview,setPreview]= useState(null);
@@ -20046,7 +20270,7 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
   async function pickDpi(file){ if(!file) return; try{ var d=await compress(file); setDpiPhoto(d); }catch(e){} }
   /* Sube automáticamente las cuotas si la cuota semanal superaría el 25% del ingreso. */
   useEffect(function(){ if(cuotas<minCuotas) setCuotas(minCuotas); },[minCuotas]);
-  function draft(){ return {vendorName:nombre,dpiNumber:dpiNum,monto:montoN,cuotas:cuotas,cobroSemanal:semanal,fechaDeposito:fecha,fechaInicio:fecha,dpiPhoto:dpiPhoto,firma:firma}; }
+  function draft(){ return {vendorName:nombre,dpiNumber:dpiNum,monto:montoN,cuotas:cuotas,cobroSemanal:semanal,fechaDeposito:fecha,fechaInicio:fecha,dpiPhoto:dpiPhoto,firma:null}; }
 
   async function submit(){
     setErr("");
@@ -20055,23 +20279,26 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
     if(!dpiNum.trim()) return setErr("Confirma tu número de DPI (CUI).");
     if(!montoN||montoN<=0) return setErr("Ingresa el monto a solicitar.");
     if(montoN>disponible)  return setErr("El monto excede tu disponible (Q"+disponible.toLocaleString()+").");
-    if(!firma)         return setErr("Firma el contrato para enviar la solicitud.");
     setBusy(true);
     var advId="adv_"+Date.now();
-    /* Sube DPI y firma a Drive ANTES de guardar: si quedaran como base64 dentro
-       de la config "adelantos" (una sola celda del Sheet, tope 50 000 caracteres),
-       la solicitud no se sincroniza al admin aunque el correo sí se envíe. */
-    var dpiUrl=dpiPhoto, firmaUrl=firma;
+    /* Sube el DPI a Drive ANTES de guardar: si quedara como base64 dentro de la
+       config "adelantos" (una sola celda del Sheet, tope 50 000 caracteres), la
+       solicitud no se sincroniza al admin aunque el correo sí se envíe. */
+    var dpiUrl=dpiPhoto;
     if(!IS_CLAUDE_SANDBOX){
       try{ dpiUrl=await uploadMedia(dpiPhoto,"dpi-"+advId+".jpg","image/jpeg","adelantos"); }catch(_){}
-      try{ firmaUrl=await uploadMedia(firma,"firma-"+advId+".png","image/png","adelantos"); }catch(_){}
     }
-    var adv = Object.assign({id:advId, vendorEmail:vendor.email, status:"pendiente", createdAt:Date.now(), pausas:[], firmadoEn:Date.now()}, draft());
-    adv.dpiPhoto=dpiUrl; adv.firma=firmaUrl;
+    var adv = Object.assign({id:advId, vendorEmail:vendor.email, status:"por_firmar", createdAt:Date.now(), pausas:[]}, draft());
+    adv.dpiPhoto=dpiUrl;
     adv.contractText = buildContractText(adv);
-    try{ await onSvAdelantos([adv].concat(adelantos||[])); }catch(e){}
+    /* El contrato nace en Docs y el correo de firma sale de ahí. Si Docs no
+       responde, la solicitud no se guarda y se avisa — no queda nada a medias. */
+    try{ adv.docs = await docsCrearAdelanto(adv); }
+    catch(e){ setBusy(false); return setErr((e&&e.message)||"No se pudo preparar el contrato. Intenta de nuevo."); }
+    try{ await onSvAdelantos([adv].concat(base)); }catch(e){}
+    setEnviado({url:adv.docs.url, email:vendor.email, correo:adv.docs.correo});
     try{ notifyTemplate(resolveNotifRecipients("solicitudAdelanto", ADV_VENDORS, [vendor.email]), "solicitudAdelanto", {tecnico:vendorDisplay(vendor), monto:"Q"+montoN.toLocaleString(), cuotas:cuotas+" semanas", cuota:"Q"+semanal.toLocaleString()}); }catch(_){}
-    setBusy(false); setDpiPhoto(null); setDpiNum(""); setMonto(""); setCuotas(8); setFirma(null);
+    setBusy(false); setDpiPhoto(null); setDpiNum(""); setMonto(""); setCuotas(8);
   }
 
   function StepBadge({n,done,active}){ return <span style={{width:24,height:24,borderRadius:"50%",flexShrink:0,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,background:done?C.green:(active?C.black:C.gray),color:done||active?"#fff":C.earth}}>{done?"✓":n}</span>; }
@@ -20083,7 +20310,17 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
         <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:27,color:C.black}}>Solicitar un adelanto</div>
       </div>
 
-      {/* Solicitudes iniciadas por el administrador — el técnico debe subir DPI y firmar */}
+      {enviado&&(
+        <div style={{background:"#E8F2ED",borderRadius:16,padding:"16px 18px",marginBottom:16,display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{fontSize:14,fontWeight:700,color:C.green}}>Tu contrato está listo para firmar</div>
+          <div style={{fontSize:12,color:C.black,lineHeight:1.6,textWrap:"pretty"}}>{enviado.correo===false?"No pudimos mandarte el correo, pero puedes firmarlo aquí mismo.":<>Te lo enviamos a <b>{enviado.email}</b>. También puedes abrirlo aquí.</>} Cuando lo firmes, el administrador hará el depósito.</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <a href={enviado.url} target="_blank" rel="noopener" style={{flex:"1 1 160px",textAlign:"center",padding:"12px 16px",minHeight:44,boxSizing:"border-box",borderRadius:"var(--sa-pill)",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,textDecoration:"none"}}>Firmar ahora →</a>
+            <button onClick={function(){setEnviado(null);}} style={{padding:"12px 16px",minHeight:44,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,fontWeight:600,cursor:"pointer"}}>Cerrar</button>
+          </div>
+        </div>
+      )}
+      {/* Solicitudes iniciadas por el administrador — el técnico sube su DPI y firma en Docs */}
       {adminReqs.map(function(a){ return (
         <AdminReqComplete key={a.id} adv={a} vendor={vendor} onComplete={function(data){return completeAdminReq(a,data);}}/>
       );})}
@@ -20101,15 +20338,16 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
           <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",marginBottom:9}}>Mis adelantos · {vigentes.filter(function(a){return a.status!=="pendiente_tecnico";}).length}</div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             {vigentes.filter(function(a){return a.status!=="pendiente_tecnico";}).map(function(a){ var st=advanceState(a,reps); var isActivo=a.status==="activo"; var dot=isActivo?C.green:C.orange;
-              var estado=isActivo?"activo":(a.status==="por_depositar"?"esperando depósito":"pendiente de aprobación");
-              var sub=isActivo?("Saldo Q"+advQ(st.saldo)+" · "+advCuotaLabel(a)):(a.status==="por_depositar"?"Firmado · el admin realizará el depósito":"En revisión"); return (
-              <button key={a.id} onClick={function(){setPreview(a);}} style={{textAlign:"left",background:"#fff",border:"1px solid "+C.line,borderRadius:14,padding:"13px 15px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",boxShadow:"var(--sa-shadow-sm)"}}>
+              var porFirmar=a.status==="por_firmar"&&a.docs&&a.docs.id;
+              var estado=isActivo?"activo":(a.status==="por_depositar"?"esperando depósito":(a.status==="por_firmar"?"por firmar":"pendiente de aprobación"));
+              var sub=isActivo?("Saldo Q"+advQ(st.saldo)+" · "+advCuotaLabel(a)):(a.status==="por_depositar"?"Firmado · el admin realizará el depósito":(a.status==="por_firmar"?"Fírmalo desde el correo o toca aquí":"En revisión")); return (
+              <button key={a.id} onClick={function(){ if(porFirmar){ window.open(a.docs.url||docsLinkFirma(a.docs.id),"_blank","noopener"); } else setPreview(a);}} style={{textAlign:"left",background:"#fff",border:"1px solid "+C.line,borderRadius:14,padding:"13px 15px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",boxShadow:"var(--sa-shadow-sm)"}}>
                 <span style={{width:9,height:9,borderRadius:"50%",background:dot,flexShrink:0}}/>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:700,color:C.black}}>Q{(a.monto||0).toLocaleString()} <span style={{fontWeight:500,color:C.earth,fontSize:11.5}}>· {estado}</span></div>
                   <div style={{fontSize:11,color:C.earth,marginTop:2}}>{sub}</div>
                 </div>
-                <span style={{fontSize:11,color:C.earth,fontWeight:600}}>Ver →</span>
+                <span style={{fontSize:11,color:C.earth,fontWeight:600}}>{porFirmar?"Firmar →":"Ver →"}</span>
               </button>
             );})}
           </div>
@@ -20211,20 +20449,18 @@ function AdvanceRequest({vendor, reps, adelantos, onSvAdelantos}){
             </div>
           )}
 
-          {/* PASO 4 — Firma y envío */}
+          {/* PASO 4 — Firma en Docs */}
           {montoOk&&(
             <div style={{background:"#fff",borderRadius:16,border:"1px solid "+C.line,boxShadow:"var(--sa-shadow-sm)",padding:"16px 18px"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:13}}><StepBadge n={4} done={!!firma} active={!firma}/><span style={{fontSize:13.5,fontWeight:700,color:C.black}}>Firma y envía</span></div>
-              <button onClick={function(){setPreview(Object.assign({vendorEmail:vendor.email},draft()));}} style={{width:"100%",padding:"12px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",marginBottom:14,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}><Icon name="file" size={15} stroke={C.black}/>Leer el contrato</button>
-              <div style={{fontSize:10,fontWeight:600,color:C.earth,letterSpacing:".2em",textTransform:"uppercase",marginBottom:9}}>Tu firma</div>
-              <SignaturePad onChange={setFirma}/>
-              <div style={{fontSize:12,color:C.earth,lineHeight:1.6,marginTop:10}}>Al firmar aceptas el contrato de adelanto y autorizas el descuento semanal automático.</div>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:13}}><StepBadge n={4} done={false} active={true}/><span style={{fontSize:13.5,fontWeight:700,color:C.black}}>Firma el contrato</span></div>
+              <button onClick={function(){setPreview(Object.assign({vendorEmail:vendor.email},draft()));}} style={{width:"100%",padding:"12px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}><Icon name="file" size={15} stroke={C.black}/>Leer el contrato</button>
+              <div style={{fontSize:12,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>Al enviar te llega el contrato a <b style={{color:C.black}}>{vendor.email}</b> para firmarlo en Docs. Firmarlo es aceptar el adelanto y autorizar el descuento semanal automático.</div>
             </div>
           )}
 
           {err&&<Err msg={err}/>}
-          <BigBtn onClick={submit} dis={busy||!firma}>{busy?"Enviando…":"Firmar y enviar solicitud →"}</BigBtn>
-          <div style={{fontSize:11,color:C.earth,textAlign:"center",lineHeight:1.7,padding:"0 10px"}}>El administrador revisará tu solicitud antes de activarla. El descuento semanal se aplica automáticamente a tus pagos.</div>
+          <BigBtn onClick={submit} dis={busy||!montoOk}>{busy?"Preparando el contrato…":"Enviar solicitud y firmar →"}</BigBtn>
+          <div style={{fontSize:11,color:C.earth,textAlign:"center",lineHeight:1.7,padding:"0 10px"}}>El adelanto se activa cuando firmes el contrato y el administrador haga el depósito. El descuento semanal se aplica automáticamente a tus pagos.</div>
         </div>
       )}
       {preview&&<ContractModal adv={preview} onClose={function(){setPreview(null);}}/>}
@@ -20313,7 +20549,41 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
   var list = adelantos||[];
   var pendTec = list.filter(function(a){return a.status==="pendiente_tecnico";}); /* admin inició, espera al técnico */
   var pend    = list.filter(function(a){return a.status==="pendiente";});         /* técnico solicitó, espera aprobación */
-  var porDep  = list.filter(function(a){return a.status==="por_depositar";});      /* técnico firmó, espera depósito */
+  var porFir  = list.filter(function(a){return a.status==="por_firmar";});         /* contrato en Docs, espera la firma */
+  var porDep  = list.filter(function(a){return a.status==="por_depositar";});      /* contrato firmado, espera depósito */
+  var firmasDocs = useDocsFirmas(list, onSvAdelantos, vendors, null);
+  const [docsBusy,setDocsBusy] = useState("");
+  const [docsMsg,setDocsMsg]   = useState(null);
+  /* Envía a firma por Docs un adelanto que aún no tiene contrato (solicitudes
+     viejas firmadas en EPI o iniciadas antes del cambio). */
+  async function enviarAFirma(a){
+    if(!String(a.dpiNumber||"").trim()){ setDocsMsg({id:a.id, err:true, txt:"Falta el DPI del técnico: el contrato lo necesita."}); return; }
+    setDocsBusy(a.id); setDocsMsg(null);
+    try{
+      var u=Object.assign({},a,{firma:null}); u.contractText=buildContractText(u);
+      u.docs=await docsCrearAdelanto(u); u.status="por_firmar";
+      onSvAdelantos(list.map(function(x){ return x.id===a.id?u:x; }));
+      setDocsMsg({id:a.id, txt:u.docs.correo?"Contrato enviado a "+a.vendorEmail+".":"Contrato creado, pero el correo no salió. Usa «Reenviar»."});
+    }catch(e){ setDocsMsg({id:a.id, err:true, txt:(e&&e.message)||"No se pudo crear el contrato en Docs."}); }
+    setDocsBusy("");
+  }
+  async function recordar(a){
+    setDocsBusy(a.id); setDocsMsg(null);
+    try{ await docsRecordar(a); setDocsMsg({id:a.id, txt:"Recordatorio enviado a "+a.vendorEmail+"."}); }
+    catch(e){ setDocsMsg({id:a.id, err:true, txt:(e&&e.message)||"No se pudo enviar el recordatorio."}); }
+    setDocsBusy("");
+  }
+  async function cancelarFirma(a){
+    if(!confirm("¿Cancelar el contrato de "+(a.vendorName||a.vendorEmail)+"? El enlace de firma deja de funcionar y el adelanto queda rechazado.")) return;
+    setDocsBusy(a.id);
+    try{ await docsCancelar(a, "Cancelado por administración"); }catch(_){}
+    update(a.id,{status:"rechazado", docs:Object.assign({},a.docs,{estado:"cancelado"})});
+    setDocsBusy("");
+  }
+  function copiarEnlace(a){
+    var url=(a.docs&&a.docs.url)||docsLinkFirma(a.docs.id);
+    try{ navigator.clipboard.writeText(url); setDocsMsg({id:a.id, txt:"Enlace de firma copiado."}); }catch(_){ window.prompt("Enlace de firma", url); }
+  }
   var active  = list.filter(function(a){return a.status==="activo";});
   var done    = list.filter(function(a){return a.status==="pagado"||a.status==="rechazado";});
   /* Un adelanto con saldo en cero ya terminó: se cierra solo y desaparece de la
@@ -20390,7 +20660,42 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
         <div style={{background:C.black,borderRadius:16,padding:"16px 18px"}}><div style={{fontSize:9.5,fontWeight:700,color:"rgba(255,255,255,.6)",letterSpacing:".14em",textTransform:"uppercase",marginBottom:5}}>Descuento</div><div style={{fontSize:24,fontWeight:600,color:C.peach}}>Q{advQ(totalSemanal)}<span style={{fontSize:12,fontWeight:600,color:"rgba(255,255,255,.55)"}}> /sem</span></div>{totalQuincenal>0&&<div style={{fontSize:12,fontWeight:600,color:"rgba(255,255,255,.75)",marginTop:2}}>Q{advQ(totalQuincenal)}<span style={{fontSize:11,color:"rgba(255,255,255,.5)"}}> /quincena · planilla</span></div>}</div>
       </div>
 
-      {/* Firmados — por depositar (adelantos iniciados por el admin, ya firmados) */}
+      {/* Esperando la firma en Docs */}
+      {porFir.length>0&&(
+        <div style={{marginBottom:26}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10,flexWrap:"wrap",marginBottom:12}}>
+            <div style={{fontSize:10,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>Esperando firma en Docs · {porFir.length}</div>
+            <button onClick={function(){firmasDocs.revisar();}} style={{padding:"5px 12px",minHeight:32,borderRadius:"var(--sa-pill)",border:"1px solid "+C.gray,background:"#fff",color:C.earth,fontSize:11,fontWeight:600,cursor:"pointer"}}>Revisar estado{firmasDocs.revisadoEn?" · "+new Date(firmasDocs.revisadoEn).toLocaleTimeString("es-GT",{hour:"2-digit",minute:"2-digit"}):""}</button>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            {porFir.map(function(a){ var malo=a.docs&&(a.docs.estado==="cancelado"||a.docs.estado==="anulado"); return (
+              <div key={a.id} style={{background:"#fff",borderRadius:16,border:"1px solid "+C.line,boxShadow:"var(--sa-shadow-sm)",padding:"16px 18px"}}>
+                <div style={{display:"flex",flexWrap:"wrap",gap:14,alignItems:"center",marginBottom:10}}>
+                  <div style={{flex:1,minWidth:160}}>
+                    <div style={{fontSize:15,fontWeight:700,color:C.black}}>{a.vendorName||a.vendorEmail}</div>
+                    <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{a.vendorEmail}{a.motivo?" · "+a.motivo:""}</div>
+                  </div>
+                  <div style={{display:"flex",gap:18}}>
+                    <AdvStat label="Monto" value={"Q"+(a.monto||0).toLocaleString()}/>
+                    <AdvStat label={advIsPlanilla(a)?"Quincenal":"Semanal"} value={advIsPlanilla(a)&&!advCuota(a)?"—":"Q"+advQ(advCuota(a))}/>
+                  </div>
+                </div>
+                <div style={{background:C.surfaceWarm,borderRadius:10,padding:"9px 12px",marginBottom:12}}><DocsFirmaEstado adv={a}/></div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {!malo&&<button onClick={function(){recordar(a);}} disabled={docsBusy===a.id} style={{padding:"10px 16px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.black,background:"#fff",color:C.black,fontSize:12,fontWeight:700,cursor:"pointer"}}>{docsBusy===a.id?"Enviando…":"Reenviar correo"}</button>}
+                  {!malo&&<button onClick={function(){copiarEnlace(a);}} style={{padding:"10px 16px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:600,cursor:"pointer"}}>Copiar enlace</button>}
+                  {malo&&<button onClick={function(){enviarAFirma(a);}} disabled={docsBusy===a.id} style={{padding:"10px 16px",borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Crear contrato nuevo</button>}
+                  <button onClick={function(){cancelarFirma(a);}} disabled={docsBusy===a.id} style={{padding:"10px 16px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.red,fontSize:12,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
+                </div>
+                {docsMsg&&docsMsg.id===a.id&&<div style={{fontSize:11,marginTop:9,color:docsMsg.err?C.red:C.green,fontWeight:600}}>{docsMsg.txt}</div>}
+                <div style={{fontSize:11,color:C.taupe,marginTop:9,lineHeight:1.6,textWrap:"pretty"}}>No se puede activar hasta que el técnico firme. Al firmarse pasa sola a «por depositar» y te avisamos por correo.</div>
+              </div>
+            );})}
+          </div>
+        </div>
+      )}
+
+      {/* Firmados — por depositar */}
       {porDep.length>0&&(
         <div style={{marginBottom:26}}>
           <div style={{fontSize:10,fontWeight:700,color:C.green,letterSpacing:".18em",textTransform:"uppercase",marginBottom:12}}>Firmados · por depositar · {porDep.length}</div>
@@ -20401,18 +20706,20 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
                   <div style={{display:"flex",flexWrap:"wrap",gap:14,alignItems:"center",marginBottom:14}}>
                     <div style={{flex:1,minWidth:160}}>
                       <div style={{fontSize:15,fontWeight:700,color:C.black}}>{a.vendorName||a.vendorEmail}</div>
-                      <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>Firmado por el técnico · DPI {a.dpiNumber||"—"}</div>
+                      <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>{a.docs&&a.docs.id?"Contrato firmado en Docs"+(a.docs.certificado?" · "+a.docs.certificado:""):"Firmado por el técnico"} · DPI {a.dpiNumber||"—"}</div>
                     </div>
                     <div style={{display:"flex",gap:18}}>
                       <AdvStat label="Monto" value={"Q"+(a.monto||0).toLocaleString()}/>
                       <AdvStat label={advIsPlanilla(a)?"Quincenal":"Semanal"} value={advIsPlanilla(a)&&!advCuota(a)?"—":"Q"+advQ(advCuota(a))} accent/>
                     </div>
                   </div>
-                  <div style={{fontSize:11.5,color:C.earth,lineHeight:1.6,marginBottom:12}}>El técnico ya subió su DPI y firmó el contrato. Sube el comprobante de depósito para activar el adelanto.</div>
+                  <div style={{fontSize:11.5,color:C.black,lineHeight:1.6,marginBottom:12,background:"var(--accent-tint,#FCEFEB)",border:"1px solid "+C.peach,borderRadius:10,padding:"9px 12px",textWrap:"pretty"}}><b>Procede con el depósito.</b> El contrato ya está firmado{a.firmadoEn?" desde el "+fmtDate(new Date(a.firmadoEn).toISOString().slice(0,10)):""}. Sube el comprobante para activar el adelanto.</div>
                   <div style={{marginBottom:12}}><DepositReceiptUp receipt={dep} onAdd={function(rc){setDeposit(a,rc);}} onDel={function(){setDeposit(a,null);}}/></div>
                   <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                     <button onClick={function(){activateDeposit(a);}} disabled={!dep} style={{flex:1,minWidth:150,padding:"11px",borderRadius:"var(--sa-pill)",border:"none",background:dep?C.green:C.gray,color:"#fff",fontSize:12.5,fontWeight:700,cursor:dep?"pointer":"not-allowed"}}>Activar adelanto</button>
-                    <button onClick={function(){setPreview(a);}} style={{padding:"11px 18px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Ver contrato</button>
+                    {a.docs&&a.docs.id
+                      ? <a href={a.docs.url||docsLinkFirma(a.docs.id)} target="_blank" rel="noopener" style={{padding:"11px 18px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,textDecoration:"none"}}>Ver en Docs</a>
+                      : <button onClick={function(){setPreview(a);}} style={{padding:"11px 18px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Ver contrato</button>}
                     <button onClick={function(){delAdv(a);}} title="Eliminar" style={{padding:"11px 14px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:12,cursor:"pointer"}}><Icon name="trash" size={15} stroke={C.earth}/></button>
                   </div>
                 </div>
@@ -20432,7 +20739,9 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
                 <div style={{display:"flex",flexWrap:"wrap",gap:14,alignItems:"center"}}>
                   <div style={{flex:1,minWidth:160}}>
                     <div style={{fontSize:15,fontWeight:700,color:C.black}}>{a.vendorName||a.vendorEmail}</div>
-                    <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>Le enviaste una solicitud. Debe subir su DPI y firmar el contrato.</div>
+                    <div style={{fontSize:11.5,color:C.earth,marginTop:2}}>Le enviaste una solicitud. Debe subir su DPI en el app; al hacerlo le llega el contrato para firmar en Docs.</div>
+                    {a.dpiNumber&&<button onClick={function(){enviarAFirma(a);}} disabled={docsBusy===a.id} style={{marginTop:9,padding:"8px 14px",minHeight:36,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.black,background:"#fff",color:C.black,fontSize:11.5,fontWeight:700,cursor:"pointer"}}>{docsBusy===a.id?"Creando contrato…":"Mandar el contrato ya (DPI "+a.dpiNumber+")"}</button>}
+                    {docsMsg&&docsMsg.id===a.id&&<div style={{fontSize:11,marginTop:6,color:docsMsg.err?C.red:C.green,fontWeight:600}}>{docsMsg.txt}</div>}
                   </div>
                   <div style={{display:"flex",gap:14,alignItems:"center"}}>
                     <AdvStat label="Monto" value={"Q"+(a.monto||0).toLocaleString()}/>
@@ -20464,10 +20773,11 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
                   </div>
                 </div>
                 <div style={{display:"flex",gap:8,padding:"0 18px 16px",flexWrap:"wrap"}}>
-                  <button onClick={function(){approve(a);}} style={{flex:1,minWidth:120,padding:"11px",borderRadius:"var(--sa-pill)",border:"none",background:C.green,color:"#fff",fontSize:12.5,fontWeight:700,cursor:"pointer"}}>Aprobar y activar</button>
+                  <button onClick={function(){enviarAFirma(a);}} disabled={docsBusy===a.id} style={{flex:1,minWidth:150,padding:"11px",borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:12.5,fontWeight:700,cursor:docsBusy===a.id?"wait":"pointer"}}>{docsBusy===a.id?"Creando contrato…":"Enviar contrato a firma"}</button>
                   <button onClick={function(){setPreview(a);}} style={{padding:"11px 18px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Ver contrato</button>
                   <button onClick={function(){reject(a);}} style={{padding:"11px 18px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.red,fontSize:12.5,fontWeight:600,cursor:"pointer"}}>Rechazar</button>
                 </div>
+                <div style={{padding:"0 18px 14px",fontSize:11,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>{docsMsg&&docsMsg.id===a.id?<span style={{color:docsMsg.err?C.red:C.green,fontWeight:600}}>{docsMsg.txt}</span>:"El adelanto solo se activa con el contrato firmado en Docs y el depósito registrado."}</div>
               </div>
             );})}
           </div>
@@ -20584,7 +20894,8 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
 
 /* ─── Admin: crear un adelanto directamente (para técnicos internos).
    Respeta el mismo límite dinámico que la solicitud del técnico (½ de las últimas 8 semanas,
-   menos lo que ya tiene vigente). Queda ACTIVO de inmediato (el admin ya lo autorizó). */
+   menos lo que ya tiene vigente). El contrato se crea en Docs y le llega al técnico
+   para firmar; el adelanto no se activa hasta que esté firmado y depositado. */
 function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
   var internos = (vendors||[]).filter(isInternalVendor).filter(function(v){return v.active!==false;})
     .sort(function(a,b){return vendorDisplay(a).localeCompare(vendorDisplay(b));});
@@ -20595,11 +20906,8 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
   const [dpiNum,setDpiNum]= useState("");
   const [motivo,setMotivo]= useState(MOTIVOS_ADELANTO[0]);
   const [motivoOtro,setMotivoOtro]= useState("");
-  /* El admin gestiona el adelanto sin necesidad de que el técnico apruebe: por
-     defecto queda ACTIVO de inmediato. Puede activar el flujo de firma si quiere
-     el contrato firmado antes de cobrar. */
-  const [pedirFirma,setPedirFirma]= useState(false);
   const [err,setErr]     = useState("");
+  const [busy,setBusy]   = useState(false);
   var vendor = internos.find(function(v){return v.id===vid;});
   /* Colaborador de planilla: no tiene ingreso por trabajos — su adelanto se descuenta
      de la quincena, o queda vivo hasta la liquidación si la cuota es 0. */
@@ -20609,7 +20917,7 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
   var sum8   = incomeLast8(reps, emails);
   var maxWeekly = Math.floor(sum8/8*0.25);
   var maxTotal = maxWeekly*12;
-  var vigentes = (adelantos||[]).filter(function(a){return (a.status==="activo"||a.status==="pendiente") && emails.indexOf((a.vendorEmail||"").toLowerCase().trim())>=0;});
+  var vigentes = (adelantos||[]).filter(function(a){return (a.status==="activo"||a.status==="pendiente"||a.status==="pendiente_tecnico"||a.status==="por_firmar"||a.status==="por_depositar") && emails.indexOf((a.vendorEmail||"").toLowerCase().trim())>=0;});
   var saldoVigente = vigentes.reduce(function(s,a){return s+(a.status==="activo"?advanceState(a,reps).saldo:(parseFloat(a.monto)||0));},0);
   var montoN = parseFloat(monto||0)||0;
   var qCuota = Math.max(0, parseFloat(quincenal||0)||0);
@@ -20620,31 +20928,28 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
   var minCuotas = 1;
   var semanal = cuotas>0?Math.ceil(montoN/cuotas):0;
   var motivoFinal = motivo==="Otro" ? motivoOtro.trim() : motivo;
-  var ok = vendor && montoN>0 && montoN<=disponible && !!motivoFinal;
+  var ok = vendor && montoN>0 && montoN<=disponible && !!motivoFinal && !!dpiNum.trim() && !busy;
   useEffect(function(){ if(!esPlanilla && cuotas<minCuotas) setCuotas(minCuotas); },[minCuotas,esPlanilla]);
-  function crear(){
+  async function crear(){
     setErr("");
     if(!vendor) return setErr("Elige un técnico interno.");
     if(!(montoN>0)) return setErr("Ingresa el monto del adelanto.");
     if(montoN>disponible) return setErr("El monto excede el disponible del técnico (Q"+disponible.toLocaleString()+").");
     if(!motivoFinal) return setErr("Escribe el motivo del adelanto.");
-    /* Adelanto gestionado por el admin. Por defecto queda ACTIVO de inmediato (no
-       necesita aprobación ni firma del técnico). Si el admin pidió firma, va al
-       flujo 'pendiente_tecnico' como antes. */
-    var activarYa = !pedirFirma;
-    var adv={id:"adv_"+Date.now(), vendorEmail:vendor.email, vendorName:vendorDisplay(vendor), dpiNumber:dpiNum||"", dpiPhoto:null, firma:null,
+    if(!dpiNum.trim()) return setErr("Escribe el DPI del técnico: va en el contrato.");
+    /* Todo adelanto nace con su contrato en Docs. El técnico lo firma desde el
+       correo; al firmarse pasa a «por depositar» y solo entonces se puede activar. */
+    var adv={id:"adv_"+Date.now(), vendorEmail:vendor.email, vendorName:vendorDisplay(vendor), dpiNumber:dpiNum.trim(), dpiPhoto:null, firma:null,
       monto:montoN, fechaDeposito:fecha, fechaInicio:fecha, motivo:motivoFinal,
-      status:activarYa?"activo":"pendiente_tecnico", createdAt:Date.now(), pausas:[], creadoPorAdmin:true};
+      status:"por_firmar", createdAt:Date.now(), pausas:[], creadoPorAdmin:true};
     if(esPlanilla){ adv.modo="quincenal"; adv.cobroQuincenal=qCuota; adv.cobroSemanal=0; adv.cuotas=qCuota>0?Math.ceil(montoN/qCuota):0; }
     else { adv.cuotas=cuotas; adv.cobroSemanal=semanal; }
     adv.contractText=buildContractText(adv);
+    setBusy(true);
+    try{ adv.docs=await docsCrearAdelanto(adv); }
+    catch(e){ setBusy(false); return setErr((e&&e.message)||"No se pudo crear el contrato en Docs. Intenta de nuevo."); }
+    setBusy(false);
     onCreate(adv);
-    try{
-      var cuotasTxt=esPlanilla?(qCuota>0?Math.ceil(montoN/qCuota)+" quincenas":"a la liquidación"):(cuotas+" semanas");
-      var cuotaTxt=esPlanilla?(qCuota>0?"Q"+qCuota.toLocaleString()+"/quincena":"sin cuota"):"Q"+semanal.toLocaleString();
-      if(activarYa) notifyTemplate(resolveNotifRecipients("adelantoDepositado", ADV_VENDORS, [vendor.email]), "adelantoDepositado", {tecnico:vendorDisplay(vendor), monto:"Q"+montoN.toLocaleString(), fecha:fmtDate(fecha), cuota:cuotaTxt, cuotas:cuotasTxt});
-      else notifyTemplate(resolveNotifRecipients("adelantoFirma", ADV_VENDORS, [vendor.email]), "adelantoFirma", {tecnico:vendorDisplay(vendor), monto:"Q"+montoN.toLocaleString(), cuotas:cuotasTxt, cuota:cuotaTxt});
-    }catch(_){}
     onClose();
   }
   return (
@@ -20690,7 +20995,7 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
           )}
           <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
             <div style={{flex:1,minWidth:150}}><F label="Fecha del depósito"><input type="date" value={fecha} onChange={function(e){setFecha(e.target.value);}}/></F></div>
-            <div style={{flex:1,minWidth:150}}><F label="DPI (opcional)"><input value={dpiNum} onChange={function(e){setDpiNum(e.target.value);setErr("");}} placeholder="0000 00000 0000" inputMode="numeric"/></F></div>
+            <div style={{flex:1,minWidth:150}}><F label="DPI del técnico"><input value={dpiNum} onChange={function(e){setDpiNum(e.target.value);setErr("");}} placeholder="0000 00000 0000" inputMode="numeric"/></F></div>
           </div>
           {montoN>0&&(
             <div style={{background:C.peach12||"rgba(233,130,106,.12)",borderRadius:12,padding:"12px 15px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -20698,20 +21003,11 @@ function AdvanceCreateModal({vendors, reps, adelantos, onCreate, onClose}){
             </div>
           )}
           {err&&<Err msg={err}/>}
-          {/* Gestión directa del admin: activar sin esperar la firma del técnico. */}
-          <label style={{display:"flex",alignItems:"flex-start",gap:11,background:C.surfaceWarm,border:"1px solid "+C.line,borderRadius:12,padding:"12px 14px",cursor:"pointer"}}>
-            <input type="checkbox" checked={pedirFirma} onChange={function(e){setPedirFirma(e.target.checked);}} style={{width:18,height:18,marginTop:1,accentColor:C.peach,flexShrink:0,cursor:"pointer"}}/>
-            <span style={{fontSize:12,color:C.earth,lineHeight:1.6}}>
-              <b style={{color:C.black}}>Pedir la firma del técnico antes de activar.</b> Si lo dejas desmarcado, el adelanto queda <b style={{color:C.black}}>activo de inmediato</b> — lo gestiona el administrador sin aprobación del técnico.
-            </span>
-          </label>
           <div style={{display:"flex",gap:10,marginTop:4}}>
             <button onClick={onClose} style={{flex:1,padding:"13px",borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.earth,fontSize:13,fontWeight:600,cursor:"pointer"}}>Cancelar</button>
-            <button onClick={crear} disabled={!ok} style={{flex:2,padding:"0 15px",borderRadius:"var(--sa-pill)",minHeight:44,border:"none",background:ok?C.green:C.gray,color:"#fff",fontSize:11.5,fontWeight:700,cursor:ok?"pointer":"not-allowed"}}>{pedirFirma?(esPlanilla?"Enviar al colaborador →":"Enviar al técnico →"):"Crear y activar →"}</button>
+            <button onClick={crear} disabled={!ok} style={{flex:2,padding:"0 15px",borderRadius:"var(--sa-pill)",minHeight:44,border:"none",background:ok?C.black:C.gray,color:"#fff",fontSize:11.5,fontWeight:700,cursor:ok?"pointer":"not-allowed"}}>{busy?"Creando contrato en Docs…":"Crear y enviar a firma →"}</button>
           </div>
-          <div style={{fontSize:12,color:C.earth,textAlign:"center",lineHeight:1.6}}>{pedirFirma
-            ? <>Le llegará {esPlanilla?"al colaborador":"al técnico"} para que suba su DPI y firme el contrato. Cuando firme, sube el comprobante de depósito para activarlo.</>
-            : <>Queda activo de inmediato y el descuento {esPlanilla?(qCuota>0?"quincenal":"a la liquidación"):"semanal"} empieza automáticamente. No requiere aprobación del técnico.</>}</div>
+          <div style={{fontSize:12,color:C.earth,textAlign:"center",lineHeight:1.6,textWrap:"pretty"}}>El contrato se crea en Docs y le llega a <b style={{color:C.black}}>{vendor?vendor.email:"su correo"}</b> para firmarlo. Cuando esté firmado te avisamos para que hagas el depósito; con el comprobante se activa y empieza el descuento {esPlanilla?(qCuota>0?"quincenal":"a la liquidación"):"semanal"}.</div>
         </div>
         )}
       </div>

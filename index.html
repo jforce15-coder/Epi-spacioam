@@ -118,13 +118,13 @@
     step("babel",function(){return !!window.Babel;}),
     plain(DS),
     plain("sa-auth-client.js?v=1"),
-    plain("sched-engine.js?v=20260801rondas")
+    plain("sched-engine.js?v=20260927zonas")
   ],function(){
     if(!window.React||!window.ReactDOM){ fatal("No cargaron las librer\u00edas (React)."); return; }
     if(typeof window.Recharts==="undefined"){ var n=function(){return null;}; window.Recharts=new Proxy({},{get:function(){return n;}}); }
     if(!window.Babel){ fatal("No carg\u00f3 el compilador (Babel)."); return; }
     // Compilar y ejecutar el app en ámbito global (equivale al <script type=text/babel> original).
-    fetch("app.jsx?v=20260806guard").then(function(r){ if(!r.ok) throw 0; return r.text(); }).then(function(src){
+    fetch("app.jsx?v=20260927docs").then(function(r){ if(!r.ok) throw 0; return r.text(); }).then(function(src){
       var code;
       try{ code=window.Babel.transform(src,{presets:["react"],filename:"app.jsx"}).code; }
       catch(e){ fatal((e&&e.message)||"Error al compilar el app."); return; }
