@@ -18449,7 +18449,7 @@ function printContract(adv){
     var txt=c.contractText||buildContractText(av);
     var body=txt.split("\n").map(function(l){ return l.trim()? "<p style='margin:0 0 10px'>"+l.replace(/</g,"&lt;")+"</p>" : "<div style='height:8px'></div>"; }).join("");
     var head=cons.length>1?"<div class='cn'>Contrato "+(i+1)+" · Q"+(c.monto||0).toLocaleString("es-GT")+"</div>":"";
-    var firma=c.firma?"<img class='fsig' src='"+c.firma+"'/>":"";
+    var firma=c.firma?"<img class='fsig' src='"+driveThumb(c.firma,800)+"'/>":"";
     return "<section class='c'>"+head+"<h1>SOLICITUD Y RECIBO DE ADELANTO DE PAGO</h1>"+body+firma+"<div class='sig'>"+(adv.vendorName||"")+"</div>"+depHtml(c.comprobanteDeposito)+"</section>";
   }).join("<div class='pb'></div>");
   var html = "<html><head><meta charset='UTF-8'><title>Adelanto — "+(adv.vendorName||"")+"</title>"
@@ -20117,11 +20117,11 @@ function ContractModal({adv,onClose}){
                 <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:23,letterSpacing:".03em",textAlign:"center",color:C.black,marginBottom:22}}>Solicitud y recibo de adelanto de pago</div>
                 <div style={{fontFamily:"Georgia,serif",fontSize:13.5,lineHeight:1.7,color:C.black,whiteSpace:"pre-wrap"}}>{txt}</div>
                 <div style={{marginTop:36}}>
-                  {c.firma&&<img src={c.firma} alt="Firma" style={{maxHeight:64,display:"block",marginBottom:2}}/>}
+                  {c.firma&&<img src={driveThumb(c.firma,800)} alt="Firma" style={{maxHeight:64,display:"block",marginBottom:2}}/>}
                   <div style={{borderTop:"1px solid "+C.black,width:260,paddingTop:6,fontSize:13,color:C.black}}>{adv.vendorName||""}{c.firma&&<span style={{fontSize:10.5,color:C.earth,display:"block",marginTop:2}}>Firmado digitalmente{c.firmadoEn?" · "+fmtDate(new Date(c.firmadoEn).toISOString().split("T")[0]):""}</span>}</div>
                 </div>
-                {c.dpiPhoto&&(<div style={{marginTop:24}}><div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",marginBottom:8}}>DPI adjunto</div><img src={c.dpiPhoto} alt="DPI" style={{maxWidth:"100%",borderRadius:10,border:"1px solid "+C.gray}}/></div>)}
-                {dep&&(<div style={{marginTop:24}}><div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",marginBottom:8}}>Comprobante de depósito</div>{(dep.type||"").indexOf("image/")===0?<img src={dep.url||dep.data} alt="Comprobante" style={{maxWidth:"100%",borderRadius:10,border:"1px solid "+C.gray}}/>:<div style={{fontSize:12.5,color:C.black,background:C.surfaceWarm,border:"1px solid "+C.gray,borderRadius:8,padding:"12px 14px"}}>📄 {dep.name||"Documento adjunto"}</div>}</div>)}
+                {c.dpiPhoto&&(<div style={{marginTop:24}}><div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",marginBottom:8}}>DPI adjunto</div><img src={driveThumb(c.dpiPhoto,1200)} alt="DPI" style={{maxWidth:"100%",borderRadius:10,border:"1px solid "+C.gray}}/></div>)}
+                {dep&&(<div style={{marginTop:24}}><div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",marginBottom:8}}>Comprobante de depósito</div>{(dep.type||"").indexOf("image/")===0?<img src={driveThumb(dep.url||dep.data,1200)} alt="Comprobante" style={{maxWidth:"100%",borderRadius:10,border:"1px solid "+C.gray}}/>:<div style={{fontSize:12.5,color:C.black,background:C.surfaceWarm,border:"1px solid "+C.gray,borderRadius:8,padding:"12px 14px"}}>📄 {dep.name||"Documento adjunto"}</div>}</div>)}
               </div>
             );
           })}
