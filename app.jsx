@@ -185,6 +185,26 @@ function driveThumb(url, size) {
   return "https://drive.google.com/thumbnail?id=" + m[1] + "&sz=w" + size;
 }
 
+/* Enlace para ABRIR un archivo de Drive (imagen o PDF) en su visor. Un enlace de
+   descarga de Drive no se puede mostrar dentro de <img>: por eso salía «?». */
+function driveOpen(url){
+  if (!url||typeof url!=="string") return url;
+  if (url.startsWith("data:")) return url;
+  var m = url.match(/[?&]id=([a-zA-Z0-9_-]{20,})/) || url.match(/\/d\/([a-zA-Z0-9_-]{20,})/);
+  return m ? "https://drive.google.com/file/d/"+m[1]+"/view" : url;
+}
+/* Imagen de Drive/base64 que carga liviana y abre el original al tocarla. Mientras
+   carga muestra un fondo beige; si falla, un enlace para abrirla en Drive. */
+function MediaThumb({src, alt, size, style}){
+  const [st,setSt]=useState("load");
+  if(!src) return null;
+  var open=driveOpen(src);
+  var clickable=!String(src).startsWith("data:");
+  if(st==="err") return <a href={open} target="_blank" rel="noopener" style={{display:"flex",alignItems:"center",gap:8,padding:"12px 14px",borderRadius:10,background:C.surfaceWarm,border:"1px solid "+C.gray,color:C.black,fontSize:12.5,fontWeight:600,textDecoration:"none"}}><Icon name="file" size={16} stroke={C.black}/>Abrir {alt||"archivo"} en Drive →</a>;
+  var img=<img src={driveThumb(src,size||800)} alt={alt||""} loading="lazy" decoding="async" onLoad={function(){setSt("ok");}} onError={function(){setSt("err");}} style={Object.assign({maxWidth:"100%",display:"block",borderRadius:10,border:"1px solid "+C.gray,background:C.surfaceWarm,minHeight:st==="load"?120:0,minWidth:st==="load"?160:0},style||{})}/>;
+  return clickable?<a href={open} target="_blank" rel="noopener" title="Abrir el original" style={{display:"inline-block",maxWidth:"100%"}}>{img}</a>:img;
+}
+
 /* La tarifa de un trabajo: la de la PROPIEDAD manda sobre la del técnico.
    Hay apartamentos que cuestan más de limpiar —más metros, más escaleras, más
    camas— y se pagan aparte sin tener que tocar la ficha de cada persona. */
@@ -18441,8 +18461,8 @@ function printContract(adv){
   function depHtml(dep){
     if(!dep) return "";
     var src=dep.url?dep.url:dep.data;
-    if((dep.type||"").indexOf("image/")===0) return "<div class='dep'><div class='dep-t'>Comprobante de depósito</div><img src='"+src+"'/></div>";
-    return "<div class='dep'><div class='dep-t'>Comprobante de depósito</div><div class='dep-f'>📄 "+String(dep.name||"Documento adjunto").replace(/</g,"&lt;")+"</div></div>";
+    if((dep.type||"").indexOf("image/")===0) return "<div class='dep'><div class='dep-t'>Comprobante de depósito</div><img src='"+driveThumb(src,1000)+"'/></div>";
+    return "<div class='dep'><div class='dep-t'>Comprobante de depósito</div><div class='dep-f'>"+String(dep.name||"Documento adjunto").replace(/</g,"&lt;")+(dep.url?" · <a href='"+driveOpen(dep.url)+"'>abrir</a>":"")+"</div></div>";
   }
   var sections = cons.map(function(c,i){
     var av=Object.assign({vendorName:adv.vendorName},c);
@@ -20120,8 +20140,8 @@ function ContractModal({adv,onClose}){
                   {c.firma&&<img src={driveThumb(c.firma,800)} alt="Firma" style={{maxHeight:64,display:"block",marginBottom:2}}/>}
                   <div style={{borderTop:"1px solid "+C.black,width:260,paddingTop:6,fontSize:13,color:C.black}}>{adv.vendorName||""}{c.firma&&<span style={{fontSize:10.5,color:C.earth,display:"block",marginTop:2}}>Firmado digitalmente{c.firmadoEn?" · "+fmtDate(new Date(c.firmadoEn).toISOString().split("T")[0]):""}</span>}</div>
                 </div>
-                {c.dpiPhoto&&(<div style={{marginTop:24}}><div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",marginBottom:8}}>DPI adjunto</div><img src={driveThumb(c.dpiPhoto,1200)} alt="DPI" style={{maxWidth:"100%",borderRadius:10,border:"1px solid "+C.gray}}/></div>)}
-                {dep&&(<div style={{marginTop:24}}><div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",marginBottom:8}}>Comprobante de depósito</div>{(dep.type||"").indexOf("image/")===0?<img src={driveThumb(dep.url||dep.data,1200)} alt="Comprobante" style={{maxWidth:"100%",borderRadius:10,border:"1px solid "+C.gray}}/>:<div style={{fontSize:12.5,color:C.black,background:C.surfaceWarm,border:"1px solid "+C.gray,borderRadius:8,padding:"12px 14px"}}>📄 {dep.name||"Documento adjunto"}</div>}</div>)}
+                {c.dpiPhoto&&(<div style={{marginTop:24}}><div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",marginBottom:8}}>DPI adjunto</div><MediaThumb src={c.dpiPhoto} alt="DPI" size={800}/></div>)}
+                {dep&&(<div style={{marginTop:24}}><div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",marginBottom:8}}>Comprobante de depósito</div>{(dep.type||"").indexOf("image/")===0?<MediaThumb src={dep.url||dep.data} alt="comprobante" size={1000}/>:<a href={driveOpen(dep.url||dep.data)} target="_blank" rel="noopener" download={dep.url?undefined:(dep.name||"comprobante")} style={{display:"flex",alignItems:"center",gap:8,fontSize:12.5,fontWeight:600,color:C.black,background:C.surfaceWarm,border:"1px solid "+C.gray,borderRadius:8,padding:"12px 14px",textDecoration:"none"}}><Icon name="file" size={16} stroke={C.black}/>{dep.name||"Documento adjunto"} · Abrir →</a>}</div>)}
               </div>
             );
           })}
@@ -20518,11 +20538,13 @@ function DepositReceiptUp({receipt, onAdd, onDel, compact}){
     var src=receipt.url?receipt.url:receipt.data;
     return (
       <div style={{display:"flex",alignItems:"center",gap:11,background:"#fff",border:"1px solid "+C.line,borderRadius:10,padding:"9px 12px"}}>
-        {isImg&&src?<img src={src} alt="" style={{width:40,height:40,borderRadius:7,objectFit:"cover",border:"1px solid "+C.gray}}/>:<span style={{fontSize:20}}>📄</span>}
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:11.5,fontWeight:700,color:C.green}}>Comprobante de depósito</div>
-          <div style={{fontSize:10.5,color:C.earth,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{receipt.name||"Adjunto"}</div>
-        </div>
+        <a href={driveOpen(src)} target="_blank" rel="noopener" download={receipt.url?undefined:(receipt.name||"comprobante")} title="Ver comprobante" style={{display:"flex",alignItems:"center",gap:11,flex:1,minWidth:0,textDecoration:"none",color:"inherit"}}>
+          {isImg&&src?<img src={driveThumb(src,120)} alt="" loading="lazy" style={{width:40,height:40,borderRadius:7,objectFit:"cover",border:"1px solid "+C.gray,background:C.surfaceWarm,flexShrink:0}}/>:<span style={{width:40,height:40,borderRadius:7,border:"1px solid "+C.gray,background:C.surfaceWarm,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Icon name="file" size={18} stroke={C.black}/></span>}
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:11.5,fontWeight:700,color:C.green}}>Comprobante de depósito</div>
+            <div style={{fontSize:10.5,color:C.earth,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{receipt.name||"Adjunto"} · Ver →</div>
+          </div>
+        </a>
         {onDel&&<button onClick={onDel} title="Quitar" style={{background:"none",border:"1px solid "+C.gray,borderRadius:6,color:C.earth,fontSize:11,fontWeight:600,padding:"4px 9px",cursor:"pointer"}}>Cambiar</button>}
       </div>
     );
