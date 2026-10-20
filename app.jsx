@@ -2548,6 +2548,13 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
     if(!sso || ssoHecho.current) return;
     if(!(vendors && vendors.length) && sheetsOk !== false) return;
     ssoHecho.current = true;
+    // Entrada instantánea con el perfil de la sesión; la firma se comprueba en segundo plano.
+    var r = window.SASesion.perfilRapido && window.SASesion.perfilRapido();
+    if(r && global_SAAuth() && global_SAAuth().roleFor(r,"epi")){
+      finalizeSA(r, r.email); setSso(false);
+      window.SASesion.confirmar("epi", function(){ try{localStorage.removeItem("sam_sess");}catch(e){} location.reload(); });
+      return;
+    }
     window.SASesion.verificar().then(function(p){
       if(p && global_SAAuth() && global_SAAuth().roleFor(p,"epi")) finalizeSA(p, p.email);
       setSso(false);
