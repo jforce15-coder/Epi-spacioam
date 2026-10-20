@@ -22,6 +22,8 @@ function doPost(e) { return route(e); }
 function route(e) {
   try {
     var p = e.postData ? JSON.parse(e.postData.contents) : e.parameter;
+    var __diag = accesosDiag_(p); if (__diag) return __diag;   // fase 1b: resumen de accesos (robot)
+    var __ses = sesionDe_(p); registrarAcceso_(p.action, !!__ses);   // fase 1b: aún no bloquea
     var r = {};
     /* Webhooks de Hospitable: su payload trae action = "review.created",
        "reservation.changed", etc. (con punto). Se atiende ANTES del router
