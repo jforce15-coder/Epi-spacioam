@@ -2539,6 +2539,20 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
     return (vendors||[]).find(function(x){ var em=String(x.email||"").toLowerCase(); return em===m || em.split("@")[0]===m || (x.prevEmails||[]).some(function(o){return String(o||"").toLowerCase()===m;}); });
   }
   /* Cierra sesión con perfil de Control de usuarios ya resuelto. */
+  /* Sesión única desde el Hub: si hay sesión firmada (hub.spacioam.com/js/sa-sesion.js), se comprueba con el
+     login y se entra directo. Espera a que cargue la lista del equipo, porque finalizeSA la necesita. */
+  var _ssoSt = React.useState(function(){ return !!(typeof window!=="undefined" && window.SASesion && window.SASesion.leer()); });
+  var sso = _ssoSt[0], setSso = _ssoSt[1];
+  var ssoHecho = React.useRef(false);
+  React.useEffect(function(){
+    if(!sso || ssoHecho.current) return;
+    if(!(vendors && vendors.length) && sheetsOk !== false) return;
+    ssoHecho.current = true;
+    window.SASesion.verificar().then(function(p){
+      if(p && global_SAAuth() && global_SAAuth().roleFor(p,"epi")) finalizeSA(p, p.email);
+      setSso(false);
+    });
+  }, [sso, vendors, sheetsOk]);
   function finalizeSA(profile, mail){
     var epiRole = (global_SAAuth().roleFor(profile,"epi")||"").toString().toLowerCase();
     if(!epiRole){ setErr(L("No tienes acceso a la app EPI.","You don't have access to the EPI app.")); return; }
@@ -2613,6 +2627,10 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
     if(adminPin2===adminPin) onLogin({role:"admin"});
     else setAdminErr("Contraseña incorrecta.");
   }
+
+  if (sso) return (
+    <div style={{minHeight:"100dvh",display:"grid",placeItems:"center",background:C.alabaster,fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".28em",textTransform:"uppercase",color:C.earth}}>Spacio AM</div>
+  );
 
   return (
     <div className="epi-login" style={{minHeight:"100dvh",background:C.alabaster,display:"grid",gridTemplateColumns:"1fr",fontFamily:"Montserrat,sans-serif"}}>
