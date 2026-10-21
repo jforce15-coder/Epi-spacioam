@@ -57,8 +57,6 @@ function route(e) {
     else if (p.action === "logEvento")      r = bitLog_(p.tipo, p.detalle, p.usuario, p.extra);
     else if (p.action === "ai")             r = aiSummary(p);
     else r = { error: "Unknown action: " + p.action };
-    /* Fase 3: las lecturas nunca devuelven contraseñas de técnicos ni el PIN de admin (ya no se usan). */
-    if (p.action === "getConfig" || p.action === "getHeavy" || p.action === "getAll") r = sinClaves_(r);
     /* Cualquier acción que escriba invalida el caché de arranque. */
     if (/^(save|delete|sync|migrar|fix|recover|programar|revisar)/.test(String(p.action)))
       cacheBump_();
@@ -539,18 +537,6 @@ function rowToReport_(row, tz) {
     Object.keys(out.fotosLimpieza).forEach(function (k) { out[k] = out.fotosLimpieza[k]; });
   }
   return out;
-}
-
-function sinClaves_(o) {
-  if (!o || typeof o !== "object") return o;
-  var c = JSON.parse(JSON.stringify(o));
-  (function limpiar(x) {
-    if (!x || typeof x !== "object") return;
-    if (Array.isArray(x)) { x.forEach(limpiar); return; }
-    delete x.password; delete x.adminpin; delete x.pin;
-    Object.keys(x).forEach(function (k) { limpiar(x[k]); });
-  })(c);
-  return c;
 }
 
 function getAll(opts) {

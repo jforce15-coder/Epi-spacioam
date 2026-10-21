@@ -2576,8 +2576,16 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
   }
   function global_SAAuth(){ return (typeof window!=="undefined" && window.SAAuth) ? window.SAAuth : null; }
   /* Respaldo local (sin conexión al Control de usuarios): valida contra la hoja. */
-  /* Fase 3: sin contraseñas locales ni PIN. Todos (técnicos y admins) entran con el login unificado. */
-  function loginLocal(){ return false; }
+  function loginLocal(){
+    var input = email.toLowerCase().trim();
+    var v = (vendors||[]).find(function(x){
+      var em = String(x.email||"").toLowerCase();
+      var user = em.split("@")[0];
+      return (em===input||user===input) && x.password===pass && x.active;
+    });
+    if (v) { onLogin({role:v.isAdmin?"admin":"vendor",vendor:v}); return true; }
+    return false;
+  }
 
   function loginUser() {
     if(busy) return;
@@ -2622,7 +2630,10 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
       }).catch(function(){ setBusy(false); setInitEmail(""); setErr(L("Contraseña guardada. Intenta iniciar sesión.","Password saved. Try signing in.")); });
     }).catch(function(){ setBusy(false); setErr(L("No se pudo conectar.","Couldn't connect.")); });
   }
-  function loginAdmin() { setAdminErr("Entra con tu correo y contraseña del login unificado."); }
+  function loginAdmin() {
+    if(adminPin2===adminPin) onLogin({role:"admin"});
+    else setAdminErr("Contraseña incorrecta.");
+  }
 
   if (sso) return (
     <div style={{minHeight:"100dvh",display:"grid",placeItems:"center",background:C.alabaster,fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".28em",textTransform:"uppercase",color:C.earth}}>Spacio AM</div>
