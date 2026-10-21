@@ -2611,7 +2611,7 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
       }
       /* Su cuenta unificada aún no tiene contraseña y la de Epi es correcta: se le pide crear una contraseña
          nueva y segura (las iniciales 1234 / spacioam no sirven). Puede dejarlo para después y entra igual. */
-      if(res.error==="needs_password" && localOk()){
+      if((res.error==="needs_password"||res.error==="bad_pass"||res.error==="no_user") && localOk()){
         setBusy(false); setDesdeLocal(true); setNp1(""); setNp2(""); setInitEmail(email.trim()); return;
       }
       /* Falló el servicio: intenta respaldo local antes de dar error. */
@@ -2631,7 +2631,10 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
     if(np1!==np2){ setErr(L("Las contraseñas no coinciden.","Passwords don't match.")); return; }
     var SA=global_SAAuth(); if(!SA){ setErr(L("Servicio no disponible.","Service unavailable.")); return; }
     setBusy(true);
-    SA.setInitialPassword(initEmail, np1).then(function(res){
+    var guardar = desdeLocal
+      ? apiCall("nuevaClaveTecnico",{email:initEmail, actual:pass, nueva:np1},{tries:1,timeout:30000}).then(function(d){ return d&&d.ok?{ok:true}:{ok:false,error:(d&&d.error)||"error",message:({weak:L("Elige una contraseña más segura.","Choose a stronger password."),admin:L("Las cuentas de administrador cambian su contraseña desde el Hub.","Admin accounts change their password from the Hub."),too_many:L("Demasiados intentos. Espera 15 minutos.","Too many attempts. Wait 15 minutes.")})[(d&&d.error)||""]}; })
+      : SA.setInitialPassword(initEmail, np1);
+    guardar.then(function(res){
       res=res||{};
       if(!res.ok){ setBusy(false); setErr((res.error&&res.message)||L("No se pudo guardar la contraseña.","Couldn't save the password.")); return; }
       /* Ya con contraseña, entra directo. */

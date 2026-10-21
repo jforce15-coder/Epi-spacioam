@@ -56,6 +56,7 @@ function route(e) {
     else if (p.action === "getBitacora")    r = bitLeer_(p.limit || 150);
     else if (p.action === "logEvento")      r = bitLog_(p.tipo, p.detalle, p.usuario, p.extra);
     else if (p.action === "ai")             r = aiSummary(p);
+    else if (p.action === "nuevaClaveTecnico") r = nuevaClaveTecnico_(p.email, p.actual, p.nueva);
     else r = { error: "Unknown action: " + p.action };
     /* Cualquier acción que escriba invalida el caché de arranque. */
     if (/^(save|delete|sync|migrar|fix|recover|programar|revisar)/.test(String(p.action)))
@@ -4797,3 +4798,47 @@ function registrarUsoIA_(funcion, modelo, usage, detalle, ref) {
   } catch (e) { console.warn('registrarUsoIA_: ' + e); }
 }
 
+
+
+/* ═══ Paso al login unificado (oct 2026) ════════════════════════════════════════════════════
+   Un técnico que entra con su contraseña de Epi (la de Config) crea aquí su contraseña del login
+   unificado. El servidor comprueba la contraseña de Epi y escribe la nueva (con el mismo hash que usa
+   el login: v2$sal$vueltas$hmac) en la hoja «Control de usuarios», que es de la misma cuenta.
+   No aplica a administradores (su contraseña solo se cambia en el login) y rechaza contraseñas débiles. */
+var CONTROL_USUARIOS_ID_ = "1r5LYE-YZw2_1JCt6919jZlcBf7AkHk5Hf2eIsP_wX2U", CLAVE_VUELTAS_ = 200;
+function claveDebil_(x) { x = String(x || "").toLowerCase(); return /^(\d)\1*$/.test(x) || /^(0?123456789?0?|12345678|87654321|password|contrase(n|ñ)a|qwerty\w*|spacio\s*am\d*|spacioam\d*|epi\d*)$/.test(x); }
+function claveHash_(clave) {
+  var sal = Utilities.getUuid().replace(/-/g, "").slice(0, 16);
+  var k = Utilities.computeHmacSha256Signature(String(clave), String(sal), Utilities.Charset.UTF_8), acc = k.slice();
+  for (var i = 1; i < CLAVE_VUELTAS_; i++) {
+    k = Utilities.computeHmacSha256Signature(k, Utilities.newBlob(String(sal)).getBytes());
+    for (var j = 0; j < acc.length; j++) acc[j] ^= k[j];
+  }
+  return "v2$" + sal + "$" + CLAVE_VUELTAS_ + "$" + acc.map(function (b) { return ("0" + (b & 0xFF).toString(16)).slice(-2); }).join("");
+}
+function nuevaClaveTecnico_(email, actual, nueva) {
+  email = String(email || "").trim().toLowerCase(); actual = String(actual || ""); nueva = String(nueva || "");
+  var cache = CacheService.getScriptCache(), kf = "ntf_" + email.slice(0, 200);
+  if (Number(cache.get(kf) || 0) >= 5) return { ok: false, error: "too_many" };
+  if (nueva.length < 8 || claveDebil_(nueva) || nueva === actual) return { ok: false, error: "weak" };
+  // 1) contraseña de Epi correcta (Config → vendors)
+  var cfgSh = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Config"), vendors = [];
+  (cfgSh ? cfgSh.getDataRange().getValues() : []).forEach(function (row) { if (row[0] === "vendors") { try { vendors = JSON.parse(row[1]); } catch (e) {} } });
+  var v = (vendors || []).filter(function (x) { return x && x.active && String(x.email || "").toLowerCase() === email && String(x.password || "") === actual; })[0];
+  if (!v) { cache.put(kf, String(Number(cache.get(kf) || 0) + 1), 900); return { ok: false, error: "bad_pass" }; }
+  // 2) su fila en Control de usuarios (con acceso a Epi y sin rol de administrador)
+  var sh = SpreadsheetApp.openById(CONTROL_USUARIOS_ID_).getSheetByName("Usuarios"), data = sh.getDataRange().getValues(), H = {};
+  data[0].forEach(function (c, i) { H[String(c).trim()] = i; });
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][H.email] || "").toLowerCase() !== email) continue;
+    if (data[i][H.estado] === "suspendido") return { ok: false, error: "suspended" };
+    if (!data[i][H.perm_epi]) return { ok: false, error: "no_epi" };
+    var esAdmin = ["mi", "epi", "grow", "hola"].some(function (a) { return /admin/.test(String(data[i][H["perm_" + a]] || "")); });
+    if (esAdmin) return { ok: false, error: "admin" };
+    sh.getRange(i + 1, H.password_hash + 1).setValue(claveHash_(nueva));
+    if (H.actualizado != null) sh.getRange(i + 1, H.actualizado + 1).setValue(new Date());
+    cache.remove(kf);
+    return { ok: true };
+  }
+  return { ok: false, error: "no_user" };
+}
