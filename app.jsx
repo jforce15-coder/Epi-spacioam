@@ -2529,6 +2529,7 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
   const [busy,     setBusy]     = useState(false);
   /* Primer ingreso vía Control de usuarios: define contraseña inicial. */
   const [initEmail,setInitEmail]= useState("");
+  const [desdeLocal,setDesdeLocal]= useState(false);   // llegó a "crear contraseña" con su contraseña de Epi válida
   const [np1,      setNp1]      = useState("");
   const [np2,      setNp2]      = useState("");
   const L = function(es,en){ return lang==="es"?es:en; };
@@ -2576,6 +2577,7 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
   }
   function global_SAAuth(){ return (typeof window!=="undefined" && window.SAAuth) ? window.SAAuth : null; }
   /* Respaldo local (sin conexión al Control de usuarios): valida contra la hoja. */
+  function claveDebil(x){ x=String(x||"").toLowerCase(); return /^(\d)\1*$/.test(x) || /^(0?123456789?0?|12345678|87654321|password|contrase(n|ñ)a|qwerty\w*|spacio\s*am\d*|spacioam\d*|epi\d*)$/.test(x); }
   function localOk(){
     var input = email.toLowerCase().trim();
     return (vendors||[]).some(function(x){ var em=String(x.email||"").toLowerCase(); return em===input && x.password===pass && x.active; });
@@ -2607,16 +2609,10 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
         var profile=res.profile||res.user||res.data||res;
         finalizeSA(profile, email.trim()); setBusy(false); return;
       }
-      /* Migración silenciosa: la cuenta del login unificado aún no tiene contraseña y la contraseña de Epi es
-         correcta → se guarda esa misma contraseña en el login unificado y se entra con sesión firmada.
-         (Así, sin que el técnico haga nada, todos pasan al login unificado.) */
-      if(res.error==="needs_password" && localOk() && String(pass).length>=8 && SA.setInitialPassword){
-        SA.setInitialPassword(email.trim(), pass).then(function(r2){
-          setBusy(false);
-          if(r2&&r2.ok){ var pf=r2.profile||{}; finalizeSA(pf, email.trim()); return; }
-          if(!loginLocal()) setErr(L("Correo o contraseña incorrectos.","Wrong email or password."));
-        }).catch(function(){ setBusy(false); if(!loginLocal()) setErr(L("Correo o contraseña incorrectos.","Wrong email or password.")); });
-        return;
+      /* Su cuenta unificada aún no tiene contraseña y la de Epi es correcta: se le pide crear una contraseña
+         nueva y segura (las iniciales 1234 / spacioam no sirven). Puede dejarlo para después y entra igual. */
+      if((res.error==="needs_password"||res.error==="bad_pass"||res.error==="no_user") && localOk()){
+        setBusy(false); setDesdeLocal(true); setNp1(""); setNp2(""); setInitEmail(email.trim()); return;
       }
       /* Falló el servicio: intenta respaldo local antes de dar error. */
       setBusy(false);
@@ -2630,11 +2626,15 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
   function submitInitial(){
     if(busy) return;
     setErr("");
-    if((np1||"").length<4){ setErr(L("La contraseña debe tener al menos 4 caracteres.","Password must be at least 4 characters.")); return; }
+    if((np1||"").length<8){ setErr(L("La contraseña debe tener al menos 8 caracteres.","Password must be at least 8 characters.")); return; }
+    if(claveDebil(np1) || np1===pass){ setErr(L("Elige una contraseña diferente a la inicial y más difícil de adivinar.","Choose a password different from the initial one and harder to guess.")); return; }
     if(np1!==np2){ setErr(L("Las contraseñas no coinciden.","Passwords don't match.")); return; }
     var SA=global_SAAuth(); if(!SA){ setErr(L("Servicio no disponible.","Service unavailable.")); return; }
     setBusy(true);
-    SA.setInitialPassword(initEmail, np1).then(function(res){
+    var guardar = desdeLocal
+      ? apiCall("nuevaClaveTecnico",{email:initEmail, actual:pass, nueva:np1},{tries:1,timeout:30000}).then(function(d){ return d&&d.ok?{ok:true}:{ok:false,error:(d&&d.error)||"error",message:({weak:L("Elige una contraseña más segura.","Choose a stronger password."),admin:L("Las cuentas de administrador cambian su contraseña desde el Hub.","Admin accounts change their password from the Hub."),too_many:L("Demasiados intentos. Espera 15 minutos.","Too many attempts. Wait 15 minutes.")})[(d&&d.error)||""]}; })
+      : SA.setInitialPassword(initEmail, np1);
+    guardar.then(function(res){
       res=res||{};
       if(!res.ok){ setBusy(false); setErr((res.error&&res.message)||L("No se pudo guardar la contraseña.","Couldn't save the password.")); return; }
       /* Ya con contraseña, entra directo. */
@@ -2690,13 +2690,15 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
             <>
               <div style={{fontFamily:"Montserrat,sans-serif",fontSize:11,fontWeight:500,letterSpacing:".32em",textTransform:"uppercase",color:C.earth,marginBottom:14}}>{L("Primer ingreso","First sign-in")}</div>
               <h1 style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontWeight:400,fontSize:34,letterSpacing:"-.01em",lineHeight:1.1,color:C.black,margin:0}}>{L("Crea tu contraseña","Create your password")}</h1>
-              <p style={{fontFamily:"Montserrat,sans-serif",fontSize:13.5,letterSpacing:".04em",lineHeight:1.7,color:C.earth,margin:"12px 0 30px"}}>{L("Es tu primer ingreso con ","This is your first sign-in with ")}<b style={{color:C.black}}>{initEmail}</b>{L(". Elige una contraseña para continuar.",". Choose a password to continue.")}</p>
+              <p style={{fontFamily:"Montserrat,sans-serif",fontSize:13.5,letterSpacing:".04em",lineHeight:1.7,color:C.earth,margin:"12px 0 30px"}}>{desdeLocal?L("Para proteger tu cuenta, crea una contraseña nueva (mínimo 8 caracteres, distinta a la inicial) para ","To protect your account, create a new password (8+ characters, not the initial one) for "):L("Es tu primer ingreso con ","This is your first sign-in with ")}<b style={{color:C.black}}>{initEmail}</b>{L(". Elige una contraseña para continuar.",". Choose a password to continue.")}</p>
               <div style={{display:"flex",flexDirection:"column",gap:18}}>
                 <LoginField label={L("Nueva contraseña","New password")} type="password" value={np1} onChange={function(v){setNp1(v);setErr("");}} ph="••••••••" err={!!err} onEnter={submitInitial} autoFocus/>
                 <LoginField label={L("Confirma la contraseña","Confirm password")} type="password" value={np2} onChange={function(v){setNp2(v);setErr("");}} ph="••••••••" err={!!err} onEnter={submitInitial}/>
                 {err&&<div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.red,marginTop:-4}}>⚠ {err}</div>}
                 <LoginBtn onClick={submitInitial} dis={busy||!np1||!np2}>{busy?L("Guardando…","Saving…"):L("Crear y entrar","Create and enter")}</LoginBtn>
-                <button onClick={function(){setInitEmail("");setNp1("");setNp2("");setErr("");}} style={{background:"none",border:"none",color:C.earth,fontSize:12,cursor:"pointer",letterSpacing:".04em"}}>← {L("Volver","Back")}</button>
+                {desdeLocal
+                  ? <button onClick={function(){setInitEmail("");setNp1("");setNp2("");setErr("");setDesdeLocal(false);loginLocal();}} style={{background:"none",border:"none",color:C.earth,fontSize:12,cursor:"pointer",letterSpacing:".04em"}}>{L("Ahora no, entrar igual","Not now, sign in anyway")}</button>
+                  : <button onClick={function(){setInitEmail("");setNp1("");setNp2("");setErr("");}} style={{background:"none",border:"none",color:C.earth,fontSize:12,cursor:"pointer",letterSpacing:".04em"}}>← {L("Volver","Back")}</button>}
               </div>
             </>
           ):!showAdmin?(
