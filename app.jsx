@@ -2576,6 +2576,10 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
   }
   function global_SAAuth(){ return (typeof window!=="undefined" && window.SAAuth) ? window.SAAuth : null; }
   /* Respaldo local (sin conexión al Control de usuarios): valida contra la hoja. */
+  function localOk(){
+    var input = email.toLowerCase().trim();
+    return (vendors||[]).some(function(x){ var em=String(x.email||"").toLowerCase(); return em===input && x.password===pass && x.active; });
+  }
   function loginLocal(){
     var input = email.toLowerCase().trim();
     var v = (vendors||[]).find(function(x){
@@ -2602,6 +2606,17 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
       if(res.ok){
         var profile=res.profile||res.user||res.data||res;
         finalizeSA(profile, email.trim()); setBusy(false); return;
+      }
+      /* Migración silenciosa: la cuenta del login unificado aún no tiene contraseña y la contraseña de Epi es
+         correcta → se guarda esa misma contraseña en el login unificado y se entra con sesión firmada.
+         (Así, sin que el técnico haga nada, todos pasan al login unificado.) */
+      if(res.error==="needs_password" && localOk() && String(pass).length>=8 && SA.setInitialPassword){
+        SA.setInitialPassword(email.trim(), pass).then(function(r2){
+          setBusy(false);
+          if(r2&&r2.ok){ var pf=r2.profile||{}; finalizeSA(pf, email.trim()); return; }
+          if(!loginLocal()) setErr(L("Correo o contraseña incorrectos.","Wrong email or password."));
+        }).catch(function(){ setBusy(false); if(!loginLocal()) setErr(L("Correo o contraseña incorrectos.","Wrong email or password.")); });
+        return;
       }
       /* Falló el servicio: intenta respaldo local antes de dar error. */
       setBusy(false);
