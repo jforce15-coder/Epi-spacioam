@@ -2614,6 +2614,11 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
       if((res.error==="needs_password"||res.error==="bad_pass"||res.error==="no_user") && localOk()){
         setBusy(false); setDesdeLocal(true); setNp1(""); setNp2(""); setInitEmail(email.trim()); return;
       }
+      /* Código temporal de reinicio (o cuenta sin contraseña): el login unificado pide crear una nueva. */
+      if(res.error==="needs_password"){
+        setBusy(false); setDesdeLocal(false); setNp1(""); setNp2(""); setInitEmail(email.trim()); return;
+      }
+      if(res.error==="reset_expired"){ setBusy(false); setErr(L("El código temporal venció. Pide uno nuevo al administrador.","The temporary code expired. Ask the admin for a new one.")); return; }
       /* Falló el servicio: intenta respaldo local antes de dar error. */
       setBusy(false);
       if(!loginLocal()) setErr((res.error&&res.message)||L("Correo o contraseña incorrectos.","Wrong email or password."));
