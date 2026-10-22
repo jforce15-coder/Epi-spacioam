@@ -116,21 +116,29 @@
     step("reactDom",function(){return !!window.ReactDOM;}),
     step("propTypes",function(){return !!window.PropTypes;}),
     step("recharts",function(){return !!window.Recharts;}),
-    step("babel",function(){return !!window.Babel;}),
     plain(DS),
     plain("sa-auth-client.js?v=1"),
     plain("sched-engine.js?v=20260927zonas")
   ],function(){
     if(!window.React||!window.ReactDOM){ fatal("No cargaron las librer\u00edas (React)."); return; }
     if(typeof window.Recharts==="undefined"){ var n=function(){return null;}; window.Recharts=new Proxy({},{get:function(){return n;}}); }
-    if(!window.Babel){ fatal("No carg\u00f3 el compilador (Babel)."); return; }
-    // Compilar y ejecutar el app en ámbito global (equivale al <script type=text/babel> original).
-    fetch("app.jsx?v=20261021reinicio").then(function(r){ if(!r.ok) throw 0; return r.text(); }).then(function(src){
-      var code;
-      try{ code=window.Babel.transform(src,{presets:["react"],filename:"app.jsx"}).code; }
-      catch(e){ fatal((e&&e.message)||"Error al compilar el app."); return; }
-      var tag=document.createElement("script"); tag.textContent=code; document.body.appendChild(tag);
-    }).catch(function(){ fatal("No se pudo cargar el app. Revisa tu conexi\u00f3n e intenta de nuevo."); });
+    /* Respaldo: compilar app.jsx en el teléfono con Babel (como antes). Solo si falta la versión ya compilada. */
+    function compilarEnTelefono(){
+      loadSeq(CDN.babel,0,function(){return !!window.Babel;},function(){
+        fetch("app.jsx?v="+Date.now()).then(function(r){ if(!r.ok) throw 0; return r.text(); }).then(function(src){
+          var code;
+          try{ code=window.Babel.transform(src,{presets:["react"],filename:"app.jsx"}).code; }
+          catch(e){ fatal((e&&e.message)||"Error al compilar el app."); return; }
+          var tag=document.createElement("script"); tag.textContent=code; document.body.appendChild(tag);
+        }).catch(function(){ fatal("No se pudo cargar el app. Revisa tu conexi\u00f3n e intenta de nuevo."); });
+      },function(){ fatal("No carg\u00f3 el compilador (Babel)."); });
+    }
+    /* Normal: app.build.js ya viene compilado desde GitHub (compilar-app.yml). Abre mucho más rápido:
+       sin descargar Babel ni compilar 1.8 MB en el teléfono. */
+    fetch("app.build.v?t="+Date.now(),{cache:"no-store"}).then(function(r){ if(!r.ok) throw 0; return r.text(); }).then(function(v){
+      v=String(v||"").trim(); if(!/^[0-9a-f]{6,}$/.test(v)) throw 0;
+      loadSeq(["app.build.js?v="+v],0,null,null,compilarEnTelefono);
+    }).catch(compilarEnTelefono);
     loadSeq(CDN.html2canvas,0,function(){return !!window.html2canvas;},null,null);
     loadSeq(CDN.jspdf,0,function(){return !!(window.jspdf||window.jsPDF);},null,null);
   });
