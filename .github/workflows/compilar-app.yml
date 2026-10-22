@@ -1,0 +1,39 @@
+# Compila app.jsx → app.build.js cada vez que cambia, para que el app abra sin compilar en el teléfono.
+name: Compilar app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app.jsx"
+      - "tools/compilar.js"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: compilar-app
+  cancel-in-progress: false
+
+jobs:
+  compilar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Compilar
+        run: |
+          npm install --no-save --no-package-lock @babel/core@7.29.0 @babel/preset-react@7.29.7
+          node tools/compilar.js
+      - name: Guardar
+        run: |
+          if git diff --quiet -- app.build.js app.build.v; then echo "Sin cambios."; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add app.build.js app.build.v
+          git commit -m "Compilar app.jsx → app.build.js"
+          git pull --rebase
+          git push

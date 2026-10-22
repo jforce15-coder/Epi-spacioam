@@ -2076,7 +2076,7 @@ function App() {
       setSheetsOk(false); setReady(true); setSyncing(false);
     }, 30000);
 
-    loadAllData().then(function(d){
+    var aplicarCarga = function(d){
       clearTimeout(timeoutId);
       setReps(withAutoPagador(d.reports||[]));
       setVendors(nom_seed(d.vendors||DEF_V));
@@ -2143,9 +2143,21 @@ function App() {
           if(h.schedvers && typeof h.schedvers==="object") setSchedVers(h.schedvers);
         }).catch(function(){});
       }, 1500);
-    }).catch(function(e){
+    };
+    /* Si la primera carga falla (arranque en frío del Apps Script, sesión recién creada al venir del Hub),
+       se reintenta sola en segundo plano: antes quedaba «Sin conexión a Google Sheets» hasta recargar a mano. */
+    var intentosCarga = 0;
+    var reintentarCarga = function(){
+      if (intentosCarga >= 8) return;
+      intentosCarga++;
+      setTimeout(function(){
+        loadAllData().then(function(d){ aplicarCarga(d); }).catch(function(){ reintentarCarga(); });
+      }, Math.min(60000, 5000 * Math.pow(1.6, intentosCarga - 1)));
+    };
+    loadAllData().then(aplicarCarga).catch(function(e){
       clearTimeout(timeoutId);
       console.error("Load failed:",e);
+      reintentarCarga();
       VENDORS_SAFE = false;
       try {
         var fb = ls_loadAll();
