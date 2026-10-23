@@ -1601,12 +1601,14 @@ async function loadAllData(opts) {
      respuestas cuando getAll y getConfig llegan a la vez, devolviendo getConfig sin
      "vendors". Pedir config primero (crítico para el login) y luego los reportes
      elimina esa condición de carrera. */
-  var cfg = await apiCall("getConfig", FULL ? {} : {slim:1}) || {};
+  /* El servidor a veces tarda 20–60 s en responder (arranque en frío o mucha carga). Con 12 s por intento
+     se rendía y la app quedaba sin la lista del equipo: nadie podía entrar. Ahora se le da más margen. */
+  var cfg = await apiCall("getConfig", FULL ? {} : {slim:1}, {timeout:45000, tries:2}) || {};
   var _v0 = salvageArray(cfg.vendors);
   if (!_v0 || !_v0.length) {
     for (var attempt=0; attempt<2; attempt++) {
       try {
-        var retry = await apiCall("getConfig", FULL ? {} : {slim:1});
+        var retry = await apiCall("getConfig", FULL ? {} : {slim:1}, {timeout:45000, tries:1});
         var _vr = retry && salvageArray(retry.vendors);
         if (_vr && _vr.length) { cfg = retry; break; }
       } catch(e){ /* sigue intentando */ }
@@ -2573,11 +2575,29 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
       setSso(false);
     });
   }, [sso, vendors, sheetsOk]);
-  function finalizeSA(profile, mail){
+  /* Si la lista del equipo aún no llegó (servidor lento), se pide solo para esta persona antes de rechazarla. */
+  var equipoExtra = React.useRef(null);
+  function finalizeSA(profile, mail, yaReintento){
     var epiRole = (global_SAAuth().roleFor(profile,"epi")||"").toString().toLowerCase();
     if(!epiRole){ setErr(L("No tienes acceso a la app EPI.","You don't have access to the EPI app.")); return; }
-    var v = matchVendor((profile&&profile.email)||mail);
-    var isAdmin = epiRole==="admin"||epiRole==="administrador"||epiRole==="principal"||epiRole==="secundario"||(v&&v.isAdmin);
+    var correo = (profile&&profile.email)||mail;
+    var v = matchVendor(correo);
+    if(!v && equipoExtra.current){
+      var m=String(correo||"").toLowerCase().trim();
+      v = equipoExtra.current.find(function(x){ var em=String(x.email||"").toLowerCase(); return em===m || (x.prevEmails||[]).some(function(o){return String(o||"").toLowerCase()===m;}); }) || null;
+    }
+    /* Los roles del Control de usuarios son admin_principal / admin_secundario: antes no se reconocían y, si la
+       lista del equipo no había cargado, el administrador quedaba fuera. */
+    var ROLES_ADMIN = ["admin","administrador","principal","secundario","admin_principal","admin_secundario"];
+    var isAdmin = ROLES_ADMIN.indexOf(epiRole)>=0||(v&&v.isAdmin);
+    if(!v && !isAdmin && !yaReintento){
+      setBusy(true); setErr(L("Buscando tu perfil en el equipo…","Looking up your team profile…"));
+      apiCall("getConfig",{slim:1},{timeout:60000,tries:2}).then(function(cfg){
+        var lista = (cfg && vendorsMerge(cfg).list) || [];
+        if(lista.length) equipoExtra.current = lista;
+      }).catch(function(){}).then(function(){ setBusy(false); setErr(""); finalizeSA(profile, mail, true); });
+      return;
+    }
     if(v){
       if(isAdmin) v=Object.assign({},v,{isAdmin:true});
       onLogin({role:isAdmin?"admin":"vendor",vendor:v,profile:profile,saEmail:(profile&&profile.email)||mail});
@@ -2619,7 +2639,7 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
       }
       if(res.ok){
         var profile=res.profile||res.user||res.data||res;
-        finalizeSA(profile, email.trim()); setBusy(false); return;
+        setBusy(false); finalizeSA(profile, email.trim()); return;
       }
       /* Su cuenta unificada aún no tiene contraseña y la de Epi es correcta: se le pide crear una contraseña
          nueva y segura (las iniciales 1234 / spacioam no sirven). Puede dejarlo para después y entra igual. */
