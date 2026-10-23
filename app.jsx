@@ -3656,6 +3656,10 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
   const [fDesde,   setFDesde]   = useState("");
   const [fHasta,   setFHasta]   = useState("");
   const [avanz,    setAvanz]    = useState(false);
+  /* En el teléfono los seis filtros ocupaban una pantalla entera antes de ver un solo trabajo:
+     quedan plegados detrás de un botón «Filtros» que dice cuántos hay activos. */
+  const [filtrosMovil, setFiltrosMovil] = useState(false);
+  var scOps = useScreen();
   const [showAll,  setShowAll]  = useState(false);
 
   function applyPreset(val) {
@@ -3857,8 +3861,18 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
       />
 
       {/* Filter panel — lo básico a la vista; el resto detrás de "Filtros avanzados" */}
-      <div style={{background:"#fff",borderBottom:"1px solid "+C.gray,padding:"14px 20px"}}>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10}}>
+      <div style={{background:"#fff",borderBottom:"1px solid "+C.gray,padding:scOps.mobile?"12px 16px":"14px 20px"}}>
+        {scOps.mobile&&(
+          <button className="ops-filtros-btn" onClick={function(){setFiltrosMovil(!filtrosMovil);}} aria-expanded={filtrosMovil}
+            style={{display:"flex",alignItems:"center",gap:10,width:"100%",minHeight:46,padding:"0 16px",borderRadius:"var(--sa-pill)",border:"1px solid "+(actF>0?C.black:C.gray),background:actF>0?C.black:"#fff",color:actF>0?"#fff":C.black,fontFamily:"Montserrat,sans-serif",fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:filtrosMovil?12:0}}>
+            <Icon name="search" size={16} stroke={actF>0?"#fff":C.taupe}/>
+            <span>Filtros</span>
+            {actF>0&&<span style={{minWidth:20,height:20,padding:"0 6px",borderRadius:999,background:C.peach,color:"#fff",fontSize:11,fontWeight:700,display:"inline-flex",alignItems:"center",justifyContent:"center"}}>{actF}</span>}
+            <span style={{marginLeft:"auto",fontSize:12,fontWeight:500,opacity:.75}}>{fReps.length} trabajos</span>
+            <Icon name="chevronDown" size={15} stroke={actF>0?"#fff":C.taupe} style={{transform:filtrosMovil?"rotate(180deg)":"none",transition:"transform .2s"}}/>
+          </button>
+        )}
+        <div style={{display:(scOps.mobile&&!filtrosMovil)?"none":"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10}}>
           <div>
             <span style={LBL}>Técnico</span>
             <PillFilter icon="user" value={fVend} allValue="Todos" minWidth={220} placeholder="Buscar técnico…" options={[{value:"Todos",label:"Todos"}].concat(techOpts)} onChange={function(v){setFVend(v);setShowAll(false);}}/>
@@ -3886,7 +3900,7 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
         </div>
 
         <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",marginTop:12}}>
-          <button onClick={function(){setAvanz(!avanz);}} style={{background:"none",border:"none",padding:0,fontSize:11.5,fontWeight:600,color:C.earth,cursor:"pointer",fontFamily:"Montserrat,sans-serif",display:"flex",alignItems:"center",gap:6,borderBottom:"1px solid "+C.gray}}>
+          <button onClick={function(){setAvanz(!avanz);}} style={{background:"none",border:"none",padding:0,fontSize:11.5,fontWeight:600,color:C.earth,cursor:"pointer",fontFamily:"Montserrat,sans-serif",display:"flex",alignItems:"center",gap:6,borderBottom:"1px solid "+C.gray,display:(scOps.mobile&&!filtrosMovil)?"none":"flex"}}>
             {avanz?"Ocultar filtros avanzados":"Filtros avanzados"}
             {actAvanz>0&&<span style={{background:C.peach,color:"#fff",borderRadius:"50%",width:16,height:16,fontSize:9.5,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>{actAvanz}</span>}
             <span style={{fontSize:9,color:C.taupe}}>{avanz?"▴":"▾"}</span>
@@ -3977,40 +3991,40 @@ function OpsDash({reps,props,vendors,reviews,rvCasos,rvIA,adelantos,onMarkPaidBa
    letra. En móvil cada trabajo pasa a ser una ficha: propiedad, qué se hizo,
    cuánto y cómo va el pago — en ese orden, que es el orden en que se lee. */
 function MobileJobList({reps,onSelect,onMarkPaid,vendors,props}) {
+  /* Ficha compacta: categoría y fecha arriba, apartamento y monto en grande, técnico y estado de pago abajo.
+     Antes cada ficha medía casi un tercio de pantalla; ahora caben el triple. */
   return (
-    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
       {reps.map(function(r){
         var b=BADGE[r.categoria]||BADGE["Mantenimiento"]; var al=alertLvl(r);
         var tec=(function(){var v=(vendors||[]).find(function(x){return repMatchesVendor(r,x);});return v?vendorDisplay(v):(r.reportadoPor||"—");})();
         var pagable=isPayable(r,vendors,props);
+        var danos=isDanos(r.categoria);
         return (
-          <div key={r.id} onClick={function(){onSelect(r);}}
-            style={{background:"#fff",border:"1px solid "+(al?ALT[al].clr+"55":C.line),borderLeft:"3px solid "+(al?ALT[al].clr:b.tx),borderRadius:14,padding:"13px 14px",cursor:"pointer",boxShadow:"var(--sa-shadow-xs)"}}>
+          <div key={r.id} className="ops-ficha" role="button" tabIndex={0} onClick={function(){onSelect(r);}}
+            style={{background:"#fff",border:"1px solid "+(al?ALT[al].clr+"55":C.line),borderRadius:16,padding:"12px 14px",cursor:"pointer",display:"flex",flexDirection:"column",gap:6}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"space-between"}}>
+              <span style={{display:"inline-flex",alignItems:"center",gap:7,minWidth:0,fontSize:10.5,fontWeight:600,letterSpacing:".06em",color:b.tx,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                <span style={{width:8,height:8,borderRadius:"50%",background:b.tx,flexShrink:0}}/>{r.categoria}
+              </span>
+              <span style={{fontSize:11,color:C.taupe,whiteSpace:"nowrap"}}>{al&&<span style={{color:ALT[al].clr,fontWeight:700}} title={ALT[al].label}>⚠ </span>}{fmtDate(r.fecha)}</span>
+            </div>
             <div style={{display:"flex",alignItems:"baseline",gap:10,justifyContent:"space-between"}}>
-              <span style={{padding:"3px 9px",borderRadius:"var(--sa-pill)",fontSize:9,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",background:b.bg,color:b.tx,whiteSpace:"nowrap"}}>{r.categoria}</span>
-              <span style={{fontSize:11,color:C.taupe,whiteSpace:"nowrap"}}>{fmtDate(r.fecha)}</span>
+              <span style={{fontSize:16,fontWeight:600,color:C.black,lineHeight:1.25,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.propiedad}</span>
+              <span style={{fontSize:17,fontWeight:700,color:danos?C.taupe:C.black,fontVariantNumeric:"tabular-nums",flexShrink:0}}>{danos?"—":(r.total?epiMoney(r.total):"—")}</span>
             </div>
-            <div style={{fontSize:15,fontWeight:600,color:C.black,lineHeight:1.35,marginTop:9,textWrap:"pretty"}}>{r.propiedad}</div>
-            {r.descripcion&&<div style={{fontSize:13,color:C.earth,lineHeight:1.6,marginTop:6,display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical",overflow:"hidden",textWrap:"pretty"}}>{r.descripcion}</div>}
-            {al&&<div style={{fontSize:11,color:ALT[al].clr,fontWeight:700,marginTop:8}}>⚠ {ALT[al].label}</div>}
-            <div style={{height:1,background:C.line,margin:"11px 0 10px"}}/>
-            <div style={{display:"flex",alignItems:"center",gap:10,justifyContent:"space-between",flexWrap:"wrap"}}>
-              <div style={{minWidth:0,flex:1}}>
-                <div style={{fontSize:9,color:C.taupe,fontWeight:700,letterSpacing:".16em",textTransform:"uppercase"}}>Técnico</div>
-                <div style={{fontSize:12.5,color:C.black,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{tec}</div>
-              </div>
-              <div style={{textAlign:"right",flexShrink:0}}>
-                <div style={{fontSize:17,fontWeight:700,color:isDanos(r.categoria)?C.taupe:C.black,fontVariantNumeric:"tabular-nums"}}>{isDanos(r.categoria)?"Sin pago":(r.total?"Q"+r.total:"—")}</div>
-                <div style={{marginTop:5}} onClick={function(e){e.stopPropagation();}}>
-                  {isDanos(r.categoria)
-                    ? <span style={{padding:"5px 11px",borderRadius:"var(--sa-pill)",fontSize:10,fontWeight:700,letterSpacing:".08em",background:"#F0EDE8",color:C.earth}}>SEGUIMIENTO</span>
-                    : (pagable
-                      ? <button onClick={function(e){e.stopPropagation();onMarkPaid(r.id,!r.paid);}} style={{padding:"7px 13px",minHeight:34,borderRadius:"var(--sa-pill)",border:"none",fontSize:11.5,fontWeight:700,cursor:"pointer",background:r.paid?"#E8F2ED":"#F7E7E4",color:r.paid?C.green:C.red,whiteSpace:"nowrap"}}>{r.paid?"✓ Pagado":"● Pendiente"}</button>
-                      : <span style={{fontSize:12,color:C.gray}}>—</span>)}
-                </div>
-              </div>
+            <div style={{display:"flex",alignItems:"center",gap:10,justifyContent:"space-between"}}>
+              <span style={{fontSize:12,color:C.earth,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                {tec}{r.pagadoPor&&!danos?<span style={{color:r.pagadoPor==="Spacio AM"?"#3B6691":"#B5573E"}}> · {r.pagadoPor==="Spacio AM"?"Spacio AM":"Dueño"}</span>:null}
+              </span>
+              <span style={{flexShrink:0}} onClick={function(e){e.stopPropagation();}}>
+                {danos
+                  ? <span style={{padding:"5px 11px",borderRadius:"var(--sa-pill)",fontSize:10,fontWeight:700,letterSpacing:".08em",background:"#F0EDE8",color:C.earth}}>SEGUIMIENTO</span>
+                  : (pagable
+                    ? <button onClick={function(e){e.stopPropagation();onMarkPaid(r.id,!r.paid);}} style={{padding:"7px 13px",minHeight:34,borderRadius:"var(--sa-pill)",border:"none",fontSize:11.5,fontWeight:700,cursor:"pointer",background:r.paid?"#E8F2ED":"#F7E7E4",color:r.paid?C.green:C.red,whiteSpace:"nowrap"}}>{r.paid?"✓ Pagado":"● Pendiente"}</button>
+                    : <span style={{fontSize:12,color:C.gray}}>—</span>)}
+              </span>
             </div>
-            {r.pagadoPor&&!isDanos(r.categoria)&&<div style={{marginTop:9}}><span style={{fontSize:9.5,fontWeight:700,letterSpacing:".08em",padding:"3px 9px",borderRadius:"var(--sa-pill)",background:r.pagadoPor==="Spacio AM"?"#E8EDF3":"#FEF0EC",color:r.pagadoPor==="Spacio AM"?"#3B6691":"#E9826A"}}>Paga {r.pagadoPor}</span></div>}
           </div>
         );
       })}
@@ -21410,6 +21424,8 @@ function GS() {
     + "@media(max-width:639px){.chart-side{grid-template-columns:1fr!important;}}"
     + "@media(max-width:639px){.stat-row{gap:10px!important;flex-wrap:wrap!important;}}"
     + "input[type=date]{min-height:44px;}"
+    + ".ops-ficha{transition:transform .14s cubic-bezier(.22,.61,.36,1),box-shadow .2s;-webkit-tap-highlight-color:transparent;}"
+    + ".ops-ficha:active{transform:scale(.98);background:#FCFBFA!important;}"
     + ".vin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}"
     + ".vin-tile{all:unset;box-sizing:border-box;cursor:pointer;border-radius:22px;padding:16px;min-height:132px;display:flex;flex-direction:column;justify-content:space-between;gap:12px;-webkit-tap-highlight-color:transparent;transition:transform .16s cubic-bezier(.22,.61,.36,1),box-shadow .2s;animation:vin-in .5s cubic-bezier(.22,.61,.36,1) backwards;font-family:Montserrat,sans-serif;}"
     + ".vin-tile:active{transform:scale(.97);}"
