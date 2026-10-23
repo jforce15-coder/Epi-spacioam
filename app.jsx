@@ -4558,6 +4558,12 @@ function PagosLimpieza({reps,vendors}) {
 
 
 /* ─── Report Form — dispatcher (all hooks before any return) */
+/* Atajo desde el Inicio del técnico: «Llenar formulario» de la siguiente limpieza abre el formulario correcto
+   con el apartamento ya elegido (sin pasar por bienvenida, país, ciudad ni responsable). */
+var EPI_PREFILL = null;
+function epiPrefillVer(){ return (EPI_PREFILL && Date.now()-EPI_PREFILL.ts < 600000) ? EPI_PREFILL : null; }
+function epiPrefillTomar(cat){ var p=epiPrefillVer(); if(p && p.cat===cat){ EPI_PREFILL=null; return p; } return null; }
+var CAT_ICONO = {"Limpieza tradicional":"home","Limpieza profunda":"star","Mantenimiento":"settings","Nuevo Producto":"plus","Ajuste":"edit","Reporte de Daños":"alert","Supervisión":"check"};
 function RepForm({vendors,props,company,onSubmit,defaultVendor,onSaveFeedback,myReps,allReps}) {
   /* Determine allowed cats by vendor type */
   var vend = vendors&&vendors.find(function(v){return v.email===defaultVendor;});
@@ -4574,10 +4580,16 @@ function RepForm({vendors,props,company,onSubmit,defaultVendor,onSaveFeedback,my
   /* El formulario de Supervisión solo existe para usuarios con la función activada */
   if (vend&&vend.isSupervisor&&allowedCats.indexOf("Supervisión")<0) allowedCats = allowedCats.concat(["Supervisión"]);
   /* Start with null (selector screen) so user always picks category first */
-  const [cat,setCat] = useState(null);
+  const [cat,setCat] = useState(function(){ var p=epiPrefillVer(); return p&&allowedCats.indexOf(p.cat)>=0?p.cat:null; });
+  const [pfKey,setPfKey] = useState(0);
+  useEffect(function(){
+    function h(){ var p=epiPrefillVer(); if(p&&allowedCats.indexOf(p.cat)>=0){ setCat(p.cat); setPfKey(function(k){return k+1;}); } }
+    window.addEventListener("epi:prefill",h);
+    return function(){ window.removeEventListener("epi:prefill",h); };
+  },[allowedCats.join("|")]);
   function goBack(){setCat(null);}
   var shared = {vendors:vendors,props:props,company:company,onSubmit:onSubmit,defaultVendor:defaultVendor,onBack:goBack,onSaveFeedback:onSaveFeedback,myReps:myReps||[]};
-  if (cat==="Limpieza tradicional"||cat==="Limpieza profunda") return <CleaningFormGated shared={shared} allReps={allReps||myReps||[]} defaultVendor={defaultVendor} props={props} onSaveFeedback={onSaveFeedback} category={cat}/>;
+  if (cat==="Limpieza tradicional"||cat==="Limpieza profunda") return <CleaningFormGated key={cat+":"+pfKey} shared={shared} allReps={allReps||myReps||[]} defaultVendor={defaultVendor} props={props} onSaveFeedback={onSaveFeedback} category={cat}/>;
   if (cat==="Ajuste")               return <AjusteForm           {...shared}/>;
   if (cat==="Reporte de Daños")     return <DanosFormSolo         {...shared}/>;
   if (cat==="Nuevo Producto")       return <NuevoProductoForm      {...shared}/>;
@@ -4660,6 +4672,27 @@ function StandardRepForm({cat,setCat,vendors,props,company,onSubmit,defaultVendo
   }
 
   if(done) return <SuccessScreen msg="¡Reporte enviado!" sub="El trabajo quedó registrado correctamente."/>;
+  /* Primer paso: solo elegir el tipo de trabajo, con mosaicos grandes. El resto del formulario aparece
+     después — antes se veía todo apagado debajo y parecía más largo de lo que es. */
+  if(!cat) return (
+    <div style={{width:"100%",maxWidth:560,margin:"0 auto",padding:"26px 16px calc(120px + env(safe-area-inset-bottom))",fontFamily:"Montserrat,sans-serif"}}>
+      <div style={{fontSize:10.5,fontWeight:600,color:C.taupe,letterSpacing:".24em",textTransform:"uppercase",marginBottom:8}}>Nuevo reporte</div>
+      <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:32,lineHeight:1.05,color:C.black,marginBottom:22}}>¿Qué hiciste?</div>
+      <div className="vin-grid">
+        {allowedCats.map(function(c,ix){
+          var b=BADGE[c]||BADGE["Mantenimiento"];
+          var grande=ix===0&&allowedCats.length%2===1;
+          return (
+            <button key={c} className="vin-tile" onClick={function(){setCat(c);}} style={{gridColumn:grande?"span 2":"span 1",background:"#fff",boxShadow:"inset 0 0 0 1px "+C.line,minHeight:124}}>
+              <span className="vin-chip" style={{background:b.bg}}><Icon name={CAT_ICONO[c]||"edit"} size={20} stroke={b.tx}/></span>
+              <span style={{fontSize:15,fontWeight:600,color:C.black,lineHeight:1.25,textAlign:"left"}}>{c}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
 
   var coName=company&&company.name?company.name:"Spacio AM S.A.";
   var coNit =company&&company.nit?company.nit:"118287796";
@@ -5219,11 +5252,12 @@ function CleaningFormGated(props){
 function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFeedback,myReps,seedPhoto}) {
   const STEPS = ["Bienvenida","País","Ciudad","Responsable","Propiedad","Habitaciones","Baños","Cocina","Sala y Comedor","Detalles finales","Inventario","Daños","Foto uniforme","Confirmación"];
   var TOTAL_STEPS_F = STEPS.length - 1;
-  const [step,setStep]   = useState(0);
+  const pfT = React.useState(function(){ return epiPrefillTomar("Limpieza tradicional"); })[0];
+  const [step,setStep]   = useState(pfT?STEPS.indexOf("Propiedad"):0);
   const [errMsg,setErrMsg] = useState("");
   const [form,setForm] = useState({
     pais:"Guatemala", ciudad:"Ciudad de Guatemala",
-    reportadoPor:defaultVendor||"", propiedad:"",
+    reportadoPor:defaultVendor||"", propiedad:(pfT&&pfT.propiedad)||"",
     fecha:todayStr(),
     fotosHabitaciones:[], fotoPisoGeneral:null,
     fotosBanos:[],
@@ -5434,7 +5468,7 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
             <div style={{fontSize:11,color:C.earth,fontWeight:700,letterSpacing:".2em",textTransform:"uppercase",marginBottom:10,display:"flex",alignItems:"center",gap:7}}><span style={{width:6,height:6,borderRadius:999,background:C.attention,flexShrink:0,display:"inline-block"}}/>Spacio AM</div>
             <div style={{fontSize:24,fontWeight:400,color:C.black,marginBottom:14,lineHeight:1.4}}>Bienvenido al Reporte de Limpieza</div>
             <div style={{fontSize:14,color:C.earth,lineHeight:1.7,marginBottom:32}}>Gracias por tu dedicación. Vamos a guiarte paso a paso para completar el control de calidad de esta limpieza.</div>
-            <button onClick={next} style={{padding:"14px 36px",borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer",letterSpacing:".08em"}}>Empezar →</button>
+            <button onClick={function(){ setStep(form.pais&&form.ciudad?STEPS.indexOf(defaultVendor?"Propiedad":"Responsable"):1); }} style={{padding:"14px 36px",borderRadius:"var(--sa-pill)",border:"none",background:C.black,color:"#fff",fontSize:14,fontWeight:600,cursor:"pointer",letterSpacing:".08em"}}>Empezar →</button>
             <div style={{marginTop:16}}><button onClick={onBack} style={{background:"none",border:"none",color:C.earth,fontSize:12,cursor:"pointer",textDecoration:"underline"}}>← Volver al formulario general</button></div>
           </div>
         )}
@@ -5795,10 +5829,11 @@ function LimpiezaTradForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFee
 /* ═══════════════ LIMPIEZA PROFUNDA WIZARD ═════════════════════════════ */
 function LimpiezaProfForm({vendors,props,onSubmit,defaultVendor,onBack,onSaveFeedback,myReps,seedPhoto}) {
   const STEPS_P = ["Bienvenida","Propiedad","Regadera y Ducha","Ventanas","Cocina profunda","Gavetas y Detrás","Detalle extra","Inventario","Foto uniforme","Confirmación"];
-  const [step,setStep]   = useState(0);
+  const pfP = React.useState(function(){ return epiPrefillTomar("Limpieza profunda"); })[0];
+  const [step,setStep]   = useState(pfP?STEPS_P.indexOf("Propiedad"):0);
   const [errMsg,setErrMsg] = useState("");
   const [form,setForm] = useState({
-    reportadoPor:defaultVendor||"", propiedad:"", fecha:todayStr(),
+    reportadoPor:defaultVendor||"", propiedad:(pfP&&pfP.propiedad)||"", fecha:todayStr(),
     fotosRegadera:null, fotosDucha:null, fotosDrenajes:[],
     fotosVentanas:[], 
     fotosEstufa:null, fotosFregadero:null, fotosMicroondas2:null, fotosPlatos:null,
@@ -8699,7 +8734,12 @@ function VendorInicio({vendor, schedules, allSchedules, reps, pnd, allVendors, p
             <span style={{display:"flex",alignItems:"center",gap:14,color:C.earth,fontSize:12.5,width:"100%"}}>
               <span style={{display:"inline-flex",alignItems:"center",gap:6}}><Icon name="home" size={15} stroke={C.earth}/>{siguiente.habitaciones||1}</span>
             </span>
-            <button className="vin-cta" onClick={function(){onIr("new");}}>
+            <button className="vin-cta" onClick={function(){
+              var pm=(props||[]).find(function(x){ return normalize(x.name||"")===normalize(siguiente.propiedad||""); });
+              EPI_PREFILL={propiedad:pm?pm.name:siguiente.propiedad, cat:SCHED.esProfunda(siguiente.tipo)?"Limpieza profunda":"Limpieza tradicional", ts:Date.now()};
+              try{ window.dispatchEvent(new Event("epi:prefill")); }catch(_){}
+              onIr("new");
+            }}>
               <Icon name="edit" size={18} stroke="#fff"/>{epiT("Llenar formulario","Fill out form")}
             </button>
           </div>
