@@ -4564,6 +4564,17 @@ var EPI_PREFILL = null;
 function epiPrefillVer(){ return (EPI_PREFILL && Date.now()-EPI_PREFILL.ts < 600000) ? EPI_PREFILL : null; }
 function epiPrefillTomar(cat){ var p=epiPrefillVer(); if(p && p.cat===cat){ EPI_PREFILL=null; return p; } return null; }
 var CAT_ICONO = {"Limpieza tradicional":"home","Limpieza profunda":"star","Mantenimiento":"settings","Nuevo Producto":"plus","Ajuste":"edit","Reporte de Daños":"alert","Supervisión":"check"};
+/* Texto de ayuda plegado: una línea a la vista y el detalle al tocar «¿Cómo funciona?». */
+function MasInfo({resumen, children}){
+  const [ab,setAb]=useState(false);
+  return (
+    <div style={{marginTop:4}}>
+      <div style={{fontSize:12,color:C.earth,lineHeight:1.5}}>{resumen}</div>
+      <button onClick={function(){setAb(!ab);}} aria-expanded={ab} style={{all:"unset",cursor:"pointer",marginTop:6,fontSize:11.5,fontWeight:600,color:C.black,borderBottom:"1px solid "+C.gray,fontFamily:"Montserrat,sans-serif"}}>{ab?"Ocultar":"¿Cómo funciona?"}</button>
+      {ab&&<div style={{fontSize:11.5,color:C.earth,marginTop:8,lineHeight:1.6,textWrap:"pretty",animation:"sa-fade .2s ease"}}>{children}</div>}
+    </div>
+  );
+}
 function RepForm({vendors,props,company,onSubmit,defaultVendor,onSaveFeedback,myReps,allReps}) {
   /* Determine allowed cats by vendor type */
   var vend = vendors&&vendors.find(function(v){return v.email===defaultVendor;});
@@ -15411,9 +15422,9 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
           <div>
             <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:20,color:C.black,lineHeight:1.2}}>Programación</div>
-            <div style={{fontSize:11.5,color:C.earth,marginTop:3,lineHeight:1.6,textWrap:"pretty"}}>
+            <MasInfo resumen={"Ruta automática · 6 pm la de mañana · 6 am ajustes · "+SCHED.HORA_INI+"–"+SCHED.HORA_FIN}>
               A las 6:00 pm se reparte la ruta de mañana y sale el correo, sin que tengas que hacer nada. A las 6:00 am se agregan las reservas que entraron de noche y se avisa del cambio. Puedes entrar antes y mover lo que quieras: el técnico no ve su ruta hasta que el correo sale. Las reservas de Hospitable se sincronizan solas cada 3 horas. Horario de limpieza: {SCHED.HORA_INI} a {SCHED.HORA_FIN}.
-            </div>
+            </MasInfo>
           </div>
           <div style={{textAlign:"right",flexShrink:0}}>
             <div style={{fontSize:9,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase"}}>Reservas</div>
@@ -16038,10 +16049,10 @@ function ProgramacionAdmin({activo, schedVers, schedules, onSvSchedules, vendors
                             var cval = perm ? String(cfg.permCode||"") : ((codigos[quincenaInfo(fecha).key]||{})[normalize(f.apto)]||"");
                             var campo = cfg.mode==="none"
                               ? <span style={{fontSize:10.5,color:C.taupe,textAlign:mobPA?"left":"right"}}>sin código</span>
-                              : <CodeInput value={cval} width={"100%"} big={mobPA} onSave={function(v){ if(perm) onSvCodigos&&onSvCodigos(withCodeMode(codigos,f.apto,"permanent",v)); else onSvCodigos&&onSvCodigos(withCodigoQuincena(codigos,f.apto,fecha,v)); }}/>;
+                              : <CodeInput value={cval} width={mobPA?140:"100%"} big={false} onSave={function(v){ if(perm) onSvCodigos&&onSvCodigos(withCodeMode(codigos,f.apto,"permanent",v)); else onSvCodigos&&onSvCodigos(withCodigoQuincena(codigos,f.apto,fecha,v)); }}/>;
                             if(!mobPA) return campo;
                             return (
-                              <div style={{gridColumn:"1 / -1",display:"grid",gridTemplateColumns:"auto minmax(0,1fr)",alignItems:"center",gap:10}} onClick={function(e){ e.stopPropagation(); }}>
+                              <div style={{gridColumn:"1 / -1",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}} onClick={function(e){ e.stopPropagation(); }}>
                                 <span style={{fontSize:9,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.taupe}}>Código</span>
                                 {campo}
                               </div>
