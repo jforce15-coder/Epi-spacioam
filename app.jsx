@@ -2365,8 +2365,14 @@ function App() {
     try { localStorage.setItem("sam_sess",JSON.stringify(s)); } catch(e){}
     setSess(s);
   }
+  /* Cerrar sesión también borra la sesión firmada compartida (cookie de .spacioam.com). Antes solo se borraba
+     la de Epi: al volver al login, la sesión única la encontraba y volvía a entrar sola — parecía que el botón
+     no hacía nada. */
   function logout() {
     try { localStorage.removeItem("sam_sess"); } catch(e){}
+    try { if(window.SASesion&&window.SASesion.borrar) window.SASesion.borrar(); } catch(e){}
+    try { if(window.SAAuth&&window.SAAuth.clearSession) window.SAAuth.clearSession(); } catch(e){}
+    setVerComo(null);
     setSess(null);
   }
 
@@ -8579,10 +8585,147 @@ function GaleriaAviso({vendor}){
   return <NotiToast key={push.id} item={push} onOpen={function(){setPush(null);}} onClose={function(){setPush(null);}}/>;
 }
 
+/* ═══ INICIO DEL TÉCNICO ══════════════════════════════════════════════════════
+   Lo primero que ve el equipo al entrar: muy gráfico y con poco texto.
+   Un anillo con el avance del día, la siguiente limpieza con un botón grande para
+   llenar su formulario, la semana en barras y accesos a pagos y calidad. */
+function vinRuta(vendor, allSchedules, schedules){
+  var hoy=SCHED.hoyGT();
+  var fuente=(allSchedules&&allSchedules.length)?allSchedules:(schedules||[]);
+  var limBorrador=parseInt(vendor.avisoDias,10)===3?SCHED.shift(hoy,3):hoy;
+  return fuente.filter(function(s){
+    if(!s) return false;
+    var sf=String(s.fecha||"").slice(0,10);
+    if(sf>limBorrador&&!s.notificadoEn) return false;
+    if(String(s.estado||"")==="cancelada") return false;
+    return schedMatchesVendor(s,vendor);
+  }).sort(function(a,b){ if(a.fecha!==b.fecha) return a.fecha<b.fecha?-1:1; return (a.orden||0)-(b.orden||0); });
+}
+function VinAnillo({hechas,total,size}){
+  var r=(size/2)-9, c=2*Math.PI*r, p=total?Math.min(1,hechas/total):0;
+  return (
+    <svg width={size} height={size} viewBox={"0 0 "+size+" "+size} aria-hidden="true" style={{display:"block",flexShrink:0}}>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,.14)" strokeWidth="9"/>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={C.peach} strokeWidth="9" strokeLinecap="round"
+        strokeDasharray={c} strokeDashoffset={c*(1-p)} transform={"rotate(-90 "+size/2+" "+size/2+")"}
+        className="vin-arco" style={{"--vin-c":c}}/>
+    </svg>
+  );
+}
+function VendorInicio({vendor, schedules, allSchedules, reps, pnd, allVendors, props, pendingCorrections, isInternal, onIr}){
+  useEPIPrefs();
+  var hoy=SCHED.hoyGT();
+  var mias=vinRuta(vendor, allSchedules, schedules);
+  var ix=React.useMemo(function(){ return cierresIndex(reps); },[reps]);
+  var deHoy=mias.filter(function(s){ return String(s.fecha).slice(0,10)===hoy; });
+  var hechas=deHoy.filter(function(s){ return cierreDe(s,ix,hoy).estado==="hecha"; }).length;
+  var siguiente=deHoy.find(function(s){ return cierreDe(s,ix,hoy).estado!=="hecha"; })||null;
+  var manana=SCHED.shift(hoy,1);
+  var deManana=mias.filter(function(s){ return String(s.fecha).slice(0,10)===manana; });
+  var tarde=horaGT()>=18;
+  var dias=[]; for(var i=0;i<7;i++){ var f=SCHED.shift(hoy,i); dias.push({f:f, n:mias.filter(function(s){return String(s.fecha).slice(0,10)===f;}).length}); }
+  var maxN=Math.max.apply(null,dias.map(function(d){return d.n;}).concat([1]));
+  var porCobrar=(pnd||[]).reduce(function(a,r){ return a+pgEffTotal(r,allVendors||[],props); },0);
+  var nombre=(vendor.primerNombre||String(vendorDisplay(vendor)).split(" ")[0]||"");
+  var DIAS=["D","L","M","M","J","V","S"];
+  var fechaTxt=(function(){ var d=new Date(hoy+"T12:00:00"); return d.toLocaleDateString(epiT("es-GT","en-US"),{weekday:"long",day:"numeric",month:"long"}); })();
+  var completo=deHoy.length>0&&hechas>=deHoy.length;
+  var serif="'Valky','Cormorant Garamond',serif";
+  function Tile(p){
+    return (
+      <button className="vin-tile" onClick={p.onClick} style={Object.assign({gridColumn:p.wide?"span 2":"span 1",background:p.bg||"#fff",color:p.fg||C.black,boxShadow:p.bg?"none":"inset 0 0 0 1px "+C.line},p.style||{})} aria-label={p.label}>
+        <span style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",width:"100%"}}>
+          <span className="vin-chip" style={{background:p.chip||C.surfaceWarm}}><Icon name={p.icon} size={20} stroke={p.iconColor||C.black}/></span>
+          {p.badge!=null&&p.badge!==""&&<span className="vin-badge" style={{background:p.badgeBg||C.peach,color:"#fff"}}>{p.badge}</span>}
+        </span>
+        <span style={{display:"flex",flexDirection:"column",gap:3,width:"100%",textAlign:"left"}}>
+          {p.big!=null&&<span style={{fontFamily:serif,fontSize:26,lineHeight:1}}>{p.big}</span>}
+          <span style={{fontSize:13,fontWeight:600,letterSpacing:".02em"}}>{p.label}</span>
+        </span>
+      </button>
+    );
+  }
+  return (
+    <div className="vin" style={{maxWidth:640,margin:"0 auto",padding:"22px 16px calc(120px + env(safe-area-inset-bottom))"}}>
+      <div style={{padding:"0 4px 16px"}}>
+        <div style={{fontSize:10.5,letterSpacing:".24em",textTransform:"uppercase",color:C.taupe}}>{fechaTxt}</div>
+        <div style={{fontFamily:serif,fontSize:34,lineHeight:1.05,color:C.black,marginTop:6}}>{epiT("Hola","Hi")}, {nombre}.</div>
+      </div>
+      <div className="vin-grid">
+        {/* Avance del día */}
+        <button className="vin-tile vin-hero" onClick={function(){onIr("sched");}} aria-label={epiT("Ver mi programa","See my schedule")}>
+          <span style={{display:"flex",alignItems:"center",gap:18,width:"100%"}}>
+            <span style={{position:"relative",display:"grid",placeItems:"center"}}>
+              <VinAnillo hechas={hechas} total={deHoy.length} size={112}/>
+              <span style={{position:"absolute",textAlign:"center"}}>
+                <span style={{display:"block",fontFamily:serif,fontSize:34,lineHeight:1,color:"#FAFAFA"}}>{deHoy.length?hechas+"/"+deHoy.length:"0"}</span>
+              </span>
+            </span>
+            <span style={{display:"flex",flexDirection:"column",gap:6,textAlign:"left"}}>
+              <span style={{fontSize:10.5,letterSpacing:".22em",textTransform:"uppercase",color:"rgba(250,250,250,.7)"}}>{epiT("Hoy","Today")}</span>
+              <span style={{fontFamily:serif,fontSize:24,lineHeight:1.1,color:"#FAFAFA"}}>
+                {deHoy.length===0?epiT("Día libre","Day off"):completo?epiT("¡Todo listo!","All done!"):epiT("Limpiezas","Cleanings")}
+              </span>
+              {(tarde||completo||deHoy.length===0)&&deManana.length>0&&<span style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:12,color:"rgba(250,250,250,.85)"}}><Icon name="calendar" size={14} stroke="rgba(250,250,250,.85)"/>{epiT("Mañana","Tomorrow")} · {deManana.length}</span>}
+            </span>
+          </span>
+        </button>
+
+        {/* Siguiente limpieza */}
+        {siguiente&&(
+          <div className="vin-tile vin-next" style={{gridColumn:"span 2",cursor:"default"}}>
+            <span style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",gap:10}}>
+              <span style={{fontSize:10.5,letterSpacing:".22em",textTransform:"uppercase",color:C.taupe}}>{epiT("Siguiente","Next")}</span>
+              <span style={{display:"flex",gap:6}}>
+                {siguiente.entradaHoy&&<span className="vin-pill" style={{background:C.attentionTint,color:C.attentionText}}><span style={{width:7,height:7,borderRadius:"50%",background:C.peach}}/>{epiT("Entra hoy","Check-in today")}</span>}
+                {SCHED.esProfunda(siguiente.tipo)&&<span className="vin-pill" style={{background:BADGE["Limpieza profunda"].bg,color:BADGE["Limpieza profunda"].tx}}>{epiT("Profunda","Deep")}</span>}
+              </span>
+            </span>
+            <span style={{fontFamily:serif,fontSize:28,lineHeight:1.1,color:C.black,textAlign:"left",width:"100%"}}>{siguiente.propiedad}</span>
+            <span style={{display:"flex",alignItems:"center",gap:14,color:C.earth,fontSize:12.5,width:"100%"}}>
+              <span style={{display:"inline-flex",alignItems:"center",gap:6}}><Icon name="home" size={15} stroke={C.earth}/>{siguiente.habitaciones||1}</span>
+            </span>
+            <button className="vin-cta" onClick={function(){onIr("new");}}>
+              <Icon name="edit" size={18} stroke="#fff"/>{epiT("Llenar formulario","Fill out form")}
+            </button>
+          </div>
+        )}
+
+        {/* Mi semana en barras */}
+        <button className="vin-tile" onClick={function(){onIr("sched");}} style={{gridColumn:"span 2",background:"#fff",boxShadow:"inset 0 0 0 1px "+C.line}} aria-label={epiT("Mi semana","My week")}>
+          <span style={{display:"flex",justifyContent:"space-between",width:"100%",alignItems:"baseline"}}>
+            <span style={{fontSize:10.5,letterSpacing:".22em",textTransform:"uppercase",color:C.taupe}}>{epiT("Mi semana","My week")}</span>
+            <span style={{fontFamily:serif,fontSize:22,color:C.black}}>{dias.reduce(function(a,d){return a+d.n;},0)}</span>
+          </span>
+          <span className="vin-bars">
+            {dias.map(function(d,i){
+              var dn=new Date(d.f+"T12:00:00").getDay();
+              return (
+                <span key={d.f} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flex:1}}>
+                  <span style={{fontSize:11,fontWeight:600,color:d.n?C.black:C.gray,height:14}}>{d.n||""}</span>
+                  <span style={{width:"100%",maxWidth:30,height:58,display:"flex",alignItems:"flex-end"}}>
+                    <span className="vin-bar" style={{width:"100%",height:Math.max(6,Math.round(58*d.n/maxN)),background:i===0?C.peach:(d.n?C.black:C.line),animationDelay:(i*0.04)+"s"}}/>
+                  </span>
+                  <span style={{fontSize:11,color:i===0?C.black:C.taupe,fontWeight:i===0?700:500}}>{DIAS[dn]}</span>
+                </span>
+              );
+            })}
+          </span>
+        </button>
+
+        <Tile icon="coins" label={epiT("Por cobrar","To be paid")} big={epiMoney(porCobrar,{dec:0})} onClick={function(){onIr("pagos");}}/>
+        {isInternal
+          ? <Tile icon="star" label={epiT("Calidad","Quality")} badge={pendingCorrections||""} onClick={function(){onIr("hist");}}/>
+          : <Tile icon="list" label={epiT("Mis trabajos","My jobs")} big={(reps||[]).length} onClick={function(){onIr("jobs");}}/>}
+      </div>
+    </div>
+  );
+}
+
 function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codigos,ausencias,onSvAusencias,swaps,onSvSwaps,allSchedules,onSvSchedules,hospUrlDay,hospUrlWeek,adelantos,onSvAdelantos,pagos,onSvPagos,onSubmit,onUpdate,onSvV,onSvFeedback,onLogout,reviews,rvCasos,onSvRvCasos,rvIA,reservas}) {
   /* Lo primero que abre cualquiera del equipo —limpieza, mantenimiento o
      proveedor externo— es su ruta: es la pregunta con la que entran al app. */
-  const [view,setView] = useState("sched");
+  const [view,setView] = useState("inicio");
   /* El permiso de galería del día abre el selector de fotos a la galería. Se lee
      en cada render: si el admin lo quita, el siguiente repintado ya lo respeta. */
   GAL_PERMISO = galeriaHoy(vendor);
@@ -8625,7 +8768,7 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codig
     var isInternal = vendor.tipo==="interno";
     /* El programa va de primero y lo ve todo el mundo: al externo también le
        llega su ruta por correo la noche anterior, así que tiene dónde verla. */
-    var navItems = [["sched","Programa","calendar"],["jobs","Mis trabajos","list"],["new","Nuevo reporte","edit"]];
+    var navItems = [["inicio","Inicio","home"],["sched","Programa","calendar"],["jobs","Mis trabajos","list"],["new","Nuevo reporte","edit"]];
     if(isInternal) navItems.push(["hist","Calidad","star"]);
     if(vendor.isSupervisor) navItems.push(["sup","Supervisión","star"]);
     if(vendor.puedeVisitas) navItems.push(["visitas","Visitas","grid"]);
@@ -8647,6 +8790,7 @@ function VendorApp({vendor,allVendors,allReps,reps,props,company,schedules,codig
       <GaleriaAviso vendor={vendor}/>
       <BounceGate vendor={vendor} allVendors={allVendors} onSvV={onSvV}/>
       {vendor.tipo==="interno"&&<QAPopupGate reps={cleaningReps} onRespond={vendorRespond} onGoCalidad={function(){setView("hist");}}/>}
+      <div style={{display:view==="inicio" ?"block":"none"}}><VendorInicio vendor={vendor} schedules={schedules} allSchedules={allSchedules} reps={reps} pnd={pnd} allVendors={allVendors} props={props} pendingCorrections={pendingCorrections} isInternal={vendor.tipo==="interno"} onIr={function(v){ setView(v); try{ window.scrollTo({top:0,behavior:"auto"}); }catch(_){} }}/></div>
       <div style={{display:view==="jobs"   ?"block":"none"}}><VendorJobsView reps={reps} tot={tot} cob={cob} pnd={pnd} adelantos={adelantos} pendingCorrections={pendingCorrections} onNew={function(){setView("new");}} onGoAccount={function(){setView("account");}} vendor={vendor} allVendors={allVendors} reviews={reviews} allReps={allReps} rvCasos={rvCasos} rvIA={rvIA} onGoCalidad={vendor.tipo==="interno"?function(){setView("hist");}:null}/></div>
       <div style={{display:view==="new"    ?"block":"none"}}><RepForm vendors={allVendors||[]} props={props} company={company} defaultVendor={vendor.email} myReps={reps} allReps={allReps||[]} onSubmit={async function(r){await onSubmit(r);setView("jobs");}} onSaveFeedback={function(fb){onSvFeedback&&onSvFeedback(fb);}}/></div>
       <div style={{display:view==="sched"  ?"block":"none"}}><VendorSchedule vendor={vendor} schedules={schedules} codigos={codigos||{}} ausencias={ausencias||[]} onSvAusencias={onSvAusencias} reps={reps} allVendors={allVendors||[]} swaps={swaps||[]} onSvSwaps={onSvSwaps} allSchedules={allSchedules||[]} onSvSchedules={onSvSchedules}/></div>
@@ -21266,6 +21410,27 @@ function GS() {
     + "@media(max-width:639px){.chart-side{grid-template-columns:1fr!important;}}"
     + "@media(max-width:639px){.stat-row{gap:10px!important;flex-wrap:wrap!important;}}"
     + "input[type=date]{min-height:44px;}"
+    + ".vin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}"
+    + ".vin-tile{all:unset;box-sizing:border-box;cursor:pointer;border-radius:22px;padding:16px;min-height:132px;display:flex;flex-direction:column;justify-content:space-between;gap:12px;-webkit-tap-highlight-color:transparent;transition:transform .16s cubic-bezier(.22,.61,.36,1),box-shadow .2s;animation:vin-in .5s cubic-bezier(.22,.61,.36,1) backwards;font-family:Montserrat,sans-serif;}"
+    + ".vin-tile:active{transform:scale(.97);}"
+    + ".vin-tile:focus-visible{box-shadow:0 0 0 3px rgba(233,130,106,.45)!important;}"
+    + ".vin-hero{grid-column:span 2;background:#3E3F3F;min-height:150px;justify-content:center;}"
+    + ".vin-next{background:#fff;box-shadow:inset 0 0 0 1px #EAE6E0,0 10px 30px rgba(62,63,63,.06);gap:12px;}"
+    + ".vin-chip{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;}"
+    + ".vin-badge{min-width:24px;height:24px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;}"
+    + ".vin-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;font-size:11px;font-weight:600;}"
+    + ".vin-cta{all:unset;box-sizing:border-box;cursor:pointer;width:100%;min-height:54px;border-radius:16px;background:#3E3F3F;color:#fff;display:flex;align-items:center;justify-content:center;gap:10px;font-family:Montserrat,sans-serif;font-size:15px;font-weight:600;letter-spacing:.02em;transition:transform .14s cubic-bezier(.22,.61,.36,1);}"
+    + ".vin-cta:active{transform:scale(.97);}"
+    + ".vin-bars{display:flex;gap:8px;width:100%;align-items:flex-end;}"
+    + ".vin-bar{display:block;border-radius:8px;transform-origin:bottom;animation:vin-bar .6s cubic-bezier(.22,.61,.36,1) backwards;}"
+    + ".vin-arco{animation:vin-arco 1s cubic-bezier(.22,.61,.36,1) backwards;}"
+    + "@keyframes vin-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}"
+    + "@keyframes vin-bar{from{transform:scaleY(0)}to{transform:none}}"
+    + "@keyframes vin-arco{from{stroke-dashoffset:var(--vin-c)}}"
+    + ".vin-grid>:nth-child(2){animation-delay:.05s}.vin-grid>:nth-child(3){animation-delay:.1s}.vin-grid>:nth-child(4){animation-delay:.15s}.vin-grid>:nth-child(5){animation-delay:.2s}.vin-grid>:nth-child(n+6){animation-delay:.25s}"
+    + "@media (min-width:720px){.vin-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.vin-hero{grid-column:span 2;grid-row:span 1}}"
+    + "@media (hover:hover){.vin-tile:hover{transform:translateY(-2px);}}"
+    + "@media (prefers-reduced-motion:reduce){.vin-tile,.vin-bar,.vin-arco{animation:none!important;transition:none}}"
     /* iPhone: cualquier campo con letra menor a 16 px hace zoom al tocarlo y la pantalla queda ampliada.
        En pantallas táctiles los campos usan 16 px; así no hay zoom y no hay que pellizcar para volver. */
     + "@media (pointer:coarse){input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea{font-size:16px!important;}}"
