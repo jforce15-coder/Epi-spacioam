@@ -76,7 +76,9 @@ function truthy_(v) {
    enteras. Ahora las respuestas de arranque se guardan en el caché del script
    por 90 segundos, partidas en trozos (el caché admite ~100 KB por llave), y
    cualquier escritura sube el contador de versión para invalidarlas. */
-var CACHE_TTL = 90;
+/* 10 minutos: cualquier escritura (desde la app, los crons o los webhooks) sube la versión y lo invalida al instante,
+   así que un TTL largo no sirve datos viejos; solo evita releer hojas enteras en cada apertura de la app. */
+var CACHE_TTL = 600;
 var CACHE_CHUNK = 90000;
 
 function cacheVer_() {
@@ -631,7 +633,8 @@ function getReport_(id) {
   return { report: null };
 }
 
-function saveReport(rep) {
+function saveReport(){ try { return saveReport__base.apply(this, arguments); } finally { cacheBump_(); } }
+function saveReport__base(rep) {
   var ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName("Reportes");
   if (!sheet) sheet = ss.insertSheet("Reportes");
@@ -663,7 +666,8 @@ function saveReport(rep) {
   return { saved: true, action: "created" };
 }
 
-function deleteReport(id) {
+function deleteReport(){ try { return deleteReport__base.apply(this, arguments); } finally { cacheBump_(); } }
+function deleteReport__base(id) {
   var ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName("Reportes");
   if (!sheet) return { deleted: false };
@@ -696,6 +700,9 @@ function getConfig(opts) {
   /* Las reviews ya NO viven en Config: viven en la hoja "Reviews", una fila
      por review. Se inyectan aquí para que el app las siga leyendo igual. */
   delete cfg.reviews_n;
+  /* Restos de cuando la programación vivía en celdas de Config (schedules#1…#4, ~225 KB): ya nadie los lee y
+     se mandaban a cada teléfono en cada apertura. Se quedan en la hoja, pero ya no viajan. */
+  Object.keys(cfg).forEach(function (k) { if (/^schedules#\d+$/.test(k)) delete cfg[k]; });
   for (var s = 2; s <= 12; s++) delete cfg["reviews_" + s];
   /* En modo slim NO se leen Reviews, Casos ni Versiones: son tres hojas enteras
      que nadie necesita para entrar a la app. Llegan después con getHeavy. */
@@ -1155,7 +1162,8 @@ function rvUpsertSheet_(nuevas) {
 
 /* Guarda la lista que manda el app (cargas manuales y ediciones). Conserva las
    filas sin nota de limpieza, que el app no ve y por tanto no puede reenviar. */
-function saveReviews_(list) {
+function saveReviews_(){ try { return saveReviews___base.apply(this, arguments); } finally { cacheBump_(); } }
+function saveReviews___base(list) {
   list = Array.isArray(list) ? list : [];
   var byId = {};
   list.forEach(function (r) { if (r && r.id) byId[String(r.id)] = 1; });
@@ -1224,7 +1232,8 @@ function rcRead_() {
   return out;
 }
 
-function saveCasos_(list) {
+function saveCasos_(){ try { return saveCasos___base.apply(this, arguments); } finally { cacheBump_(); } }
+function saveCasos___base(list) {
   list = Array.isArray(list) ? list : [];
   var sh = rcSheet_();
   if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, RC_COLS.length).clearContent();
@@ -1863,7 +1872,8 @@ function schedFilas_(sh, list) {
   return { saved: true, n: filas.length, hoy: hoy };
 }
 
-function schedWrite_(list) {
+function schedWrite_(){ try { return schedWrite___base.apply(this, arguments); } finally { cacheBump_(); } }
+function schedWrite___base(list) {
   var lock = LockService.getScriptLock();
   try { lock.waitLock(20000); } catch (e) { }
   try { return schedFilas_(schedSheet_(), list); }
@@ -1892,7 +1902,8 @@ function svSheet_() {
   }
   return sh;
 }
-function svWrite_(hist) {
+function svWrite_(){ try { return svWrite___base.apply(this, arguments); } finally { cacheBump_(); } }
+function svWrite___base(hist) {
   var lock = LockService.getScriptLock();
   try { lock.waitLock(20000); } catch (e) {}
   try {
