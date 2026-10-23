@@ -3311,6 +3311,11 @@ function MultiAptoPicker({options, value, onChange, baseStyle, activeStyle}){
   function toggle(n){
     onChange(sel.indexOf(n)>=0 ? sel.filter(function(x){return x!==n;}) : sel.concat([n]));
   }
+  /* En el teléfono usa la misma hoja desde abajo que el resto de filtros. */
+  if(typeof window!=="undefined"&&window.matchMedia&&window.matchMedia("(max-width:720px)").matches){
+    return <PillFilter multi={true} value={sel} allValue="__todos" title="Apartamentos" placeholder="apartamentos" searchable={true}
+      options={[{value:"__todos",label:"Todos"}].concat(options.map(function(n){return {value:n,label:n};}))} onChange={onChange}/>;
+  }
   return (
     <div style={{position:"relative"}}>
       <button onClick={function(){setOpen(!open);}} style={Object.assign({},sel.length?activeStyle:baseStyle,{textAlign:"left",display:"flex",alignItems:"center",justifyContent:"space-between",gap:6,minHeight:34})}>
@@ -9418,16 +9423,32 @@ function Icon({name, size, stroke, width, style}) {
    arriba) y selección múltiple opcional. Reemplaza los <select> nativos de los
    filtros. Opciones: string[] o {value,label,sub}[]. allValue = el valor
    centinela ("Todos"/"Todas"/"all") que significa "sin filtrar". */
-function PillFilter({value,options,onChange,icon,minWidth,multi,searchable,placeholder,allValue,align}){
+function portalEpi(node){ return (window.ReactDOM&&window.ReactDOM.createPortal)?window.ReactDOM.createPortal(node,document.body):node; }
+function PillFilter({value,options,onChange,icon,minWidth,multi,searchable,placeholder,allValue,align,title}){
   const [open,setOpen]=useState(false);
   const [q,setQ]=useState("");
   const ref=useRef(null);
+  const hojaRef=useRef(null);
   align=align||"left";
+  /* En el teléfono las opciones se abren en una hoja desde abajo (como iOS): se ve la lista completa, se
+     desliza con el dedo y no queda recortada por la barra de filtros. */
+  var enMovil=typeof window!=="undefined"&&window.matchMedia&&window.matchMedia("(max-width:720px)").matches;
   useEffect(function(){
-    function h(e){ if(ref.current&&!ref.current.contains(e.target)){ setOpen(false); setQ(""); } }
+    function h(e){
+      if(ref.current&&ref.current.contains(e.target)) return;
+      if(hojaRef.current&&hojaRef.current.contains(e.target)) return;
+      setOpen(false); setQ("");
+    }
     document.addEventListener("mousedown",h);
     return function(){ document.removeEventListener("mousedown",h); };
   },[]);
+  useEffect(function(){
+    if(!open||!enMovil) return;
+    var b=document.body, prev=b.style.overflow; b.style.overflow="hidden";
+    function esc(e){ if(e.key==="Escape"){ setOpen(false); setQ(""); } }
+    document.addEventListener("keydown",esc);
+    return function(){ b.style.overflow=prev; document.removeEventListener("keydown",esc); };
+  },[open,enMovil]);
   var opts=(options||[]).map(function(o){ return (typeof o==="string")?{value:o,label:o}:o; });
   var sV=allValue;
   var sel=multi?(Array.isArray(value)?value:[]):value;
@@ -9467,7 +9488,47 @@ function PillFilter({value,options,onChange,icon,minWidth,multi,searchable,place
           <Icon name="chevronDown" size={13} stroke={activeTrigger?"#fff":C.taupe} style={{transform:open?"rotate(180deg)":"none",transition:"transform .18s"}}/>
         </span>
       </button>
-      {open&&(
+      {open&&enMovil&&portalEpi(
+        <div onClick={function(){setOpen(false);setQ("");}} style={{position:"fixed",inset:0,zIndex:9600,background:"rgba(62,63,63,.32)",display:"flex",alignItems:"flex-end",animation:"sa-fade .2s var(--sa-ease,ease)"}}>
+          <div ref={hojaRef} role="dialog" aria-modal="true" onClick={function(e){e.stopPropagation();}} className="epi-hoja" style={{width:"100%",maxHeight:"78dvh",background:"#fff",borderRadius:"24px 24px 0 0",boxShadow:"0 -18px 60px rgba(62,63,63,.18)",display:"flex",flexDirection:"column",fontFamily:"Montserrat,sans-serif"}}>
+            <div style={{display:"flex",justifyContent:"center",padding:"9px 0 2px"}}><span style={{width:38,height:5,borderRadius:3,background:C.gray}}/></div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 20px 10px"}}>
+              <span style={{fontSize:11,fontWeight:600,letterSpacing:".18em",textTransform:"uppercase",color:C.earth}}>{title||(placeholder?(placeholder.indexOf("Buscar ")===0?placeholder.slice(7).replace(/…$/,"").replace(/^./,function(c){return c.toUpperCase();}):placeholder):"Elige una opción")}</span>
+              <button onClick={function(){setOpen(false);setQ("");}} style={{border:"none",background:multi?C.black:C.surfaceWarm,color:multi?"#fff":C.black,borderRadius:"var(--sa-pill)",padding:"8px 16px",fontFamily:"Montserrat,sans-serif",fontSize:13,fontWeight:600,cursor:"pointer"}}>{multi?"Listo":"Cerrar"}</button>
+            </div>
+            {showSearch&&(
+              <div style={{padding:"0 16px 10px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,background:C.surfaceWarm,border:"1px solid "+C.gray,borderRadius:12,padding:"10px 12px"}}>
+                  <Icon name="search" size={16} stroke={C.taupe}/>
+                  <input value={q} onChange={function(e){setQ(e.target.value);}} placeholder={placeholder||"Buscar…"} style={{border:"none",outline:"none",background:"transparent",width:"100%",fontFamily:"Montserrat,sans-serif",fontSize:16,color:C.black}}/>
+                  {q&&<button onClick={function(){setQ("");}} aria-label="Borrar" style={{border:"none",background:"transparent",cursor:"pointer",display:"inline-flex",color:C.taupe}}><Icon name="x" size={15} stroke="currentColor"/></button>}
+                </div>
+              </div>
+            )}
+          <div className="epi-hoja-lista" style={{overflowY:"auto",minHeight:0,flex:1,WebkitOverflowScrolling:"touch",overscrollBehavior:"contain",padding:"0 10px calc(14px + env(safe-area-inset-bottom))"}}>
+            {shown.map(function(o){
+              var active=isActive(o.value);
+              return (
+                <button key={String(o.value)} onClick={function(){pick(o.value);}} style={{display:"flex",alignItems:"center",gap:10,width:"100%",textAlign:"left",border:"none",cursor:"pointer",background:active?C.surfaceWarm:"transparent",borderRadius:10,padding:"14px 12px",minHeight:48,fontFamily:"Montserrat,sans-serif",fontSize:15,color:C.black}}>
+                  {multi&&o.value!==sV&&(
+                    <span style={{flexShrink:0,width:17,height:17,borderRadius:5,border:"1.5px solid "+(active?C.peach:C.gray),background:active?C.peach:"transparent",display:"inline-flex",alignItems:"center",justifyContent:"center"}}>{active&&<Icon name="check" size={12} stroke="#fff"/>}</span>
+                  )}
+                  {o.sub?(
+                    <span style={{display:"flex",flexDirection:"column",gap:2,minWidth:0}}>
+                      <span style={{fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.label}</span>
+                      <span style={{fontSize:10.5,color:C.taupe}}>{o.sub}</span>
+                    </span>
+                  ):<span style={{fontWeight:active?500:400,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.label}</span>}
+                  {active&&!multi&&<Icon name="check" size={15} stroke={C.peach} style={{marginLeft:"auto"}}/>}
+                </button>
+              );
+            })}
+            {shown.length===0&&<div style={{padding:"14px 12px",textAlign:"center",fontFamily:"Montserrat,sans-serif",fontSize:12,color:C.taupe}}>Sin resultados</div>}
+          </div>
+          </div>
+        </div>
+      )}
+      {open&&!enMovil&&(
         <div style={pop}>
           {showSearch&&(
             <div style={{padding:"2px 2px 7px"}}>
@@ -9543,6 +9604,8 @@ function DateRangePicker({from,to,onChange,activeStyle,baseStyle}){
     else { onChange(from,ds); setOpen(false); }
   }
   var label = from&&to ? fmtRangeShort(from)+" – "+fmtRangeShort(to) : from ? fmtRangeShort(from)+" – …" : "Rango de fechas";
+  /* Si el calendario no cabe hacia la derecha (filtro en la columna derecha del teléfono), se abre alineado a la derecha. */
+  var alDerecha = open && ref.current && (ref.current.getBoundingClientRect().left + 268 > window.innerWidth - 8);
   var active=!!(from||to);
   var btnStyle = {display:"inline-flex",alignItems:"center",gap:9,cursor:"pointer",width:"100%",boxSizing:"border-box",justifyContent:"space-between",background:active?C.black:"#fff",border:"1px solid "+(active?C.black:C.gray),borderRadius:"var(--sa-pill)",padding:"9px 13px",minHeight:40,fontFamily:"Montserrat,sans-serif",fontSize:12,letterSpacing:".02em",color:active?"#fff":C.black};
   return (
@@ -9555,7 +9618,7 @@ function DateRangePicker({from,to,onChange,activeStyle,baseStyle}){
         <Icon name="chevronDown" size={13} stroke={active?"#fff":C.taupe} style={{transform:open?"rotate(180deg)":"none",transition:"transform .18s"}}/>
       </button>
       {open&&(
-        <div style={{position:"absolute",top:"calc(100% + 8px)",left:0,zIndex:80,background:"#fff",border:"1px solid "+C.line,borderRadius:16,boxShadow:"var(--sa-shadow-md)",padding:14,width:268}}>
+        <div style={{position:"absolute",top:"calc(100% + 8px)",left:alDerecha?"auto":0,right:alDerecha?0:"auto",zIndex:80,background:"#fff",border:"1px solid "+C.line,borderRadius:16,boxShadow:"var(--sa-shadow-md)",padding:14,width:268}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
             <button onClick={function(){setMonth(new Date(yr,mo-1,1));}} style={{background:C.surfaceWarm,border:"none",borderRadius:8,width:30,height:30,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}><Icon name="chevronLeft" size={16} stroke={C.black}/></button>
             <span style={{fontSize:12.5,fontWeight:600,color:C.black,textTransform:"capitalize"}}>{month.toLocaleDateString("es-GT",{month:"long",year:"numeric"})}</span>
@@ -21203,6 +21266,16 @@ function GS() {
     + "@media(max-width:639px){.chart-side{grid-template-columns:1fr!important;}}"
     + "@media(max-width:639px){.stat-row{gap:10px!important;flex-wrap:wrap!important;}}"
     + "input[type=date]{min-height:44px;}"
+    /* iPhone: cualquier campo con letra menor a 16 px hace zoom al tocarlo y la pantalla queda ampliada.
+       En pantallas táctiles los campos usan 16 px; así no hay zoom y no hay que pellizcar para volver. */
+    + "@media (pointer:coarse){input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea{font-size:16px!important;}}"
+    /* Respuesta al toque inmediata (como iOS) y desplazamiento contenido en listas y hojas. */
+    + "@media (pointer:coarse){button:not(:disabled){transition:transform .12s cubic-bezier(.22,.61,.36,1),background-color .15s,opacity .15s;}button:not(:disabled):active{transform:scale(.97);}}"
+    + ".epi-hoja{animation:epi-hoja-in .34s cubic-bezier(.22,.61,.36,1);}"
+    + "@keyframes epi-hoja-in{from{transform:translateY(100%)}to{transform:none}}"
+    + ".epi-hoja-lista button:active{background:#F5F3F0!important;}"
+    + "html,body{-webkit-text-size-adjust:100%;text-size-adjust:100%;}"
+    + "@media (prefers-reduced-motion:reduce){.epi-hoja{animation:none}button:active{transform:none!important}}"
     + "select{min-height:40px;padding-right:36px;position:relative;}"
     + "button:active{transform:scale(.98);}"
     + ".card-hover:hover{box-shadow:var(--sa-shadow-md)!important;transform:translateY(-1px);transition:all .2s;}"
