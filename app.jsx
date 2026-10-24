@@ -10873,6 +10873,18 @@ function UserMenu({userName, userEmail, userAvatar, isAdmin, canAccount, onAccou
 }
 function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, configActive, role, sheetsOk, adminLabel, feedbackVendor, onSaveFeedback, wifiProps, wifiVendor, userName, userEmail, userAvatar, isAdmin, canAccount, onAccount, onSetup}) {
   var sc = useScreen();
+  /* Menú compartido de Spacio AM (hub.spacioam.com/js/sa-nav.js): la primera sección va al botón central
+     y el resto a la barra. Si el script no cargó, se queda la navegación propia de Epi. */
+  var HAS_SANAV = !!window.SANav;
+  var tabRef = React.useRef(setTab); tabRef.current = setTab;
+  React.useEffect(function(){
+    if(!window.SANav || !navItems || !navItems.length) return;
+    var h = navItems[0];
+    window.SANav.update({ app:"epi", home:{ k:h[0], l:h[1] }, current:tab, hidden:false,
+      items: navItems.slice(1).map(function(it){ return { k:it[0], l:it[1], icon:it[2], badge:it[3]||0 }; }),
+      onNavigate: function(k){ tabRef.current(k); } });
+  });
+  React.useEffect(function(){ return function(){ if(window.SANav) window.SANav.hide(true); }; },[]);
   var isMobile = sc.mobile;
   const [notiOpen,setNotiOpen] = useState(false);
   const [notiDismiss,setNotiDismiss] = useState(function(){ try{ return JSON.parse(localStorage.getItem("epi:notiDismiss")||"{}")||{}; }catch(_){ return {}; } });
@@ -10960,7 +10972,7 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
         {onSaveFeedback&&<HeaderFeedback vendor={feedbackVendor} onSaveFeedback={onSaveFeedback} isMobile={isMobile}/>}
 
         {/* Desktop nav */}
-        {!isMobile&&(
+        {!isMobile&&!HAS_SANAV&&(
           <nav className="epi-nav" aria-label="Secciones" style={{display:"flex",alignItems:"center",flexShrink:1,minWidth:0,boxSizing:"border-box",height:44,background:C.surfaceWarm,borderRadius:"var(--sa-pill)",padding:"0 4px",gap:2,border:"1px solid "+C.line}}>
             {navItems.map(function(it){ var k=it[0],l=it[1],ic=it[2],on=tab===k; return (
               <button key={k} title={l} aria-current={on?"page":undefined} onClick={function(){setTab(k);}} style={{position:"relative",display:"flex",alignItems:"center",justifyContent:"center",gap:compacto?0:7,padding:compacto?"0 13px":(medio?"0 11px":"0 15px"),borderRadius:"var(--sa-pill)",height:36,minHeight:36,border:"none",fontFamily:"Montserrat,sans-serif",fontSize:medio?11.5:12,fontWeight:on?700:600,letterSpacing:".03em",whiteSpace:"nowrap",cursor:"pointer",background:on?C.black:"transparent",color:on?"#fff":NAV_MUTED,transition:"background-color .18s cubic-bezier(.22,.61,.36,1), color .18s cubic-bezier(.22,.61,.36,1)"}}>
@@ -10984,7 +10996,7 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
       {/* Barra inferior móvil. El botón principal (Dashboard) va a la DERECHA, al
           alcance del pulgar derecho con el teléfono en una mano; las demás
           secciones se reparten a su izquierda. La barra es chrome translúcido. */}
-      {isMobile&&(function(){
+      {isMobile&&!HAS_SANAV&&(function(){
         function tabBtn(it){ var k=it[0],l=it[1],ic=it[2],on=tab===k; return (
           <button key={k} onClick={function(){setTab(k);}} aria-current={on?"page":undefined} aria-label={l} style={{flex:1,minWidth:0,minHeight:48,position:"relative",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,border:"none",background:"transparent",cursor:"pointer",padding:"4px 0",WebkitTapHighlightColor:"transparent"}}>
             <span style={{position:"relative",display:"flex",alignItems:"center",justifyContent:"center",width:48,height:28,borderRadius:"var(--sa-pill)",background:on?"var(--color-ink-08,rgba(62,63,63,.08))":"transparent",transition:"background-color .18s cubic-bezier(.22,.61,.36,1)"}}>
