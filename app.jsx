@@ -10882,6 +10882,7 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
     var h = navItems[0];
     window.SANav.update({ app:"epi", home:{ k:h[0], l:h[1] }, current:tab, hidden:false,
       items: navItems.slice(1).map(function(it){ return { k:it[0], l:it[1], icon:it[2], badge:it[3]||0 }; }),
+      alma: window.SAAlmaVoz || null,
       onNavigate: function(k){ tabRef.current(k); } });
   });
   React.useEffect(function(){ return function(){ if(window.SANav) window.SANav.hide(true); }; },[]);
