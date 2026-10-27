@@ -23,7 +23,8 @@ function route(e) {
   try {
     var p = e.postData ? JSON.parse(e.postData.contents) : e.parameter;
     var __diag = accesosDiag_(p); if (__diag) return __diag;   // fase 1b: resumen de accesos (robot)
-    var __ses = sesionDe_(p); registrarAcceso_(p.action, !!__ses);   // fase 1b: aún no bloquea
+    var __ses = sesionDe_(p); registrarAcceso_(p.action, __ses ? true : esRobot_(p) ? 'r' : false);
+    var __bloq = (typeof p.action === 'string' && p.action.indexOf('.') > 0) ? null : exigirSesion_(p.action, !!__ses, p, ['ping', 'nuevaClaveTecnico', '']); if (__bloq) return __bloq;   // fase 1c: públicas = webhooks de Hospitable, ping y cambio de clave del técnico
     var r = {};
     /* Webhooks de Hospitable: su payload trae action = "review.created",
        "reservation.changed", etc. (con punto). Se atiende ANTES del router
