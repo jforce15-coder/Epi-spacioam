@@ -1,7 +1,18 @@
-# Compila app.jsx → app.build.js cada vez que cambia, para que el app abra sin compilar en el teléfono.
+# Compila app.jsx → app.build.js para que el app abra sin compilar en el teléfono.
+#
+# main está protegida (solo entra por PR), así que el robot compila dentro del PR:
+# cuando das Merge, el código y su versión compilada llegan juntos a main.
+# Red de seguridad: si algo llega a main sin compilar, el robot abre su propio PR
+# (rama robot/compilar-app) para que lo apruebes.
+
 name: Compilar app
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "app.jsx"
+      - "tools/compilar.js"
   push:
     branches: [main]
     paths:
@@ -11,29 +22,64 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
-  group: compilar-app
-  cancel-in-progress: false
+  group: compilar-app-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   compilar:
+    # A un PR que viene de un fork el robot no le puede guardar nada.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    env:
+      RAMA: ${{ github.head_ref || github.ref_name }}
+      RAMA_ROBOT: robot/compilar-app
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RAMA }}
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+
       - name: Compilar
         run: |
           npm install --no-save --no-package-lock @babel/core@7.29.0 @babel/preset-react@7.29.7
           node tools/compilar.js
+
       - name: Guardar
         run: |
-          if git diff --quiet -- app.build.js app.build.v; then echo "Sin cambios."; exit 0; fi
+          if git diff --quiet -- app.build.js app.build.v; then
+            echo "app.build.js ya estaba al día." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           git add app.build.js app.build.v
           git commit -m "Compilar app.jsx → app.build.js"
-          git pull --rebase
-          git push
+
+          if [ "$RAMA" != "main" ]; then
+            git push origin "HEAD:refs/heads/$RAMA"
+            echo "Compilado y guardado en la rama \`$RAMA\`." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Llegó a main sin compilar: el robot lo propone en su propio PR.
+          git push --force origin "HEAD:refs/heads/$RAMA_ROBOT"
+          if [ -n "$(gh pr list --head "$RAMA_ROBOT" --state open --json number -q '.[].number')" ]; then
+            echo "Actualicé el PR abierto del robot (\`$RAMA_ROBOT\`)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if gh pr create --base main --head "$RAMA_ROBOT" \
+               --title "Compilar app.jsx → app.build.js" \
+               --body "app.jsx llegó a main sin su versión compilada. Este PR la trae; revísalo y dale Merge."; then
+            echo "Abrí un PR del robot con app.build.js al día." >> "$GITHUB_STEP_SUMMARY"
+          else
+            URL="https://github.com/$GITHUB_REPOSITORY/compare/main...$RAMA_ROBOT"
+            echo "::warning::No pude abrir el PR solo. Ábrelo aquí: $URL"
+            echo "Falta compilar en main. Abre el PR aquí: $URL" >> "$GITHUB_STEP_SUMMARY"
+          fi
