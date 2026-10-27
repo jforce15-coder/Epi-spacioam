@@ -1,8 +1,17 @@
 # Garantiza que index.html cargue la sesión firmada compartida (fase 1b de seguridad).
 # Si una exportación de Claude Design la quita, este flujo la vuelve a poner sola.
+#
+# main está protegida (solo entra por PR), así que el arreglo se hace dentro del PR,
+# antes de que lo apruebes. Red de seguridad: si algo llega a main sin el script,
+# el robot abre su propio PR (rama robot/asegurar-sesion).
+
 name: Asegurar sesión firmada
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "index.html"
   push:
     branches: [main]
     paths:
@@ -11,17 +20,32 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
+
+concurrency:
+  group: asegurar-sesion-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   asegurar:
+    # A un PR que viene de un fork el robot no le puede guardar nada.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    env:
+      RAMA: ${{ github.head_ref || github.ref_name }}
+      RAMA_ROBOT: robot/asegurar-sesion
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RAMA }}
+
       - name: Añadir el script si falta
         run: |
           TAG='<script src="https://hub.spacioam.com/js/sa-sesion.js"></script>'
           if grep -q 'hub.spacioam.com/js/sa-sesion.js' index.html; then
-            echo "Ya está."; exit 0
+            echo "index.html ya carga sa-sesion.js." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
           python3 - "$TAG" <<'PY'
           import re, sys
@@ -34,4 +58,25 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           git commit -am "Añadir sa-sesion.js a index.html (lo quitó una exportación)"
-          git push
+
+          if [ "$RAMA" != "main" ]; then
+            git push origin "HEAD:refs/heads/$RAMA"
+            echo "Añadí sa-sesion.js en la rama \`$RAMA\`." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Llegó a main sin el script: el robot lo propone en su propio PR.
+          git push --force origin "HEAD:refs/heads/$RAMA_ROBOT"
+          if [ -n "$(gh pr list --head "$RAMA_ROBOT" --state open --json number -q '.[].number')" ]; then
+            echo "Actualicé el PR abierto del robot (\`$RAMA_ROBOT\`)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if gh pr create --base main --head "$RAMA_ROBOT" \
+               --title "Añadir sa-sesion.js a index.html" \
+               --body "index.html llegó a main sin la sesión firmada. Este PR la vuelve a poner; revísalo y dale Merge."; then
+            echo "Abrí un PR del robot con sa-sesion.js." >> "$GITHUB_STEP_SUMMARY"
+          else
+            URL="https://github.com/$GITHUB_REPOSITORY/compare/main...$RAMA_ROBOT"
+            echo "::warning::No pude abrir el PR solo. Ábrelo aquí: $URL"
+            echo "Falta sa-sesion.js en main. Abre el PR aquí: $URL" >> "$GITHUB_STEP_SUMMARY"
+          fi

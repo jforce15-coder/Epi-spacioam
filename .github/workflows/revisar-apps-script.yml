@@ -1,0 +1,54 @@
+# Revisa el Apps Script dentro del PR, antes de que lo apruebes.
+# Si algo falla aquí, no le des Merge: Publicar Apps Script lo subiría roto.
+
+name: Revisar Apps Script
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps-script/**"
+      - ".clasp.json"
+
+jobs:
+  revisar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Sintaxis de los .js
+        run: |
+          fallo=0
+          for f in apps-script/*.js; do
+            if node --check "$f"; then echo "✓ $f"; else echo "::error file=$f::Error de sintaxis"; fallo=1; fi
+          done
+          exit $fallo
+
+      - name: JSON de configuración
+        run: |
+          fallo=0
+          for f in apps-script/appsscript.json .clasp.json; do
+            if node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$f"; then
+              echo "✓ $f"
+            else
+              echo "::error file=$f::JSON inválido"; fallo=1
+            fi
+          done
+          node -e 'const c = require("./.clasp.json"); if (!c.scriptId || c.rootDir !== "apps-script") { console.error("Falta scriptId o rootDir no es apps-script"); process.exit(1) }' \
+            || { echo "::error file=.clasp.json::Revisa scriptId y rootDir"; fallo=1; }
+          exit $fallo
+
+      # Apps Script junta todos los archivos en uno: dos funciones con el mismo nombre
+      # no dan error, la última simplemente pisa a la otra.
+      - name: Funciones repetidas entre archivos
+        run: |
+          DUP="$(grep -ohE '^function +[A-Za-z0-9_$]+' apps-script/*.js | awk '{print $2}' | sort | uniq -d)"
+          if [ -n "$DUP" ]; then
+            echo "::error::Funciones definidas más de una vez: $DUP"
+            exit 1
+          fi
+          echo "✓ Sin funciones repetidas"
