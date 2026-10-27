@@ -9977,6 +9977,8 @@ function AusenciaHoyModal({aus, schedules, vendors, onClose, onApply}){
 var TIPS_VERSION = "v4";
 /* roles: quién lo ve. cat: "nuevo" (forzado la 1ª vez) o "mas" (solo en el hub "?"). */
 var TUTORIALES = [
+  // ── Primeros pasos · video compartido de todas las apps (hub.spacioam.com/js/sa-tutoriales.js) ──
+  {id:"botonroca", video:"boton-roca", type:"Primeros pasos", roles:["vendor","admin"], cat:"mas", title:"Cómo usar el botón roca", dur:"1:50", lines:["Video de 1:50 con Alma: mover la piedra, un toque, doble toque, el abanico de apps y cómo hablarle por voz."]},
   // ── Lo más nuevo · técnicos ──
   {id:"correccion", type:"Calidad", roles:["vendor"], cat:"nuevo", title:"Responder una solicitud de corrección", lines:["Cuando el supervisor te deja una corrección, al entrar al app te sale sola. Ahora los puntos vienen en lista, uno por uno.","Si la abres dentro de la primera hora, corriges de una vez: toma de 1 a 3 fotos de lo que arreglaste y toca «Corrección realizada».","Si ya pasó más de una hora no tienes que regresar: solo toca «He leído y lo pondré en práctica».","El aviso vuelve cada vez que entres al app hasta que contestes."]},
   {id:"noentendi", type:"Calidad", roles:["vendor"], cat:"nuevo", title:"Cuando no entiendes la corrección", lines:["En la misma solicitud, abajo, toca «No entendí, favor aclarar».","Escribe qué parte no te quedó clara — es opcional, pero ayuda — y envía.","Le llega de vuelta a quien hizo la revisión. Mientras te aclara, no te volvemos a insistir; la respuesta te aparece en Calidad."]},
@@ -10008,6 +10010,12 @@ var TUTORIALES = [
   {id:"intercambios", type:"Programación", roles:["admin"], cat:"mas", title:"Ver intercambios de ruta", lines:["En Programación, abre la bitácora «Intercambios entre técnicos».","Ahí ves quién le cedió qué a quién y en qué quedó cada solicitud."]},
   {id:"fotos", type:"Dashboard", roles:["admin"], cat:"mas", title:"Análisis de fotos del equipo", lines:["En el Dashboard Ejecutivo, abre «¿Están subiendo las fotos?».","Filtra por técnico o ve al equipo completo; el Pareto muestra las fotos que más se omiten."]},
 ];
+/* Los tutoriales de video se ven con el reproductor compartido del Hub (sa-tutoriales.js). */
+function playVideoTut(id){
+  function ir(){ if(window.SATutoriales) window.SATutoriales.play(id); }
+  if(window.SATutoriales){ ir(); return; }
+  var s=document.createElement("script"); s.src="https://hub.spacioam.com/js/sa-tutoriales.js?v=2026-10-27"; s.onload=ir; document.head.appendChild(s);
+}
 function tutsForRole(role, cat){ return TUTORIALES.filter(function(t){ return t.roles.indexOf(role)>=0 && (!cat||t.cat===cat); }); }
 function tipsSeen(){ try{ return localStorage.getItem("epi_tips_seen_"+TIPS_VERSION)==="1"; }catch(_){ return false; } }
 function markTipsSeen(){ try{ localStorage.setItem("epi_tips_seen_"+TIPS_VERSION,"1"); }catch(_){} }
@@ -10493,9 +10501,9 @@ function TipsHub({mobile, role, onPick, onPlayNew, onClose}){
   all.forEach(function(t){ if(!byType[t.type]){ byType[t.type]=[]; order.push(t.type); } byType[t.type].push(t); });
   function fila(t){
     return (
-      <button key={t.id} onClick={function(){onPick(t.id);}} style={{display:"flex",alignItems:"center",gap:12,textAlign:"left",background:C.beige,border:"1px solid "+C.line,borderRadius:12,padding:"12px 13px",cursor:"pointer",fontFamily:"Montserrat,sans-serif",minHeight:52,width:"100%"}}>
-        <span style={{flexShrink:0,width:34,height:34,borderRadius:10,background:C.surface,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{width:9,height:9,borderRadius:t.cat==="nuevo"?"50%":2,background:C.peach}}/></span>
-        <span style={{fontSize:13.5,fontWeight:600,color:C.black,minWidth:0}}>{t.title}</span>
+      <button key={t.id} onClick={function(){ if(t.video){ onClose(); playVideoTut(t.video); } else onPick(t.id); }} style={{display:"flex",alignItems:"center",gap:12,textAlign:"left",background:C.beige,border:"1px solid "+C.line,borderRadius:12,padding:"12px 13px",cursor:"pointer",fontFamily:"Montserrat,sans-serif",minHeight:52,width:"100%"}}>
+        <span style={{flexShrink:0,width:34,height:34,borderRadius:10,background:t.video?C.peach:C.surface,display:"flex",alignItems:"center",justifyContent:"center"}}>{t.video?<span style={{width:0,height:0,borderTop:"5px solid transparent",borderBottom:"5px solid transparent",borderLeft:"8px solid #fff",marginLeft:2}}/>:<span style={{width:9,height:9,borderRadius:t.cat==="nuevo"?"50%":2,background:C.peach}}/>}</span>
+        <span style={{fontSize:13.5,fontWeight:600,color:C.black,minWidth:0}}>{t.title}{t.video&&<span style={{display:"block",fontSize:11,fontWeight:500,color:C.earth,marginTop:2}}>Video · {t.dur}</span>}</span>
         {t.cat==="nuevo"&&<span style={{flexShrink:0,fontSize:8.5,fontWeight:700,color:"#B4553C",letterSpacing:".1em",textTransform:"uppercase",background:"#FCEDE8",border:"1px solid "+C.peach,borderRadius:"var(--sa-pill)",padding:"2px 7px"}}>Nuevo</span>}
         <span style={{marginLeft:t.cat==="nuevo"?8:"auto",flexShrink:0,color:C.taupe}}><Icon name="chevronRight" size={16} stroke={C.taupe}/></span>
       </button>
@@ -10551,6 +10559,8 @@ function TutorialSystem({enabled, role}){
   if(!enabled) return null;
   var forcedItems=tutsForRole(role,"nuevo");
   var singleItems=single?TUTORIALES.filter(function(t){return t.id===single;}):null;
+  /* «Tutoriales» del menú compartido (botón roca) abre este mismo centro. */
+  useEffect(function(){ window.__epiTutAbrir=function(){ setHub(true); }; return function(){ window.__epiTutAbrir=null; }; },[]);
   return (
     <>
       {/* Botón "?" flotante — sobre la barra inferior en móvil */}
@@ -10884,6 +10894,8 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
     window.SANav.update({ app:"epi", home:{ k:h[0], l:h[1] }, current:tab, hidden:false,
       items: navItems.slice(1).map(function(it){ return { k:it[0], l:it[1], icon:it[2], badge:it[3]||0 }; }),
       alma: window.SAAlmaVoz || null,
+      /* «Tutoriales» del menú abre el centro de ayuda propio de Epi (ahí está también el video del botón roca). */
+      tutoriales: function(){ if(window.__epiTutAbrir) window.__epiTutAbrir(); else if(window.SATutoriales) window.SATutoriales.centro({app:"epi"}); },
       onNavigate: function(k){ tabRef.current(k); } });
   });
   React.useEffect(function(){ return function(){ if(window.SANav) window.SANav.hide(true); }; },[]);
