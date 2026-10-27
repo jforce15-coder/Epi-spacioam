@@ -1,3 +1,4 @@
+/* app.jsx se compila solo a app.build.js dentro de cada PR (robot Compilar app). No edites app.build.js a mano. */
 const {useState,useEffect,useRef,Component}=React;
 const {BarChart,Bar,XAxis,YAxis,Tooltip,ResponsiveContainer,LineChart,Line,CartesianGrid,ComposedChart,Cell}=(window.Recharts||{});
 
