@@ -10476,7 +10476,7 @@ function TipsPlayer({items, mobile, forced, onClose}){
         {forced&&last&&(
           <div style={{marginTop:14,background:C.beige,border:"1px solid "+C.line,borderRadius:12,padding:"12px 14px",display:"flex",gap:10,alignItems:"flex-start"}}>
             <span style={{flexShrink:0,width:26,height:26,borderRadius:"50%",background:C.surface,border:"1.5px solid "+C.peach,color:"#B4553C",fontSize:14,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>?</span>
-            <span style={{fontSize:12.5,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>¿Quieres verlos otra vez? Toca el botón <b style={{color:C.black}}>?</b> abajo a la derecha — ahí viven estos y más tutoriales.</span>
+            <span style={{fontSize:12.5,color:C.earth,lineHeight:1.6,textWrap:"pretty"}}>¿Quieres verlos otra vez? Toca el botón <b style={{color:C.black}}>?</b> del costado derecho — ahí viven estos y más tutoriales.</span>
           </div>
         )}
         <div style={{display:"flex",alignItems:"center",gap:12,marginTop:18}}>
@@ -10491,83 +10491,35 @@ function TipsPlayer({items, mobile, forced, onClose}){
   );
 }
 
-/* Hub de ayuda: portada editorial, acceso a "lo más nuevo" y todos los
-   tutoriales del rol clasificados por tipo. */
-function TipsHub({mobile, role, onPick, onPlayNew, onClose}){
-  var all=tutsForRole(role);
-  var nuevos=tutsForRole(role,"nuevo");
-  /* Agrupar por tipo, preservando el orden de aparición. */
-  var order=[], byType={};
-  all.forEach(function(t){ if(!byType[t.type]){ byType[t.type]=[]; order.push(t.type); } byType[t.type].push(t); });
-  function fila(t){
-    return (
-      <button key={t.id} onClick={function(){ if(t.video){ onClose(); playVideoTut(t.video); } else onPick(t.id); }} style={{display:"flex",alignItems:"center",gap:12,textAlign:"left",background:C.beige,border:"1px solid "+C.line,borderRadius:12,padding:"12px 13px",cursor:"pointer",fontFamily:"Montserrat,sans-serif",minHeight:52,width:"100%"}}>
-        <span style={{flexShrink:0,width:34,height:34,borderRadius:10,background:t.video?C.peach:C.surface,display:"flex",alignItems:"center",justifyContent:"center"}}>{t.video?<span style={{width:0,height:0,borderTop:"5px solid transparent",borderBottom:"5px solid transparent",borderLeft:"8px solid #fff",marginLeft:2}}/>:<span style={{width:9,height:9,borderRadius:t.cat==="nuevo"?"50%":2,background:C.peach}}/>}</span>
-        <span style={{fontSize:13.5,fontWeight:600,color:C.black,minWidth:0}}>{t.title}{t.video&&<span style={{display:"block",fontSize:11,fontWeight:500,color:C.earth,marginTop:2}}>Video · {t.dur}</span>}</span>
-        {t.cat==="nuevo"&&<span style={{flexShrink:0,fontSize:8.5,fontWeight:700,color:"#B4553C",letterSpacing:".1em",textTransform:"uppercase",background:"#FCEDE8",border:"1px solid "+C.peach,borderRadius:"var(--sa-pill)",padding:"2px 7px"}}>Nuevo</span>}
-        <span style={{marginLeft:t.cat==="nuevo"?8:"auto",flexShrink:0,color:C.taupe}}><Icon name="chevronRight" size={16} stroke={C.taupe}/></span>
-      </button>
-    );
-  }
-  return (
-    <div onClick={onClose} style={{position:"fixed",inset:0,zIndex:9750,background:"rgba(62,63,63,.55)",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",display:"flex",alignItems:mobile?"flex-end":"center",justifyContent:"center",padding:mobile?0:16,fontFamily:"Montserrat,sans-serif"}}>
-      <div onClick={function(e){e.stopPropagation();}} style={{width:"100%",maxWidth:mobile?"none":460,background:C.surface,borderRadius:mobile?"28px 28px 0 0":28,boxShadow:"var(--sa-shadow-lg)",maxHeight:"92vh",overflowY:"auto",overflowX:"hidden"}}>
-        {/* Portada */}
-        <div style={{position:"relative"}}>
-          <img src="public/tips-hero.png" alt="" style={{width:"100%",height:mobile?116:132,objectFit:"cover",display:"block"}}/>
-          <button onClick={onClose} style={{position:"absolute",top:12,right:12,width:32,height:32,borderRadius:"50%",border:"none",background:"rgba(255,255,255,.85)",backdropFilter:"blur(6px)",color:C.earth,fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>✕</button>
-        </div>
-        <div style={{padding:"18px 22px 24px"}}>
-          <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".2em",textTransform:"uppercase"}}>Centro de ayuda</div>
-          <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:24,color:C.black,marginTop:5,lineHeight:1.15}}>¿Cómo se hace?</div>
-
-          {/* Lo más nuevo — reproduce el recorrido de los cambios recientes */}
-          {nuevos.length>0&&(
-            <button onClick={onPlayNew} style={{marginTop:16,width:"100%",display:"flex",alignItems:"center",gap:12,textAlign:"left",background:"#FCEDE8",border:"1.5px solid "+C.peach,borderRadius:14,padding:"14px 15px",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>
-              <span style={{flexShrink:0,width:38,height:38,borderRadius:"50%",background:C.peach,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{width:0,height:0,borderTop:"6px solid transparent",borderBottom:"6px solid transparent",borderLeft:"10px solid #fff",marginLeft:2}}/></span>
-              <span style={{minWidth:0,flex:1}}>
-                <span style={{display:"block",fontSize:13.5,fontWeight:700,color:C.black}}>Lo más nuevo</span>
-                <span style={{display:"block",fontSize:11.5,color:"#B4553C",marginTop:2,lineHeight:1.4}}>Vuelve a ver el recorrido de los {nuevos.length} cambios recientes</span>
-              </span>
-              <Icon name="chevronRight" size={16} stroke="#B4553C"/>
-            </button>
-          )}
-
-          {/* Todos, clasificados por tipo */}
-          {order.map(function(tp){
-            return (
-              <div key={tp} style={{marginTop:18}}>
-                <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".16em",textTransform:"uppercase",marginBottom:8}}>{tp}</div>
-                <div style={{display:"flex",flexDirection:"column",gap:7}}>{byType[tp].map(fila)}</div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* Orquestador: popup forzado (1 vez) + botón "?" flotante + hub + reproductor. */
+/* Orquestador: popup forzado (1 vez) + guías de Epi en el centro de tutoriales compartido + reproductor. */
 function TutorialSystem({enabled, role}){
   role=role||"vendor";
   var sc=useScreen(); var mobile=sc.mobile;
   const [forced,setForced] = useState(function(){ return enabled && !tipsSeen(); });
-  const [hub,setHub]       = useState(false);
   const [single,setSingle] = useState(null);   /* id de tutorial abierto desde el hub */
   const [replay,setReplay] = useState(false);  /* "lo más nuevo": vuelve a ver los cambios */
   if(!enabled) return null;
   var forcedItems=tutsForRole(role,"nuevo");
   var singleItems=single?TUTORIALES.filter(function(t){return t.id===single;}):null;
-  /* «Tutoriales» del menú compartido (botón roca) abre este mismo centro. */
-  useEffect(function(){ window.__epiTutAbrir=function(){ setHub(true); }; return function(){ window.__epiTutAbrir=null; }; },[]);
+  /* Un solo centro de tutoriales en todas las apps: el «?» y el centro compartidos (hub.spacioam.com/js/sa-tutoriales.js).
+     Las guías de Epi (tarjetas paso a paso de este rol) se registran ahí y se abren con el visor de siempre. */
+  useEffect(function(){
+    var vivo=true, n=0;
+    function registrar(){
+      if(!vivo) return;
+      if(!window.SATutoriales){ if(++n<40) setTimeout(registrar,500); return; }
+      var guias=[{id:"epi-nuevo", apps:["epi"], tipo:"Lo más nuevo", titulo:"Lo más nuevo en Epi", resumen:"Los cambios recientes, en tarjetas.", pasos:forcedItems.length, abrir:function(){ setReplay(true); }}]
+        .concat(tutsForRole(role).filter(function(t){ return !t.video; }).map(function(t){
+          return {id:"epi-"+t.id, apps:["epi"], tipo:t.type, titulo:t.title, resumen:(t.lines||[])[0]||"", pasos:(t.lines||[]).length, abrir:function(){ setSingle(t.id); }};
+        }));
+      window.SATutoriales.registrar(guias);
+    }
+    registrar();
+    return function(){ vivo=false; };
+  },[role]);
   return (
     <>
-      {/* Botón "?" flotante — sobre la barra inferior en móvil */}
-      <button onClick={function(){setHub(true);}} title="Ayuda y tutoriales" aria-label="Ayuda y tutoriales"
-        style={{position:"fixed",right:mobile?"auto":20,left:mobile?12:"auto",bottom:mobile?"calc(80px + env(safe-area-inset-bottom))":20,zIndex:9200,width:mobile?44:48,height:mobile?44:48,borderRadius:"50%",border:"1.5px solid "+C.peach,background:"#fff",color:C.black,boxShadow:"var(--sa-shadow-md,0 12px 40px rgba(62,63,63,.07))",cursor:"pointer",fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:mobile?22:24,lineHeight:1,display:"flex",alignItems:"center",justifyContent:"center"}}>?</button>
       {forced&&<TipsPlayer items={forcedItems} mobile={mobile} forced={true} onClose={function(){ markTipsSeen(); setForced(false); }}/>}
-      {hub&&<TipsHub mobile={mobile} role={role} onClose={function(){setHub(false);}} onPick={function(id){ setHub(false); setSingle(id); }} onPlayNew={function(){ setHub(false); setReplay(true); }}/>}
       {replay&&<TipsPlayer items={forcedItems} mobile={mobile} forced={false} onClose={function(){setReplay(false);}}/>}
       {singleItems&&<TipsPlayer items={singleItems} mobile={mobile} forced={false} onClose={function(){setSingle(null);}}/>}
     </>
@@ -10894,8 +10846,7 @@ function ResponsiveHeader({tab, setTab, notis, navItems, onLogout, onConfig, con
     window.SANav.update({ app:"epi", home:{ k:h[0], l:h[1] }, current:tab, hidden:false,
       items: navItems.slice(1).map(function(it){ return { k:it[0], l:it[1], icon:it[2], badge:it[3]||0 }; }),
       alma: window.SAAlmaVoz || null,
-      /* «Tutoriales» del menú abre el centro de ayuda propio de Epi (ahí está también el video del botón roca). */
-      tutoriales: function(){ if(window.__epiTutAbrir) window.__epiTutAbrir(); else if(window.SATutoriales) window.SATutoriales.centro({app:"epi"}); },
+      /* «Tutoriales» del menú y el «?» abren el centro compartido, con las guías de Epi incluidas. */
       onNavigate: function(k){ tabRef.current(k); } });
   });
   React.useEffect(function(){ return function(){ if(window.SANav) window.SANav.hide(true); }; },[]);
