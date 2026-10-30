@@ -5240,7 +5240,7 @@ function CleaningPhotoGate({diag, vendorEmail, onSaveFeedback, onCleared}){
                 <div style={{fontSize:13,color:C.earth,marginTop:10,lineHeight:1.7,textWrap:"pretty"}}>Para este formulario necesitamos específicamente la foto de <b style={{color:C.black}}>{diag.topLabel}</b>. Es la que más se ha estado omitiendo — con una foto tuya la ponemos al día.</div>
                 <div style={{marginTop:16,maxWidth:220}}><SinglePhotoUp foto={photo} accent={C.peach} onAdd={function(f){compress(f).then(setPhoto);}} onDel={function(){setPhoto(null);}}/></div>
                 {!noPuedo
-                  ? <button onClick={function(){setNoPuedo(true);}} style={{marginTop:12,background:"none",border:"none",padding:0,color:C.earth,fontSize:12,fontWeight:600,textDecoration:"underline",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>¿No puedes subir esta foto? Explícanos por qué</button>
+                  ? <button onClick={function(){setNoPuedo(true);}} style={{marginTop:4,background:"none",border:"none",padding:"12px 0",minHeight:44,color:C.earth,fontSize:12,fontWeight:600,textDecoration:"underline",cursor:"pointer",fontFamily:"Montserrat,sans-serif"}}>¿No puedes subir esta foto? Explícanos por qué</button>
                   : <div style={{marginTop:14}}>
                       <div style={{fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",marginBottom:6}}>¿Por qué no puedes subirla?</div>
                       <textarea rows={3} value={expl} onChange={function(e){setExpl(e.target.value);}} placeholder="Cuéntanos qué pasó — no hay ecofiltro, no había acceso, etc." style={{width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:12,padding:"11px 13px",fontSize:13,fontFamily:"Montserrat,sans-serif",outline:"none",resize:"vertical"}}/>
@@ -9458,8 +9458,8 @@ function VendorAccount({vendor,allVendors,allReps,onSvV}) {
           </div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <input ref={photoRef} type="file" accept="image/*" onChange={onPhoto} style={{display:"none"}}/>
-            <button onClick={function(){photoRef.current&&photoRef.current.click();}} style={{border:"none",cursor:"pointer",background:C.black,color:"#fff",borderRadius:"var(--sa-pill)",padding:"10px 18px",fontFamily:"Montserrat,sans-serif",fontSize:11,fontWeight:600,letterSpacing:".1em",textTransform:"uppercase"}}>{foto?"Cambiar":"Subir foto"}</button>
-            {foto&&<button onClick={function(){saveFoto("");}} style={{border:"1px solid "+C.gray,cursor:"pointer",background:"#fff",color:C.earth,borderRadius:"var(--sa-pill)",padding:"10px 16px",fontFamily:"Montserrat,sans-serif",fontSize:11,fontWeight:600,letterSpacing:".1em",textTransform:"uppercase"}}>Quitar</button>}
+            <button onClick={function(){photoRef.current&&photoRef.current.click();}} style={{border:"none",cursor:"pointer",background:C.black,color:"#fff",borderRadius:"var(--sa-pill)",padding:"10px 18px",minHeight:44,fontFamily:"Montserrat,sans-serif",fontSize:11,fontWeight:600,letterSpacing:".1em",textTransform:"uppercase"}}>{foto?"Cambiar":"Subir foto"}</button>
+            {foto&&<button onClick={function(){saveFoto("");}} style={{border:"1px solid "+C.gray,cursor:"pointer",background:"#fff",color:C.earth,borderRadius:"var(--sa-pill)",padding:"10px 16px",minHeight:44,fontFamily:"Montserrat,sans-serif",fontSize:11,fontWeight:600,letterSpacing:".1em",textTransform:"uppercase"}}>Quitar</button>}
           </div>
         </div>
         {fotoMsg&&<div style={{marginTop:12,padding:"10px 13px",borderRadius:8,fontSize:13,fontWeight:600,background:fotoMsg.ok?"#E8F2ED":"#F7E7E4",color:fotoMsg.ok?C.green:C.red}}>{fotoMsg.t}</div>}
