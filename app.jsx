@@ -1579,7 +1579,7 @@ async function loadAllData(opts) {
       reports:   d.reports,
       vendors:   d.vendors   || DEF_V,
       props:     d.props     || DEF_P,
-      pin:       d.adminpin  || "spacio2024",
+      pin:       d.adminpin  || "",
       company:   d.company   || {name:"Spacio AM S.A.",nit:"118287796"},
       extcats:   d.extcats   || [],
       schedules: d.schedules || [],
@@ -1628,7 +1628,7 @@ async function loadAllData(opts) {
     vendors: (_vFinal && _vFinal.length) ? _vFinal : DEF_V,
     vendorsComplete: !!(_vFinal && _vFinal.length) && _vMerge.complete,
     props:   (_pFinal && _pFinal.length) ? _pFinal : DEF_P,
-    pin:     cfg.adminpin|| "spacio2024",
+    pin:     cfg.adminpin|| "",
     company: cfg.company || {name:"Spacio AM S.A.",nit:"118287796"},
     extcats: cfg.extcats || [],
     /* Faltaba: la programación del servidor nunca llegaba al app. Por eso la ruta
@@ -2004,7 +2004,7 @@ function App() {
   const [reps,     setReps]     = useState([]);
   const [vendors,  setVendors]  = useState(DEF_V);
   const [props,    setProps]    = useState(DEF_P);
-  const [pin,      setPin]      = useState("spacio2024");
+  const [pin,      setPin]      = useState("");
   const [company,  setCompany]  = useState({name:"Spacio AM S.A.",nit:"118287796"});
   const [extCats,   setExtCats]   = useState([]);
   const [hospUrlDay,  setHospUrlDay]  = useState("https://share.hospitable.com/metrics/1d1aabad-db5f-4f7a-847d-0de50c9dedc4");
@@ -2107,7 +2107,7 @@ function App() {
          re-guardar una lista incompleta y borrar usuarios que no se pudieron leer. */
       VENDORS_SAFE = (d.vendorsComplete !== false);
       setProps(d.props||DEF_P);
-      setPin(d.pin||"spacio2024");
+      setPin(d.pin||"");
       setCompany(d.company||{name:"Spacio AM S.A.",nit:"118287796"});
       if(d.extcats)   setExtCats(d.extcats);
       if(d.schedules) setSchedules(d.schedules);
@@ -8084,7 +8084,7 @@ function SecurityCfg({adminPin,onSave}) {
     setBusy(true);
     apiCall("cambiarPinEpi",{actual:cur, nueva:np},{tries:1,timeout:30000}).then(function(d){
       setBusy(false);
-      if(!d||!d.ok){ setMsg({ok:false,t:(d&&d.error)==="too_many"?"Demasiados intentos. Espera 15 minutos.":(d&&d.error)==="weak"?"El nuevo PIN debe tener al menos 4 caracteres.":"PIN actual incorrecto."}); return; }
+      if(!d||!d.ok){ setMsg({ok:false,t:(d&&d.error)==="too_many"?"Demasiados intentos. Espera 15 minutos.":(d&&d.error)==="weak"?"El nuevo PIN debe tener al menos 4 caracteres.":(d&&d.error)==="sin_sesion_admin"?"Aún no hay PIN: para crear el primero entra con tu cuenta de administrador principal y deja «PIN actual» vacío.":"PIN actual incorrecto."}); return; }
       setCur(""); setNp(""); setCp("");
       setMsg({ok:true,t:"✓ PIN actualizado correctamente."}); setTimeout(function(){setMsg(null);},3000);
     }).catch(function(){ setBusy(false); setMsg({ok:false,t:"No se pudo conectar. Intenta de nuevo."}); });
