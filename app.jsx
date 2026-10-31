@@ -8323,8 +8323,7 @@ function DetailModal(p) {
   if (!full) return (
     <Overlay>
       <div style={{background:"#fff",borderRadius:16,padding:"28px 24px",width:"100%",maxWidth:420,display:"flex",flexDirection:"column",gap:14}}>
-        <div style={{fontSize:11,fontWeight:700,letterSpacing:".14em",textTransform:"uppercase",color:C.earth}}>Cargando detalle</div>
-        {[62,38,120].map(function(h,i){return <div key={i} style={{height:h,borderRadius:12,background:C.surfaceWarm}}/>;})}
+        <div className="sa-esq" aria-label="Cargando el detalle del reporte"><i className="t"/><i className="corta"/><i className="c"/><i className="g"/></div>
         <button onClick={p.onClose} style={{alignSelf:"flex-start",padding:"9px 16px",minHeight:40,borderRadius:"var(--sa-pill)",border:"1.5px solid "+C.gray,background:"#fff",color:C.black,fontSize:12,fontWeight:700,cursor:"pointer"}}>Cerrar</button>
       </div>
     </Overlay>
@@ -21593,16 +21592,16 @@ function Loader() {
     var t = setInterval(function(){setSecs(function(s){return s+1;});},1000);
     return function(){clearInterval(t);};
   },[]);
+  /* Rápido de sentir (hub ds/velocidad.md, regla 2): la forma del app en gris
+     (esqueleto del Hub, cargado en index.html), igual que el #__splash. */
   return (
-    <div style={{position:"fixed",inset:0,background:C.alabaster,fontFamily:"Montserrat,sans-serif",zIndex:9998}}>
-      <div style={{position:"absolute",left:0,right:0,top:"50%",transform:"translateY(-50%)",display:"flex",flexDirection:"column",alignItems:"center"}}>
-        <img src={LOGO_WORDMARK} alt="Spacio AM" style={{width:172,maxWidth:"70vw",height:"auto",display:"block",marginBottom:30}}/>
-        <div className="sa-spin" style={{width:26,height:26,boxSizing:"border-box",borderRadius:"50%",border:"2px solid "+C.gray,borderTopColor:C.peach}}/>
-      </div>
-      <div style={{position:"absolute",left:0,right:0,top:"calc(50% + 98px)",padding:"0 24px",textAlign:"center"}}>
-        <div style={{fontSize:12,color:C.earth,letterSpacing:".18em",textTransform:"uppercase"}}>
-          {secs<4?"Conectando con tu información…":secs<8?"Esto puede tardar unos segundos…":"Verificando conexión…"}
+    <div style={{position:"fixed",inset:0,background:C.alabaster,fontFamily:"Montserrat,sans-serif",zIndex:9998,overflow:"hidden"}}>
+      <div style={{maxWidth:560,margin:"0 auto",padding:"40px 16px 0"}}>
+        <img src={LOGO_WORDMARK} alt="Spacio AM" style={{width:132,height:"auto",display:"block",marginBottom:26}}/>
+        <div style={{fontSize:12,color:C.earth,letterSpacing:".18em",textTransform:"uppercase",marginBottom:18}}>
+          {secs<8?"Conectando con tu información…":"Esto puede tardar unos segundos…"}
         </div>
+        <div className="sa-esq" aria-label="Cargando tu información"><i className="t"/><i className="corta"/><div className="sa-esq dos"><i className="c"/><i className="c"/><i className="c"/><i className="c"/></div><i className="g"/><i className="c"/><i className="c"/></div>
       </div>
     </div>
   );
