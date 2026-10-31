@@ -1598,13 +1598,16 @@ async function loadAllData(opts) {
       formcfg: d.formcfg || {},
     };
   }
-  /* Carga SECUENCIAL (no Promise.all): el Apps Script ocasionalmente mezcla las
-     respuestas cuando getAll y getConfig llegan a la vez, devolviendo getConfig sin
-     "vendors". Pedir config primero (crítico para el login) y luego los reportes
-     elimina esa condición de carrera. */
-  /* El servidor a veces tarda 20–60 s en responder (arranque en frío o mucha carga). Con 12 s por intento
-     se rendía y la app quedaba sin la lista del equipo: nadie podía entrar. Ahora se le da más margen. */
-  var cfg = await apiCall("getConfig", FULL ? {} : {slim:1}, {timeout:45000, tries:2}) || {};
+  /* Nada en fila (hub ds/velocidad.md, regla 7): la configuración y los reportes se piden JUNTOS. Antes iban uno
+     detrás del otro por una supuesta mezcla de respuestas cuando llegaban a la vez; el Apps Script guarda cada una en
+     su propia llave de caché ("cfg:…" y "reps:…"), así que no pueden cruzarse. Por si acaso, se revisa la forma de
+     cada respuesta: si una no trae lo suyo, esa sola se vuelve a pedir (como ya se hacía con la lista del equipo).
+     El servidor a veces tarda 20–60 s en responder (arranque en frío o mucha carga): se le da margen. */
+  var pideCfg = function(){ return apiCall("getConfig", FULL ? {} : {slim:1}, {timeout:45000, tries:2}).then(function(c){ return c || {}; }); };
+  var pideReps = function(){ return apiCall("getAll", FULL ? {} : {light:1, days:WIN}, FULL ? {timeout:90000, tries:2} : null).then(function(r){ return r || {}; }); };
+  var juntos = await Promise.all([pideCfg(), pideReps().catch(function(e){ return {__error:e}; })]);
+  var cfg = juntos[0], rd = juntos[1];
+  if (Array.isArray(cfg.reports)) cfg = await pideCfg();             // llegó la respuesta de reportes en lugar de la configuración
   var _v0 = salvageArray(cfg.vendors);
   if (!_v0 || !_v0.length) {
     for (var attempt=0; attempt<2; attempt++) {
@@ -1615,8 +1618,8 @@ async function loadAllData(opts) {
       } catch(e){ /* sigue intentando */ }
     }
   }
-  var rd = await apiCall("getAll", FULL ? {} : {light:1, days:WIN},
-                         FULL ? {timeout:90000, tries:2} : null) || {};
+  if (rd.__error) throw rd.__error;                                     // igual que antes: sin reportes, la carga falla y se reintenta
+  if (!Array.isArray(rd.reports)) rd = await pideReps();                // llegó otra cosa en lugar de los reportes
   var _vMerge = vendorsMerge(cfg);
   var _vFinal = _vMerge.list;
   var _pFinal = salvageArray(cfg.props);
