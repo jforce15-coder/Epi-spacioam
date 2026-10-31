@@ -61,7 +61,7 @@ function route(e) {
     else if (p.action === "loginEpi")       r = loginEpi_(p.email, p.clave);
     else if (p.action === "loginAdminEpi")  r = loginAdminEpi_(p.clave);
     else if (p.action === "cambiarClaveEpi") r = cambiarClaveEpi_(p.email, p.actual, p.nueva);
-    else if (p.action === "cambiarPinEpi")  r = cambiarPinEpi_(p.actual, p.nueva);
+    else if (p.action === "cambiarPinEpi")  r = cambiarPinEpi_(p.actual, p.nueva, __ses);
     else r = { error: "Unknown action: " + p.action };
     /* Cualquier acción que escriba invalida el caché de arranque. */
     if (/^(save|delete|sync|migrar|fix|recover|programar|revisar)/.test(String(p.action)))
@@ -4890,7 +4890,7 @@ function nuevaClaveTecnico_(email, actual, nueva) {
    ═════════════════════════════════════════════════════════════════════════════════════════════ */
 var EPI_RX_VENDORS_ = /^vendors(_\d+)?$/;
 /* PIN de siempre cuando nunca se guardó uno (el mismo que usaba la app). */
-var EPI_PIN_INICIAL_ = "spacio2024";
+/* Sin PIN de fábrica: si nadie guardó uno, el PIN no abre nada y se entra con la cuenta de Spacio AM. */
 function epiClaveKey_(v) { return "EPI_CLAVE_" + String((v && (v.id || v.email)) || "").replace(/[^A-Za-z0-9_@.\-]/g, "_").slice(0, 200); }
 function epiIguales_(a, b) { a = String(a); b = String(b); if (a.length !== b.length) return false; var r = 0; for (var i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i); return r === 0; }
 function epiHashOk_(hash, clave) {
@@ -4995,7 +4995,8 @@ function epiPinOk_(pin) {
   if (h) return epiHashOk_(h, pin);
   var sh = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Config"), guardado = "";
   (sh ? sh.getDataRange().getValues() : []).forEach(function (row) { if (row[0] === "adminpin") guardado = String(row[1] == null ? "" : row[1]); });
-  return epiIguales_(guardado || EPI_PIN_INICIAL_, String(pin == null ? "" : pin));
+  if (!guardado) return false;
+  return epiIguales_(guardado, String(pin == null ? "" : pin));
 }
 function loginAdminEpi_(pin) {
   var kf = "lea_pin";
@@ -5016,11 +5017,21 @@ function cambiarClaveEpi_(email, actual, nueva) {
   PropertiesService.getScriptProperties().setProperty(epiClaveKey_(v), claveHash_(nueva));
   return { ok: true };
 }
-function cambiarPinEpi_(actual, nueva) {
+/* ¿Ya hay un PIN guardado (en Propiedades o, de antes, en la hoja Config)? */
+function epiPinExiste_() {
+  if (PropertiesService.getScriptProperties().getProperty("EPI_ADMIN_PIN")) return true;
+  var sh = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Config");
+  return (sh ? sh.getDataRange().getValues() : []).some(function (row) { return row[0] === "adminpin" && String(row[1] == null ? "" : row[1]) !== ""; });
+}
+function cambiarPinEpi_(actual, nueva, ses) {
   var kf = "lea_pin"; nueva = String(nueva || "");
   if (epiFallos_(kf) >= 8) return { ok: false, error: "too_many" };
   if (nueva.length < 4) return { ok: false, error: "weak" };
-  if (!epiPinOk_(actual)) { epiFallo_(kf); return { ok: false, error: "bad_pass" }; }
+  if (!epiPinExiste_()) {
+    /* El primer PIN solo lo crea un administrador principal con su sesión de Spacio AM (no hay PIN actual que pedir). */
+    var apps = (ses && ses.apps) || {}, esAdmin = Object.keys(apps).some(function (k) { return String(apps[k]) === "admin_principal"; });
+    if (!esAdmin) return { ok: false, error: "sin_sesion_admin" };
+  } else if (!epiPinOk_(actual)) { epiFallo_(kf); return { ok: false, error: "bad_pass" }; }
   epiMoverClaves_();
   PropertiesService.getScriptProperties().setProperty("EPI_ADMIN_PIN", claveHash_(nueva));
   return { ok: true };
