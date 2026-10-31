@@ -2438,16 +2438,18 @@ function App() {
 }
 
 /* ═══ LOGIN */
-function LoginField({label,type,value,onChange,ph,err,onEnter,autoFocus}) {
+function LoginField({label,type,value,onChange,ph,err,onEnter,autoFocus,campoRef}) {
   const [show,setShow]=useState(false);
   const inputRef=useRef(null);
+  /* campoRef: quien usa el campo lo puede sacudir si hay error (ds/movimiento.md, regla 4) */
+  function setInput(el){ inputRef.current=el; if(campoRef) campoRef.current=el; }
   useEffect(function(){ if(autoFocus){ var t=setTimeout(function(){ if(inputRef.current) inputRef.current.focus(); },120); return function(){clearTimeout(t);}; } },[autoFocus]);
   var isPass=type==="password";
   return (
     <label style={{display:"flex",flexDirection:"column",gap:9}}>
       <span style={{fontFamily:"Montserrat,sans-serif",fontSize:10,fontWeight:500,letterSpacing:".28em",textTransform:"uppercase",color:C.earth}}>{label}</span>
       <div style={{position:"relative",display:"flex",alignItems:"center"}}>
-        <input ref={inputRef} value={value} onChange={function(e){onChange(e.target.value);}} placeholder={ph} type={isPass&&!show?"password":(isPass?"text":type)} autoCapitalize="none" autoCorrect="off" autoFocus={autoFocus} onKeyDown={function(e){if(e.key==="Enter"&&onEnter)onEnter();}}
+        <input ref={setInput} value={value} onChange={function(e){onChange(e.target.value);}} placeholder={ph} type={isPass&&!show?"password":(isPass?"text":type)} autoCapitalize="none" autoCorrect="off" autoFocus={autoFocus} onKeyDown={function(e){if(e.key==="Enter"&&onEnter)onEnter();}}
           style={{width:"100%",boxSizing:"border-box",fontFamily:"Montserrat,sans-serif",fontSize:15,letterSpacing:".04em",color:C.black,padding:"15px 16px",paddingRight:isPass?52:16,background:C.alabaster,border:"1px solid "+(err?C.peach:C.gray),borderRadius:14,outline:"none",transition:"border-color .18s"}}
           onFocus={function(e){e.target.style.borderColor=C.peach;e.target.style.boxShadow="var(--sa-focus-ring)";}} onBlur={function(e){e.target.style.borderColor=err?C.peach:C.gray;e.target.style.boxShadow="none";}}/>
         {isPass&&<button type="button" onClick={function(){setShow(function(s){return !s;});}} aria-label={show?"Ocultar contraseña":"Ver contraseña"} style={{position:"absolute",right:12,border:"none",background:"transparent",cursor:"pointer",color:C.earth,padding:4,display:"flex"}}><svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={show?"M3 3l18 18M10.6 10.7a3 3 0 004.2 4.2M9.4 5.7A9.5 9.5 0 0112 5.5c6 0 9.5 6.5 9.5 6.5a16 16 0 01-2.6 3.3M6.2 6.3A16 16 0 002.5 12S6 18.5 12 18.5a9 9 0 003.6-.7":"M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12zM12 15a3 3 0 100-6 3 3 0 000 6z"}></path></svg></button>}
@@ -2465,17 +2467,20 @@ function OnboardModal({vendor, allVendors, onSvV, onClose}) {
   const [pass,  setPass]  = useState("");
   const [pass2, setPass2] = useState("");
   const [err,   setErr]   = useState("");
+  /* El campo malo se sacude y queda en rojo con su texto (ds/movimiento.md, regla 4) */
+  const rEmail=useRef(null), rPass=useRef(null), rPass2=useRef(null);
+  function sacudir(r){ if(window.SAMov) SAMov.sacudir(r.current); }
 
   function goEmail(){
     var e=(email||"").trim().toLowerCase();
-    if(!e||e.indexOf("@")<1||e.indexOf(".")<0){ setErr("Escribe un correo electrónico válido."); return; }
+    if(!e||e.indexOf("@")<1||e.indexOf(".")<0){ setErr("Escribe un correo electrónico válido."); sacudir(rEmail); return; }
     var conflict=(allVendors||[]).find(function(v){return v.id!==vendor.id&&(v.email||"").toLowerCase()===e;});
-    if(conflict){ setErr("Ese correo ya está en uso por otro usuario."); return; }
+    if(conflict){ setErr("Ese correo ya está en uso por otro usuario."); sacudir(rEmail); return; }
     setErr(""); setStep(1);
   }
   function goPass(){
-    if((pass||"").length<4){ setErr("La contraseña debe tener al menos 4 caracteres."); return; }
-    if(pass!==pass2){ setErr("Las contraseñas no coinciden."); return; }
+    if((pass||"").length<4){ setErr("La contraseña debe tener al menos 4 caracteres."); sacudir(rPass); return; }
+    if(pass!==pass2){ setErr("Las contraseñas no coinciden."); sacudir(rPass2); return; }
     setErr(""); setStep(2);
   }
   function commit(){
@@ -2510,7 +2515,7 @@ function OnboardModal({vendor, allVendors, onSvV, onClose}) {
           <>
             <h2 style={titleStyle}>¿A qué correo electrónico podemos enviarte las notificaciones?</h2>
             <p style={{fontSize:13,lineHeight:1.6,color:C.earth,margin:"0 0 22px"}}>Este será también el correo con el que iniciarás sesión de ahora en adelante.</p>
-            <F label="Correo electrónico"><input type="email" value={email} placeholder="tu@correo.com" onChange={function(e){setEmail(e.target.value);setErr("");}}/></F>
+            <F label="Correo electrónico"><input ref={rEmail} type="email" value={email} placeholder="tu@correo.com" onChange={function(e){setEmail(e.target.value);setErr("");}}/></F>
             {err&&<div style={{fontSize:12,color:C.red,fontWeight:600,margin:"10px 0 0"}}>⚠ {err}</div>}
             <div style={{marginTop:22}}><button onClick={goEmail} style={primaryBtn}>Continuar</button></div>
           </>
@@ -2521,8 +2526,8 @@ function OnboardModal({vendor, allVendors, onSvV, onClose}) {
             <h2 style={titleStyle}>Escoge una nueva contraseña</h2>
             <p style={{fontSize:13,lineHeight:1.6,color:C.earth,margin:"0 0 22px"}}>Mínimo 4 caracteres. La usarás junto con tu correo para entrar.</p>
             <div style={{display:"flex",flexDirection:"column",gap:14}}>
-              <F label="Nueva contraseña"><input type="password" value={pass} placeholder="••••••••" onChange={function(e){setPass(e.target.value);setErr("");}}/></F>
-              <F label="Confirma la contraseña"><input type="password" value={pass2} placeholder="••••••••" onChange={function(e){setPass2(e.target.value);setErr("");}}/></F>
+              <F label="Nueva contraseña"><input ref={rPass} type="password" value={pass} placeholder="••••••••" onChange={function(e){setPass(e.target.value);setErr("");}}/></F>
+              <F label="Confirma la contraseña"><input ref={rPass2} type="password" value={pass2} placeholder="••••••••" onChange={function(e){setPass2(e.target.value);setErr("");}}/></F>
             </div>
             {err&&<div style={{fontSize:12,color:C.red,fontWeight:600,margin:"10px 0 0"}}>⚠ {err}</div>}
             <div style={{display:"flex",flexDirection:"column",gap:10,marginTop:22}}>
@@ -2574,6 +2579,11 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
   const [np1,      setNp1]      = useState("");
   const [np2,      setNp2]      = useState("");
   const L = function(es,en){ return lang==="es"?es:en; };
+  var pdLang=usePildora(lang);
+  /* El no se ve antes de leerlo (ds/movimiento.md, regla 4): el campo malo se sacude y queda en rojo hasta que
+     vuelvas a escribir; el texto del error va debajo. Una falla de red no sacude: el campo no está mal. */
+  const rEmail=useRef(null), rPass=useRef(null), rNp1=useRef(null), rNp2=useRef(null);
+  function sacudir(){ if(!window.SAMov) return; for(var i=0;i<arguments.length;i++) SAMov.sacudir(arguments[i]&&arguments[i].current); }
 
   /* Ubica el registro completo del técnico (agenda, zonas, etc.) por correo. */
   function matchVendor(mail){
@@ -2648,11 +2658,12 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
     onLogin({role:d.role==="admin"||v.isAdmin?"admin":"vendor",vendor:v});
   }
   /* Intenta entrar con la contraseña de Epi; si no, muestra el error. */
-  function loginLocal(msg){
+  function loginLocal(msg,red){
     return epiServidor().then(function(d){
       setBusy(false);
       if(d){ entrarEpi(d); return true; }
       setErr(msg||L("Correo o contraseña incorrectos.","Wrong email or password."));
+      if(!red) sacudir(rEmail,rPass);
       return false;
     });
   }
@@ -2682,23 +2693,24 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
           /* Código temporal de reinicio (o cuenta sin contraseña): el login unificado pide crear una nueva. */
           if(res.error==="needs_password"){ setDesdeLocal(false); setNp1(""); setNp2(""); setInitEmail(email.trim()); return; }
           setErr((res.error&&res.message)||L("Correo o contraseña incorrectos.","Wrong email or password."));
+          sacudir(rEmail,rPass);
         });
         return;
       }
-      if(res.error==="reset_expired"){ setBusy(false); setErr(L("El código temporal venció. Pide uno nuevo al administrador.","The temporary code expired. Ask the admin for a new one.")); return; }
+      if(res.error==="reset_expired"){ setBusy(false); setErr(L("El código temporal venció. Pide uno nuevo al administrador.","The temporary code expired. Ask the admin for a new one.")); sacudir(rPass); return; }
       /* Falló el servicio: intenta con la contraseña de Epi (la revisa el servidor) antes de dar error. */
       loginLocal((res.error&&res.message)||L("Correo o contraseña incorrectos.","Wrong email or password."));
     }).catch(function(){
-      loginLocal(L("No se pudo conectar. Revisa tu internet e intenta de nuevo.","Couldn't connect. Check your internet and try again."));
+      loginLocal(L("No se pudo conectar. Revisa tu internet e intenta de nuevo.","Couldn't connect. Check your internet and try again."),true);
     });
   }
   /* Guarda la contraseña inicial en el Control de usuarios y entra. */
   function submitInitial(){
     if(busy) return;
     setErr("");
-    if((np1||"").length<8){ setErr(L("La contraseña debe tener al menos 8 caracteres.","Password must be at least 8 characters.")); return; }
-    if(claveDebil(np1) || np1===pass){ setErr(L("Elige una contraseña diferente a la inicial y más difícil de adivinar.","Choose a password different from the initial one and harder to guess.")); return; }
-    if(np1!==np2){ setErr(L("Las contraseñas no coinciden.","Passwords don't match.")); return; }
+    if((np1||"").length<8){ setErr(L("La contraseña debe tener al menos 8 caracteres.","Password must be at least 8 characters.")); sacudir(rNp1); return; }
+    if(claveDebil(np1) || np1===pass){ setErr(L("Elige una contraseña diferente a la inicial y más difícil de adivinar.","Choose a password different from the initial one and harder to guess.")); sacudir(rNp1); return; }
+    if(np1!==np2){ setErr(L("Las contraseñas no coinciden.","Passwords don't match.")); sacudir(rNp2); return; }
     var SA=global_SAAuth(); if(!SA){ setErr(L("Servicio no disponible.","Service unavailable.")); return; }
     setBusy(true);
     var guardar = desdeLocal
@@ -2706,7 +2718,7 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
       : SA.setInitialPassword(initEmail, np1);
     guardar.then(function(res){
       res=res||{};
-      if(!res.ok){ setBusy(false); setErr((res.error&&res.message)||L("No se pudo guardar la contraseña.","Couldn't save the password.")); return; }
+      if(!res.ok){ setBusy(false); setErr((res.error&&res.message)||L("No se pudo guardar la contraseña.","Couldn't save the password.")); if(res.error==="weak") sacudir(rNp1); return; }
       /* Ya con contraseña, entra directo. */
       SA.login(initEmail, np1).then(function(r2){
         r2=r2||{}; setBusy(false);
@@ -2738,9 +2750,10 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
       {/* Estado de Sheets (punto tipo farol) + toggle de idioma — top right, fixed */}
       <div style={{position:"fixed",top:14,right:14,display:"flex",alignItems:"center",gap:12,zIndex:200}}>
         {sheetsOk!=null&&<span title={sheetsOk?L("Conectado a Sheets","Connected to Sheets"):L("Sin conexión a Sheets","No connection to Sheets")}><SheetsDot ok={sheetsOk}/></span>}
-        <div style={{display:"inline-flex",padding:3,background:C.surfaceWarm,borderRadius:999,gap:2}}>
-          {[["es","ES"],["en","EN"]].map(function(o){var active=lang===o[0];return (
-            <button key={o[0]} onClick={function(){setLang(o[0]);}} style={{border:"none",cursor:"pointer",padding:"7px 12px",borderRadius:999,fontFamily:"Montserrat,sans-serif",fontSize:10.5,fontWeight:600,letterSpacing:".12em",textTransform:"uppercase",background:active?C.alabaster:"transparent",color:active?C.black:C.earth,boxShadow:active?"0 1px 2px rgba(62,63,63,.05)":"none",transition:"all .18s"}}>{o[1]}</button>
+        <div ref={pdLang.bar} style={{position:"relative",display:"inline-flex",padding:3,background:C.surfaceWarm,borderRadius:999,gap:2}}>
+          {pdLang.mov&&<i ref={pdLang.pil} className="sa-pildora" aria-hidden="true" style={Object.assign({},PILDORA_BASE,{background:C.alabaster,borderRadius:999,boxShadow:"0 1px 2px rgba(62,63,63,.05)"})}/>}
+          {[["es","ES"],["en","EN"]].map(function(o){var active=lang===o[0];var fondo=active&&!pdLang.mov;return (
+            <button key={o[0]} data-on={active?"1":undefined} onClick={function(){setLang(o[0]);}} style={{position:"relative",zIndex:1,border:"none",cursor:"pointer",padding:"7px 12px",borderRadius:999,fontFamily:"Montserrat,sans-serif",fontSize:10.5,fontWeight:600,letterSpacing:".12em",textTransform:"uppercase",background:fondo?C.alabaster:"transparent",color:active?C.black:C.earth,boxShadow:fondo?"0 1px 2px rgba(62,63,63,.05)":"none",transition:"all .18s"}}>{o[1]}</button>
           );})}
         </div>
       </div>
@@ -2768,8 +2781,8 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
               <h1 style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontWeight:400,fontSize:34,letterSpacing:"-.01em",lineHeight:1.1,color:C.black,margin:0}}>{L("Crea tu contraseña","Create your password")}</h1>
               <p style={{fontFamily:"Montserrat,sans-serif",fontSize:13.5,letterSpacing:".04em",lineHeight:1.7,color:C.earth,margin:"12px 0 30px"}}>{desdeLocal?L("Para proteger tu cuenta, crea una contraseña nueva (mínimo 8 caracteres, distinta a la inicial) para ","To protect your account, create a new password (8+ characters, not the initial one) for "):L("Es tu primer ingreso con ","This is your first sign-in with ")}<b style={{color:C.black}}>{initEmail}</b>{L(". Elige una contraseña para continuar.",". Choose a password to continue.")}</p>
               <div style={{display:"flex",flexDirection:"column",gap:18}}>
-                <LoginField label={L("Nueva contraseña","New password")} type="password" value={np1} onChange={function(v){setNp1(v);setErr("");}} ph="••••••••" err={!!err} onEnter={submitInitial} autoFocus/>
-                <LoginField label={L("Confirma la contraseña","Confirm password")} type="password" value={np2} onChange={function(v){setNp2(v);setErr("");}} ph="••••••••" err={!!err} onEnter={submitInitial}/>
+                <LoginField label={L("Nueva contraseña","New password")} type="password" value={np1} onChange={function(v){setNp1(v);setErr("");}} ph="••••••••" err={!!err} onEnter={submitInitial} autoFocus campoRef={rNp1}/>
+                <LoginField label={L("Confirma la contraseña","Confirm password")} type="password" value={np2} onChange={function(v){setNp2(v);setErr("");}} ph="••••••••" err={!!err} onEnter={submitInitial} campoRef={rNp2}/>
                 {err&&<div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.red,marginTop:-4}}>⚠ {err}</div>}
                 <LoginBtn onClick={submitInitial} dis={busy||!np1||!np2}>{busy?L("Guardando…","Saving…"):L("Crear y entrar","Create and enter")}</LoginBtn>
                 {desdeLocal
@@ -2783,8 +2796,8 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
               <h1 style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontWeight:400,fontSize:38,letterSpacing:"-.01em",lineHeight:1.08,color:C.black,margin:0}}>{L("Bienvenido de vuelta.","Welcome back.")}</h1>
               <p style={{fontFamily:"Montserrat,sans-serif",fontSize:13.5,letterSpacing:".04em",lineHeight:1.7,color:C.earth,margin:"12px 0 30px"}}>{L("Accede para ver tus trabajos.","Sign in to see your jobs.")}</p>
               <div style={{display:"flex",flexDirection:"column",gap:18}}>
-                <LoginField label={L("Correo electrónico","Email")} type="email" value={email} onChange={function(v){setEmail(v);setErr("");}} ph={L("tu@correo.com","you@email.com")} err={!!err} onEnter={loginUser} autoFocus/>
-                <LoginField label={L("Contraseña","Password")} type="password" value={pass} onChange={function(v){setPass(v);setErr("");}} ph={L("tu contraseña","your password")} err={!!err} onEnter={loginUser}/>
+                <LoginField label={L("Correo electrónico","Email")} type="email" value={email} onChange={function(v){setEmail(v);setErr("");}} ph={L("tu@correo.com","you@email.com")} err={!!err} onEnter={loginUser} autoFocus campoRef={rEmail}/>
+                <LoginField label={L("Contraseña","Password")} type="password" value={pass} onChange={function(v){setPass(v);setErr("");}} ph={L("tu contraseña","your password")} err={!!err} onEnter={loginUser} campoRef={rPass}/>
                 {err&&<div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.red,marginTop:-4}}>⚠ {err}</div>}
                 <div style={{fontFamily:"Montserrat,sans-serif",fontSize:11.5,letterSpacing:".04em",color:C.earth,marginTop:2}}>{L("¿Olvidaste tu contraseña?","Forgot your password?")}</div>
                 <LoginBtn onClick={loginUser} dis={busy||!email||!pass}>{busy?L("Entrando…","Signing in…"):L("Entrar","Enter")}</LoginBtn>
@@ -3311,8 +3324,31 @@ function AdminApp({schedVers,pagosReady,reservas,onSvReservas,ausencias,onSvAuse
 }
 
 /* ─── Dashboard container */
+/* La píldora viaja (ds/movimiento.md, regla 5): el marcador de la opción activa se desliza de una a otra.
+   La barra lleva bar (position: relative) y su botón activo data-on="1"; la píldora (pil) la mueve SAMov.pildora.
+   La primera vez se pone sin animar (no viaja desde la esquina). Sin SAMov (la red), cada botón pinta su marcador
+   como antes: mov dice cuál de los dos va. */
+function usePildora(clave){
+  var bar=useRef(null), pil=useRef(null), puesta=useRef(false);
+  var mov=typeof window!=="undefined"&&!!window.SAMov;
+  function poner(quieto){
+    var b=bar.current, p=pil.current; if(!b||!p||!window.SAMov) return;
+    var a=b.querySelector('[data-on="1"]'); if(!a||!a.offsetWidth) return;   // oculta (display:none): espera a verse
+    if(quieto||!puesta.current){ p.style.transition="none"; SAMov.pildora(b,a); void p.offsetWidth; p.style.transition=""; puesta.current=true; }
+    else SAMov.pildora(b,a);
+  }
+  React.useLayoutEffect(function(){ poner(false); },[clave,mov]);
+  useEffect(function(){
+    var b=bar.current; if(!b||typeof ResizeObserver==="undefined") return;
+    var ro=new ResizeObserver(function(){ poner(true); }); ro.observe(b);
+    return function(){ ro.disconnect(); };
+  },[mov]);
+  return {bar:bar, pil:pil, mov:mov};
+}
+var PILDORA_BASE={position:"absolute",left:0,top:0,zIndex:0,pointerEvents:"none"};
 function DashView({props,reservas,nomAjustes,onSvNomAjustes,canNom,meEmails,onSvV,reviews,rvCasos,rvIA,reps,vendors,alerts,adelantos,pagos,onSvPagos,company,onMarkPaidBatch,onSelect,onMarkPaid,onRefresh,schedules,onSvSchedules,onUpsert,onDelete}) {
   const [sub,setSub] = useState("ops");
+  var pd=usePildora(sub);
   /* El botón principal de la barra móvil siempre regresa al Dashboard Operativo,
      aunque se haya quedado abierto otro subtab. */
   useEffect(function(){
@@ -3324,9 +3360,10 @@ function DashView({props,reservas,nomAjustes,onSvNomAjustes,canNom,meEmails,onSv
     <div>
       {/* La alerta de pagos pendientes se movió al centro de notificaciones (item "pagos-pend"). */}
       {/* Sub-navegación estilo TabNav de mi-spacioam: subrayado peach, mayúsculas con tracking */}
-      <div style={{background:C.surface||"#fff",borderBottom:"1px solid "+C.line,padding:"0 22px",display:"flex",gap:4,overflowX:"auto"}}>
+      <div ref={pd.bar} style={{position:"relative",background:C.surface||"#fff",borderBottom:"1px solid "+C.line,padding:"0 22px",display:"flex",gap:4,overflowX:"auto"}}>
+        {pd.mov&&<i ref={pd.pil} className="sa-pildora" aria-hidden="true" style={Object.assign({},PILDORA_BASE,{background:"transparent",borderRadius:0,boxSizing:"border-box",borderBottom:"2px solid "+C.peach})}/>}
         {[["ops","Dashboard Operativo"],["exec","Dashboard Ejecutivo"],["pagos","Historial de pagos"]].concat(canNom?[["planilla","Planilla"]]:[]).map(function(it){ var k=it[0],l=it[1]; var on=sub===k; return (
-          <button key={k} onClick={function(){setSub(k);}} onMouseEnter={function(e){if(!on)e.currentTarget.style.color=C.black;}} onMouseLeave={function(e){if(!on)e.currentTarget.style.color=C.taupe;}} style={{padding:"18px 18px",border:"none",borderBottom:"2px solid "+(on?C.peach:"transparent"),background:"none",fontSize:12.5,fontWeight:500,letterSpacing:".14em",textTransform:"uppercase",whiteSpace:"nowrap",cursor:"pointer",color:on?C.black:C.taupe,transition:"color .18s var(--sa-ease,ease), border-color .18s var(--sa-ease,ease)"}}>{l}</button>
+          <button key={k} data-on={on?"1":undefined} onClick={function(){setSub(k);}} onMouseEnter={function(e){if(!on)e.currentTarget.style.color=C.black;}} onMouseLeave={function(e){if(!on)e.currentTarget.style.color=C.taupe;}} style={{position:"relative",zIndex:1,padding:"18px 18px",border:"none",borderBottom:"2px solid "+(on&&!pd.mov?C.peach:"transparent"),background:"none",fontSize:12.5,fontWeight:500,letterSpacing:".14em",textTransform:"uppercase",whiteSpace:"nowrap",cursor:"pointer",color:on?C.black:C.taupe,transition:"color .18s var(--sa-ease,ease), border-color .18s var(--sa-ease,ease)"}}>{l}</button>
         ); })}
       </div>
       <div style={{display:sub==="ops" ?"block":"none"}}><OpsDash  reps={reps} props={props} vendors={vendors} reviews={reviews} rvCasos={rvCasos} rvIA={rvIA} adelantos={adelantos} onMarkPaidBatch={onMarkPaidBatch} onSelect={onSelect} onMarkPaid={onMarkPaid} onRefresh={onRefresh} schedules={schedules||[]} onSvSchedules={onSvSchedules} onUpsert={onUpsert} onDelete={onDelete}/></div>
@@ -6507,11 +6544,11 @@ function regLink(tipo){
 var REG_LBL={fontSize:9.5,fontWeight:700,color:C.earth,letterSpacing:".14em",textTransform:"uppercase",display:"block",marginBottom:6,lineHeight:1.5};
 /* 16px de base: menos que eso hace que iOS haga zoom al enfocar el campo. */
 var REG_IN={width:"100%",boxSizing:"border-box",border:"1.5px solid "+C.gray,borderRadius:10,padding:"13px",fontSize:16,fontFamily:"Montserrat,sans-serif",letterSpacing:"normal",outline:"none",background:"#fff",color:C.black,minHeight:48};
-function RegField({label,value,onChange,ph,type,opt}){
+function RegField({label,value,onChange,ph,type,opt,campo}){
   return (
     <div>
       <span style={REG_LBL}>{label}{opt?<span style={{color:C.taupe,fontWeight:600,letterSpacing:0,textTransform:"none"}}> · opcional</span>:""}</span>
-      <input value={value} type={type||"text"} onChange={onChange} placeholder={ph||""} style={REG_IN}/>
+      <input value={value} type={type||"text"} onChange={onChange} placeholder={ph||""} style={REG_IN} data-campo={campo}/>
     </div>
   );
 }
@@ -6534,13 +6571,18 @@ function RegistroPublico({tipo, company}) {
   var actual = pasos[Math.min(paso,total-1)];
   var formPasos = pasos.filter(function(p){ return p!=="pitch"; });
 
-  function faltaEnPaso(p){
-    if(p==="quien")    return !f.primerNombre.trim() || !f.primerApellido.trim() || (cfg.empresa && !f.empresa.trim());
-    if(p==="contacto") return !f.email.trim() || !f.phone.trim() || !mailOk;
-    return false;
+  /* Los obligatorios que faltan en un paso (por su clave, la misma de data-campo). */
+  function faltan(p){
+    var o=[];
+    if(p==="quien"){ if(!f.primerNombre.trim()) o.push("primerNombre"); if(!f.primerApellido.trim()) o.push("primerApellido"); if(cfg.empresa && !f.empresa.trim()) o.push("empresa"); }
+    if(p==="contacto"){ if(!mailOk) o.push("email"); if(!f.phone.trim()) o.push("phone"); }
+    return o;
   }
+  function faltaEnPaso(p){ return faltan(p).length>0; }
   function avanzar(){
     if(faltaEnPaso(actual)){
+      /* El no se ve antes de leerlo (ds/movimiento.md, regla 4): cada campo que falta se sacude y queda en rojo */
+      if(window.SAMov) faltan(actual).forEach(function(k){ SAMov.sacudir(document.querySelector('[data-campo="'+k+'"]')); });
       setErr(actual==="contacto" && f.email.trim() && !mailOk
         ? "Revisa el correo — no parece válido."
         : "Completa los campos obligatorios para seguir.");
@@ -6647,14 +6689,14 @@ function RegistroPublico({tipo, company}) {
             <div style={{fontSize:13,color:C.earth,lineHeight:1.7,marginTop:8,marginBottom:22,textWrap:"pretty"}}>Como aparece en tu DPI — así salen tus comprobantes de pago.</div>
             <div style={{display:"flex",flexDirection:"column",gap:16}}>
               <div style={G}>
-                <RegField label="Primer nombre"    value={f.primerNombre}    onChange={chg("primerNombre")}/>
+                <RegField label="Primer nombre"    value={f.primerNombre}    onChange={chg("primerNombre")} campo="primerNombre"/>
                 <RegField label="Segundo nombre"   value={f.segundoNombre}   onChange={chg("segundoNombre")} opt/>
-                <RegField label="Primer apellido"  value={f.primerApellido}  onChange={chg("primerApellido")}/>
+                <RegField label="Primer apellido"  value={f.primerApellido}  onChange={chg("primerApellido")} campo="primerApellido"/>
                 <RegField label="Segundo apellido" value={f.segundoApellido} onChange={chg("segundoApellido")} opt/>
               </div>
               {cfg.empresa&&(
                 <div style={G}>
-                  <RegField label="Empresa o nombre comercial" value={f.empresa} onChange={chg("empresa")}/>
+                  <RegField label="Empresa o nombre comercial" value={f.empresa} onChange={chg("empresa")} campo="empresa"/>
                   <RegField label="Servicios que ofreces" value={f.servicios} onChange={chg("servicios")} ph="Ej. plomería, cerrajería" opt/>
                 </div>
               )}
@@ -6668,8 +6710,8 @@ function RegistroPublico({tipo, company}) {
             <div style={{fontSize:13,color:C.earth,lineHeight:1.7,marginTop:8,marginBottom:22,textWrap:"pretty"}}>Al correo te llega tu acceso al sistema y cada aviso de pago.</div>
             <div style={{display:"flex",flexDirection:"column",gap:16}}>
               <div style={G}>
-                <RegField label="Correo"   value={f.email} onChange={chg("email")} type="email" ph="tu@correo.com"/>
-                <RegField label="Teléfono" value={f.phone} onChange={chg("phone")} type="tel"   ph="5555 5555"/>
+                <RegField label="Correo"   value={f.email} onChange={chg("email")} type="email" ph="tu@correo.com" campo="email"/>
+                <RegField label="Teléfono" value={f.phone} onChange={chg("phone")} type="tel"   ph="5555 5555" campo="phone"/>
               </div>
               <div style={G}>
                 <RegField label="DPI" value={f.dpi} onChange={chg("dpi")} ph="0000 00000 0000" opt/>
@@ -9898,6 +9940,9 @@ function DateRangePicker({from,to,onChange,activeStyle,baseStyle}){
 /* ─── Botón de comentario en la barra superior (reemplaza la burbuja flotante invasiva) */
 function HeaderFeedback({vendor, onSaveFeedback, isMobile}) {
   const [open,setOpen]=useState(false);
+  /* Sale de donde tocaste (ds/movimiento.md, regla 3): la hoja crece desde el botón «Comentario», no del centro. */
+  const btnRef=useRef(null), hojaRef=useRef(null);
+  React.useLayoutEffect(function(){ if(open&&window.SAMov) SAMov.desde(hojaRef.current, btnRef.current); },[open]);
   const [sent,setSent]=useState(false);
   const [text,setText]=useState("");
   const [type,setType]=useState("mejora");
@@ -9913,14 +9958,14 @@ function HeaderFeedback({vendor, onSaveFeedback, isMobile}) {
     : {position:"relative"};
   return (
     <div style={wrap}>
-      <button onClick={function(){setOpen(function(o){return !o;});setSent(false);}} aria-label="Enviar un comentario" style={{display:"flex",alignItems:"center",gap:7,padding:"7px 13px",borderRadius:"var(--sa-pill)",background:open?C.black:C.surfaceWarm,border:"1px solid "+(open?C.black:C.line),color:open?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",letterSpacing:".02em"}}>
+      <button ref={btnRef} onClick={function(){setOpen(function(o){return !o;});setSent(false);}} aria-label="Enviar un comentario" style={{display:"flex",alignItems:"center",gap:7,padding:"7px 13px",borderRadius:"var(--sa-pill)",background:open?C.black:C.surfaceWarm,border:"1px solid "+(open?C.black:C.line),color:open?"#fff":C.earth,fontSize:11.5,fontWeight:600,cursor:"pointer",whiteSpace:"nowrap",letterSpacing:".02em"}}>
         <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
         Comentario
       </button>
       {open&&(
         <>
           <div onClick={function(){setOpen(false);}} style={{position:"fixed",inset:0,zIndex:60}}></div>
-          <div style={{position:"fixed",top:isMobile?60:70,left:"50%",transform:"translateX(-50%)",zIndex:61,width:"min(340px,calc(100vw - 32px))",background:"#fff",borderRadius:16,padding:"16px",boxShadow:"var(--sa-shadow-md)",border:"1px solid "+C.line,fontFamily:"Montserrat,sans-serif"}}>
+          <div ref={hojaRef} style={{position:"fixed",top:isMobile?60:70,left:0,right:0,margin:"0 auto",zIndex:61,width:"min(340px,calc(100vw - 32px))",background:"#fff",borderRadius:16,padding:"16px",boxShadow:"var(--sa-shadow-md)",border:"1px solid "+C.line,fontFamily:"Montserrat,sans-serif"}}>
             {sent
               ? <div style={{padding:"14px 6px",textAlign:"center",fontSize:13,fontWeight:700,color:C.green}}>✓ ¡Gracias! Tu comentario fue enviado.</div>
               : <>
@@ -10600,10 +10645,19 @@ var NOTI_TIPOS=[["accion","Necesita tu acción","info"],["alerta","Alertas impor
 function NotiRow({n, onOpen, onDismiss, onSnooze}){
   var W="rgba(255,255,255,";
   var cuando=n.cuando!=null?n.cuando:notiHaceTxt(n.ts);
-  var setRef=React.useCallback(function(el){ if(el){ requestAnimationFrame(function(){ try{ el.scrollLeft=88; }catch(_){} }); } },[]);
+  var fila=React.useRef(null);
+  var setRef=React.useCallback(function(el){ fila.current=el; if(el){ requestAnimationFrame(function(){ try{ el.scrollLeft=88; }catch(_){} }); } },[]);
+  /* Nada salta (ds/movimiento.md, regla 6): al eliminar o posponer, la fila se cierra suave y las de abajo suben;
+     después se quita de la lista. Es local (no espera al servidor). El -8px de arriba se come el espacio (gap) de la lista. */
+  function irse(fn){
+    var el=fila.current; if(!fn) return;
+    if(!window.SAMov||!el){ fn(n); return; }
+    SAMov.quitar(el,function(){ fn(n); });
+    if(el.classList.contains("sa-se-va")) el.style.marginTop="-8px";
+  }
   return (
     <div ref={setRef} data-noti-card className="noti-swipe" style={{display:"flex",overflowX:"auto",scrollSnapType:"x mandatory",scrollbarWidth:"none",msOverflowStyle:"none",borderRadius:22,gap:8,willChange:"transform,opacity"}}>
-      <button onClick={function(){ onSnooze&&onSnooze(n); }} style={{flex:"0 0 80px",scrollSnapAlign:"start",border:"none",cursor:"pointer",borderRadius:22,background:"rgba(72,72,74,.55)",color:"#fff",fontSize:11,fontWeight:700,letterSpacing:".06em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif"}}>Posponer</button>
+      <button onClick={function(){ irse(onSnooze); }} style={{flex:"0 0 80px",scrollSnapAlign:"start",border:"none",cursor:"pointer",borderRadius:22,background:"rgba(72,72,74,.55)",color:"#fff",fontSize:11,fontWeight:700,letterSpacing:".06em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif"}}>Posponer</button>
       <div onClick={onOpen} style={{flex:"0 0 100%",scrollSnapAlign:"center",boxSizing:"border-box",display:"flex",alignItems:"flex-start",gap:12,borderRadius:22,padding:"13px 17px",cursor:"pointer",background:"rgba(72,72,74,.42)",backdropFilter:"blur(40px) saturate(180%) brightness(1.08)",WebkitBackdropFilter:"blur(40px) saturate(180%) brightness(1.08)",border:"1px solid "+W+".14)",boxShadow:"0 8px 24px rgba(0,0,0,.18),inset 0 1px 0 "+W+".42),inset 0 0 0 1px "+W+".06)"}}>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:13.5,color:W+".98)",lineHeight:1.4,textWrap:"pretty"}}>{n.texto}</div>
@@ -10611,7 +10665,7 @@ function NotiRow({n, onOpen, onDismiss, onSnooze}){
         </div>
         <div style={{flexShrink:0,minWidth:34,textAlign:"right",fontSize:10.5,color:W+".6)",fontVariantNumeric:"tabular-nums"}}>{cuando}</div>
       </div>
-      <button onClick={function(){ onDismiss&&onDismiss(n); }} style={{flex:"0 0 80px",scrollSnapAlign:"end",border:"none",cursor:"pointer",borderRadius:22,background:"rgba(192,57,43,.9)",color:"#fff",fontSize:11,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif"}}>Eliminar</button>
+      <button onClick={function(){ irse(onDismiss); }} style={{flex:"0 0 80px",scrollSnapAlign:"end",border:"none",cursor:"pointer",borderRadius:22,background:"rgba(192,57,43,.9)",color:"#fff",fontSize:11,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",fontFamily:"Montserrat,sans-serif"}}>Eliminar</button>
     </div>
   );
 }
@@ -10821,6 +10875,19 @@ function NotiToast({item, onOpen, onClose}){
    Portado del header de mi-spacioam. Reúne "Mi cuenta", "Configuración" (solo
    admin) y "Cerrar sesión"; el círculo es su único lugar. Sin foto → iniciales.
    El símbolo de Wi-Fi queda fuera, como su propio botón del header. */
+/* Control Segmented (dos píldoras) para las preferencias del menú. Vive fuera de UserMenu para que no se vuelva
+   a montar en cada repintado: así la píldora puede viajar de una opción a otra (regla 5). */
+function PrefSeg(props){
+  var pd=usePildora(props.value);
+  return (
+    <span ref={pd.bar} style={{position:"relative",display:"inline-flex",padding:3,background:C.surfaceWarm,borderRadius:"var(--sa-pill)",gap:2}}>
+      {pd.mov&&<i ref={pd.pil} className="sa-pildora" aria-hidden="true" style={Object.assign({},PILDORA_BASE,{background:C.black,borderRadius:"var(--sa-pill)"})}/>}
+      {props.options.map(function(o){ var on=o[0]===props.value; return (
+        <button key={o[0]} data-on={on?"1":undefined} onClick={function(){ props.onChange(o[0]); }} style={{position:"relative",zIndex:1,border:"none",cursor:"pointer",padding:"6px 13px",borderRadius:"var(--sa-pill)",fontFamily:"Montserrat,sans-serif",fontSize:10.5,fontWeight:600,letterSpacing:".12em",textTransform:"uppercase",background:on&&!pd.mov?C.black:"transparent",color:on?"#fff":C.taupe,transition:"all .18s"}}>{o[1]}</button>
+      ); })}
+    </span>
+  );
+}
 function UserMenu({userName, userEmail, userAvatar, isAdmin, canAccount, onAccount, onSetup, onLogout, compact}){
   const [open,setOpen]=useState(false);
   const ref=useRef(null);
@@ -10833,16 +10900,6 @@ function UserMenu({userName, userEmail, userAvatar, isAdmin, canAccount, onAccou
   var item={display:"flex",alignItems:"center",gap:11,width:"100%",border:"none",background:"transparent",cursor:"pointer",textAlign:"left",padding:"13px 15px",fontFamily:"Montserrat,sans-serif",fontSize:12.5,letterSpacing:".04em",color:C.black};
   var sz=compact?38:38;
   var initials=String(userName||"").trim().split(/\s+/).map(function(w){return w[0]||"";}).slice(0,2).join("").toUpperCase();
-  /* Control Segmented (dos píldoras) para las preferencias del menú. */
-  function PrefSeg(props){
-    return (
-      <span style={{display:"inline-flex",padding:3,background:C.surfaceWarm,borderRadius:"var(--sa-pill)",gap:2}}>
-        {props.options.map(function(o){ var on=o[0]===props.value; return (
-          <button key={o[0]} onClick={function(){ props.onChange(o[0]); }} style={{border:"none",cursor:"pointer",padding:"6px 13px",borderRadius:"var(--sa-pill)",fontFamily:"Montserrat,sans-serif",fontSize:10.5,fontWeight:600,letterSpacing:".12em",textTransform:"uppercase",background:on?C.black:"transparent",color:on?"#fff":C.taupe,transition:"all .18s"}}>{o[1]}</button>
-        ); })}
-      </span>
-    );
-  }
   function PrefRow(props){
     return (
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
@@ -10857,7 +10914,7 @@ function UserMenu({userName, userEmail, userAvatar, isAdmin, canAccount, onAccou
         {userAvatar?<img src={userAvatar} alt="" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>:(initials||<Icon name="user" size={19} stroke={C.earth}/>)}
       </button>
       {open&&(
-        <div style={{position:"absolute",top:"calc(100% + 8px)",right:0,zIndex:9500,minWidth:248,background:"#fff",border:"1px solid "+C.line,borderRadius:16,boxShadow:"var(--sa-shadow-md)",overflow:"hidden",animation:"sa-fade .18s var(--sa-ease,ease)"}}>
+        <div className="sa-desde" style={{position:"absolute",top:"calc(100% + 8px)",right:0,zIndex:9500,minWidth:248,background:"#fff",border:"1px solid "+C.line,borderRadius:16,boxShadow:"var(--sa-shadow-md)",overflow:"hidden","--origen":"calc(100% - 19px) -27px"}}>{/* sale de donde tocaste (ds/movimiento.md, regla 3): crece desde la foto */}
           <div style={{padding:"13px 15px",borderBottom:"1px solid "+C.line}}>
             <div style={{fontFamily:"'Valky','Cormorant Garamond',serif",fontSize:18,color:C.black,lineHeight:1.15}}>{userName||"Cuenta"}</div>
             {userEmail&&<div style={{fontFamily:"Montserrat,sans-serif",fontSize:11,letterSpacing:".05em",color:C.taupe,marginTop:3,wordBreak:"break-all"}}>{userEmail}</div>}
