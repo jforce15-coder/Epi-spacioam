@@ -24,7 +24,7 @@ function route(e) {
     var p = e.postData ? JSON.parse(e.postData.contents) : e.parameter;
     var __diag = accesosDiag_(p); if (__diag) return __diag;   // fase 1b: resumen de accesos (robot)
     var __ses = sesionDe_(p); registrarAcceso_(p.action, __ses ? true : esRobot_(p) ? 'r' : false);
-    var __bloq = (typeof p.action === 'string' && p.action.indexOf('.') > 0) ? null : exigirSesion_(p.action, !!__ses, p, ['ping', 'nuevaClaveTecnico', '']); if (__bloq) return __bloq;   // fase 1c: públicas = webhooks de Hospitable, ping y cambio de clave del técnico
+    var __bloq = (typeof p.action === 'string' && p.action.indexOf('.') > 0) ? null : exigirSesion_(p.action, !!__ses, p, ['ping', 'nuevaClaveTecnico', 'loginEpi', 'loginAdminEpi', 'cambiarClaveEpi', 'cambiarPinEpi', '']); if (__bloq) return __bloq;   // fase 1c: públicas = webhooks de Hospitable, ping, entrar y cambio de clave (el servidor comprueba la contraseña)
     var r = {};
     /* Webhooks de Hospitable: su payload trae action = "review.created",
        "reservation.changed", etc. (con punto). Se atiende ANTES del router
@@ -58,6 +58,10 @@ function route(e) {
     else if (p.action === "logEvento")      r = bitLog_(p.tipo, p.detalle, p.usuario, p.extra);
     else if (p.action === "ai")             r = aiSummary(p);
     else if (p.action === "nuevaClaveTecnico") r = nuevaClaveTecnico_(p.email, p.actual, p.nueva);
+    else if (p.action === "loginEpi")       r = loginEpi_(p.email, p.clave);
+    else if (p.action === "loginAdminEpi")  r = loginAdminEpi_(p.clave);
+    else if (p.action === "cambiarClaveEpi") r = cambiarClaveEpi_(p.email, p.actual, p.nueva);
+    else if (p.action === "cambiarPinEpi")  r = cambiarPinEpi_(p.actual, p.nueva);
     else r = { error: "Unknown action: " + p.action };
     /* Cualquier acción que escriba invalida el caché de arranque. */
     if (/^(save|delete|sync|migrar|fix|recover|programar|revisar)/.test(String(p.action)))
@@ -682,13 +686,16 @@ function deleteReport__base(id) {
 function getConfig(opts) {
   opts = opts || {};
   var slim = !!opts.slim;
-  var ck = "cfg:" + (slim ? "S" : "F");
+  /* «cfg2»: el caché de antes guardaba la lista con contraseñas; con otra llave nunca se vuelve a servir. */
+  var ck = "cfg2:" + (slim ? "S" : "F");
   var hit = cacheGet_(ck);
-  if (hit) return hit;
+  if (hit) return epiLimpiarCfg_(hit);
   var ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName("Config");
   if (!sheet) return {};
   var data = sheet.getDataRange().getValues();
+  /* Si en Config quedó alguna contraseña o el PIN, se mueven a las Propiedades antes de leer. */
+  if (epiHayClavesEnConfig_(data) && epiMoverClaves_()) data = sheet.getDataRange().getValues();
   var cfg  = {};
   data.forEach(function (row) {
     if (!row[0]) return;
@@ -716,6 +723,7 @@ function getConfig(opts) {
      celda de Config no aguantaba el histórico y el guardado fallaba en silencio:
      el técnico veía una ruta en su teléfono y el administrador otra distinta. */
   try { cfg.schedules = schedRead_(); } catch (e) { }
+  epiLimpiarCfg_(cfg);   // nunca sale una contraseña ni el PIN
   cachePut_(ck, cfg);
   return cfg;
 }
@@ -741,9 +749,23 @@ function saveConfig(key, value) {
   /* El historial de versiones tampoco cabe en una celda: hoja propia, una fila
      por versión. Ver svWrite_ para el cálculo. */
   if (key === "schedvers")  return svWrite_(value);
+  /* El PIN ya no se guarda en la hoja: se cambia con cambiarPinEpi (el servidor comprueba el actual). */
+  if (key === "adminpin") throw new Error("El PIN de administrador se cambia desde Configuración → Seguridad.");
   var ss    = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName("Config");
   if (!sheet) sheet = ss.insertSheet("Config");
+  var esLista = EPI_RX_VENDORS_.test(String(key));
+  if (esLista) {
+    /* Antes de escribir una lista sin contraseñas, se mueven las que aún estén en la hoja (si no, se perderían).
+       Luego, las que lleguen en la lista se guardan como hash y no se escriben en la hoja. */
+    if (epiHayClavesEnConfig_(sheet.getDataRange().getValues())) {
+      epiMoverClaves_();
+      if (epiHayClavesEnConfig_(sheet.getDataRange().getValues())) throw new Error("La hoja está ocupada; intenta guardar de nuevo en unos segundos.");
+    }
+    var arrIn = value;
+    if (typeof arrIn === "string") { try { arrIn = JSON.parse(arrIn); } catch (e) { arrIn = null; } }
+    if (Array.isArray(arrIn)) value = epiGuardarClavesDeLista_(arrIn);
+  }
   var val  = (typeof value === "object") ? JSON.stringify(value) : String(value);
   var data = sheet.getDataRange().getValues();
   for (var i = 0; i < data.length; i++) {
@@ -4819,14 +4841,17 @@ function registrarUsoIA_(funcion, modelo, usage, detalle, ref) {
    No aplica a administradores (su contraseña solo se cambia en el login) y rechaza contraseñas débiles. */
 var CONTROL_USUARIOS_ID_ = "1r5LYE-YZw2_1JCt6919jZlcBf7AkHk5Hf2eIsP_wX2U", CLAVE_VUELTAS_ = 200;
 function claveDebil_(x) { x = String(x || "").toLowerCase(); return /^(\d)\1*$/.test(x) || /^(0?123456789?0?|12345678|87654321|password|contrase(n|ñ)a|qwerty\w*|spacio\s*am\d*|spacioam\d*|epi\d*)$/.test(x); }
-function claveHash_(clave) {
-  var sal = Utilities.getUuid().replace(/-/g, "").slice(0, 16);
+function claveDerivar_(clave, sal, vueltas) {
   var k = Utilities.computeHmacSha256Signature(String(clave), String(sal), Utilities.Charset.UTF_8), acc = k.slice();
-  for (var i = 1; i < CLAVE_VUELTAS_; i++) {
+  for (var i = 1; i < vueltas; i++) {
     k = Utilities.computeHmacSha256Signature(k, Utilities.newBlob(String(sal)).getBytes());
     for (var j = 0; j < acc.length; j++) acc[j] ^= k[j];
   }
-  return "v2$" + sal + "$" + CLAVE_VUELTAS_ + "$" + acc.map(function (b) { return ("0" + (b & 0xFF).toString(16)).slice(-2); }).join("");
+  return acc.map(function (b) { return ("0" + (b & 0xFF).toString(16)).slice(-2); }).join("");
+}
+function claveHash_(clave) {
+  var sal = Utilities.getUuid().replace(/-/g, "").slice(0, 16);
+  return "v2$" + sal + "$" + CLAVE_VUELTAS_ + "$" + claveDerivar_(clave, sal, CLAVE_VUELTAS_);
 }
 function nuevaClaveTecnico_(email, actual, nueva) {
   email = String(email || "").trim().toLowerCase(); actual = String(actual || ""); nueva = String(nueva || "");
@@ -4834,9 +4859,7 @@ function nuevaClaveTecnico_(email, actual, nueva) {
   if (Number(cache.get(kf) || 0) >= 5) return { ok: false, error: "too_many" };
   if (nueva.length < 8 || claveDebil_(nueva) || nueva === actual) return { ok: false, error: "weak" };
   // 1) contraseña de Epi correcta (Config → vendors)
-  var cfgSh = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Config"), vendors = [];
-  (cfgSh ? cfgSh.getDataRange().getValues() : []).forEach(function (row) { if (row[0] === "vendors") { try { vendors = JSON.parse(row[1]); } catch (e) {} } });
-  var v = (vendors || []).filter(function (x) { return x && x.active && String(x.email || "").toLowerCase() === email && String(x.password || "") === actual; })[0];
+  var v = epiVendors_().filter(function (x) { return x && x.active && String(x.email || "").toLowerCase() === email && epiClaveVendorOk_(x, actual); })[0];
   if (!v) { cache.put(kf, String(Number(cache.get(kf) || 0) + 1), 900); return { ok: false, error: "bad_pass" }; }
   // 2) su fila en Control de usuarios (con acceso a Epi y sin rol de administrador)
   var sh = SpreadsheetApp.openById(CONTROL_USUARIOS_ID_).getSheetByName("Usuarios"), data = sh.getDataRange().getValues(), H = {};
@@ -4853,4 +4876,152 @@ function nuevaClaveTecnico_(email, actual, nueva) {
     return { ok: true };
   }
   return { ok: false, error: "no_user" };
+}
+
+/* ═══ CONTRASEÑAS DE EPI SOLO EN EL SERVIDOR (oct 2026) ══════════════════════════════════════
+   Antes la lista del equipo llegaba al navegador con la contraseña de cada persona (Config → vendors) y el PIN
+   de administrador (Config → adminpin), y el login comparaba en el teléfono. Ahora:
+   · Las contraseñas viven solo en las Propiedades del script, como hash (EPI_CLAVE_<id>; el PIN en EPI_ADMIN_PIN).
+     Config ya no las guarda: la primera lectura o guardado después de publicar las mueve solas (epiMoverClaves_).
+   · getConfig nunca devuelve «password» ni «adminpin».
+   · Entrar y cambiar contraseña son acciones del servidor: loginEpi, loginAdminEpi, cambiarClaveEpi, cambiarPinEpi.
+   · Guardar la lista sin contraseñas no las borra: se conserva la que hay. Si en la lista llega una (usuario nuevo
+     o el administrador le pone una), se guarda como hash y se quita de la lista antes de escribir la hoja.
+   ═════════════════════════════════════════════════════════════════════════════════════════════ */
+var EPI_RX_VENDORS_ = /^vendors(_\d+)?$/;
+/* PIN de siempre cuando nunca se guardó uno (el mismo que usaba la app). */
+var EPI_PIN_INICIAL_ = "spacio2024";
+function epiClaveKey_(v) { return "EPI_CLAVE_" + String((v && (v.id || v.email)) || "").replace(/[^A-Za-z0-9_@.\-]/g, "_").slice(0, 200); }
+function epiIguales_(a, b) { a = String(a); b = String(b); if (a.length !== b.length) return false; var r = 0; for (var i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i); return r === 0; }
+function epiHashOk_(hash, clave) {
+  var p = String(hash || "").split("$");
+  if (p.length !== 4 || p[0] !== "v2" || clave == null || String(clave) === "") return false;
+  return epiIguales_(claveDerivar_(String(clave), p[1], Number(p[2]) || CLAVE_VUELTAS_), p[3]);
+}
+/* ¿Es «clave» la contraseña de Epi de esta persona? Hash en Propiedades; si aún no se movió, la de la lista. */
+function epiClaveVendorOk_(v, clave) {
+  if (!v || clave == null || String(clave) === "") return false;
+  var h = PropertiesService.getScriptProperties().getProperty(epiClaveKey_(v));
+  if (h) return epiHashOk_(h, clave);
+  return v.password != null && String(v.password) !== "" && epiIguales_(v.password, clave);
+}
+/* La persona sin su contraseña (lo único que el navegador puede ver). */
+function epiSinClave_(v) {
+  if (!v || typeof v !== "object") return v;
+  var o = {}; for (var k in v) if (v.hasOwnProperty(k) && k !== "password") o[k] = v[k];
+  return o;
+}
+/* Quita contraseña y PIN de lo que getConfig va a devolver. */
+function epiLimpiarCfg_(cfg) {
+  if (!cfg || typeof cfg !== "object") return cfg;
+  Object.keys(cfg).forEach(function (k) { if (EPI_RX_VENDORS_.test(k) && Array.isArray(cfg[k])) cfg[k] = cfg[k].map(epiSinClave_); });
+  delete cfg.adminpin;
+  return cfg;
+}
+/* Lista completa del equipo (todas las partes vendors, vendors_2…, como la arma la app). */
+function epiVendors_() {
+  var sh = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Config"), m = {};
+  (sh ? sh.getDataRange().getValues() : []).forEach(function (row) { if (row[0]) m[String(row[0])] = row[1]; });
+  function arr(x) { try { var a = typeof x === "string" ? JSON.parse(x || "[]") : x; return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+  var lista = arr(m.vendors), n = parseInt(m.vendors_n, 10) || 1;
+  for (var i = 2; i <= n; i++) lista = lista.concat(arr(m["vendors_" + i]));
+  return lista.filter(function (v) { return v && typeof v === "object"; });
+}
+/* Mueve las contraseñas y el PIN que aún estén escritos en Config a las Propiedades (como hash).
+   Devuelve cuántas movió. Es seguro repetirla: si ya no hay nada que mover, no escribe. */
+function epiMoverClaves_() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) return 0;
+  try {
+    var sh = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Config"); if (!sh) return 0;
+    var data = sh.getDataRange().getValues(), props = PropertiesService.getScriptProperties(), n = 0;
+    for (var i = 0; i < data.length; i++) {
+      var k = String(data[i][0] || "");
+      if (k === "adminpin") {
+        var pin = String(data[i][1] == null ? "" : data[i][1]);
+        if (pin) { props.setProperty("EPI_ADMIN_PIN", claveHash_(pin)); sh.getRange(i + 1, 2).setValue(""); n++; }
+        continue;
+      }
+      if (!EPI_RX_VENDORS_.test(k) || String(data[i][1] || "").indexOf('"password"') < 0) continue;
+      var arr; try { arr = JSON.parse(String(data[i][1])); } catch (e) { continue; }
+      if (!Array.isArray(arr)) continue;
+      arr.forEach(function (v) {
+        if (!v || typeof v !== "object" || !("password" in v)) return;
+        if (String(v.password || "")) props.setProperty(epiClaveKey_(v), claveHash_(v.password));
+        delete v.password; n++;
+      });
+      sh.getRange(i + 1, 2).setValue(JSON.stringify(arr));
+    }
+    if (n) cacheBump_();
+    return n;
+  } finally { lock.releaseLock(); }
+}
+/* ¿Queda alguna contraseña o PIN escrito en las filas de Config? */
+function epiHayClavesEnConfig_(data) {
+  return (data || []).some(function (row) {
+    var k = String(row[0] || "");
+    return (k === "adminpin" && String(row[1] == null ? "" : row[1]) !== "") || (EPI_RX_VENDORS_.test(k) && String(row[1] || "").indexOf('"password"') >= 0);
+  });
+}
+/* Guardado de una parte de la lista: las contraseñas que llegan se guardan como hash; las que no llegan se conservan. */
+function epiGuardarClavesDeLista_(arr) {
+  if (!Array.isArray(arr)) return arr;
+  var props = PropertiesService.getScriptProperties();
+  return arr.map(function (v) {
+    if (!v || typeof v !== "object") return v;
+    if (v.password != null && String(v.password) !== "") props.setProperty(epiClaveKey_(v), claveHash_(v.password));
+    return epiSinClave_(v);
+  });
+}
+function epiFallos_(k) { return Number(CacheService.getScriptCache().get(k) || 0); }
+function epiFallo_(k) { var c = CacheService.getScriptCache(); c.put(k, String(epiFallos_(k) + 1), 900); }
+
+/* Entrar con correo (o la parte antes de la @) y contraseña de Epi. Devuelve quién es y su rol, nunca la contraseña. */
+function loginEpi_(usuario, clave) {
+  var input = String(usuario || "").trim().toLowerCase(), kf = "lep_" + input.slice(0, 200);
+  if (!input || clave == null || String(clave) === "") return { ok: false, error: "bad_pass" };
+  if (epiFallos_(kf) >= 8) return { ok: false, error: "too_many" };
+  var v = epiVendors_().filter(function (x) {
+    if (!x.active) return false;
+    var em = String(x.email || "").toLowerCase();
+    return (em === input || em.split("@")[0] === input) && epiClaveVendorOk_(x, clave);
+  })[0];
+  if (!v) { epiFallo_(kf); return { ok: false, error: "bad_pass" }; }
+  CacheService.getScriptCache().remove(kf);
+  return { ok: true, role: v.isAdmin ? "admin" : "vendor", vendor: epiSinClave_(v) };
+}
+function epiPinOk_(pin) {
+  var h = PropertiesService.getScriptProperties().getProperty("EPI_ADMIN_PIN");
+  if (h) return epiHashOk_(h, pin);
+  var sh = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName("Config"), guardado = "";
+  (sh ? sh.getDataRange().getValues() : []).forEach(function (row) { if (row[0] === "adminpin") guardado = String(row[1] == null ? "" : row[1]); });
+  return epiIguales_(guardado || EPI_PIN_INICIAL_, String(pin == null ? "" : pin));
+}
+function loginAdminEpi_(pin) {
+  var kf = "lea_pin";
+  if (epiFallos_(kf) >= 8) return { ok: false, error: "too_many" };
+  if (!epiPinOk_(pin)) { epiFallo_(kf); return { ok: false, error: "bad_pass" }; }
+  CacheService.getScriptCache().remove(kf);
+  return { ok: true, role: "admin" };
+}
+/* Cambiar la propia contraseña de Epi: el servidor comprueba la actual. */
+function cambiarClaveEpi_(email, actual, nueva) {
+  email = String(email || "").trim().toLowerCase(); nueva = String(nueva || "");
+  var kf = "lep_" + email.slice(0, 200);
+  if (epiFallos_(kf) >= 8) return { ok: false, error: "too_many" };
+  if (nueva.length < 6) return { ok: false, error: "weak" };
+  var v = epiVendors_().filter(function (x) { return x.active && String(x.email || "").toLowerCase() === email && epiClaveVendorOk_(x, actual); })[0];
+  if (!v) { epiFallo_(kf); return { ok: false, error: "bad_pass" }; }
+  epiMoverClaves_();   // si la lista aún tenía contraseñas escritas, que no quede la vieja en la hoja
+  PropertiesService.getScriptProperties().setProperty(epiClaveKey_(v), claveHash_(nueva));
+  return { ok: true };
+}
+function cambiarPinEpi_(actual, nueva) {
+  var kf = "lea_pin"; nueva = String(nueva || "");
+  if (epiFallos_(kf) >= 8) return { ok: false, error: "too_many" };
+  if (nueva.length < 4) return { ok: false, error: "weak" };
+  if (!epiPinOk_(actual)) { epiFallo_(kf); return { ok: false, error: "bad_pass" }; }
+  epiMoverClaves_();
+  PropertiesService.getScriptProperties().setProperty("EPI_ADMIN_PIN", claveHash_(nueva));
+  return { ok: true };
 }
