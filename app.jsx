@@ -1872,6 +1872,22 @@ async function deleteReportById(id) {
   await apiCall("deleteReport",{id:id});
 }
 
+/* Copia de la lista del equipo sin contraseñas (para guardar en este dispositivo). */
+function v_sinClave(arr){
+  return Array.isArray(arr) ? arr.map(function(v){ if(!v||typeof v!=="object"||!("password" in v)) return v; var o=Object.assign({},v); delete o.password; return o; }) : arr;
+}
+/* Limpieza única: dispositivos que guardaron la lista con contraseñas o el PIN de administrador. */
+(function(){
+  if(IS_CLAUDE_SANDBOX) return;
+  try{
+    localStorage.removeItem("sam_c:pin");
+    var cv=localStorage.getItem("sam_c:v");
+    if(cv&&cv.indexOf('"password"')>=0) localStorage.setItem("sam_c:v",JSON.stringify(v_sinClave(JSON.parse(cv))));
+    var ss=localStorage.getItem("sam_sess");
+    if(ss&&ss.indexOf('"password"')>=0){ var o=JSON.parse(ss); if(o&&o.vendor) delete o.vendor.password; localStorage.setItem("sam_sess",JSON.stringify(o)); }
+  }catch(e){}
+})();
+
 async function saveConfigItem(key, value) {
   if(IS_CLAUDE_SANDBOX){
     var ls_km={vendors:"c:v",props:"c:p",pin:"c:pin",company:"c:co",extcats:"c:ec",notifprefs:"c:notif",nomAjustes:"c:nomaj",regSol:"c:regsol",reservas:"c:resv",ausencias:"c:aus",swaps:"c:swaps",formcfg:"c:formcfg"};
@@ -1887,10 +1903,10 @@ async function saveConfigItem(key, value) {
       for(var si=0; si<shards.length; si++){ await apiCall("saveConfig",{key:si===0?"vendors":"vendors_"+(si+1),value:shards[si]}); }
       for(var sk=shards.length; sk<shards.length+4; sk++){ await apiCall("saveConfig",{key:"vendors_"+(sk+1),value:[]}); }
       await apiCall("saveConfig",{key:"vendors_n",value:shards.length});
-      try{ ls_set("c:v",value); }catch(_){}
+      try{ ls_set("c:v",v_sinClave(value)); }catch(_){}
     }catch(e){
       console.error("saveConfig vendors failed:", e&&e.message);
-      try{ ls_set("c:v",value); }catch(_){}
+      try{ ls_set("c:v",v_sinClave(value)); }catch(_){}
     }
     return;
   }
@@ -2366,6 +2382,7 @@ function App() {
     finally { setSyncing(false); setSyncMsg(""); }
   }
   function login(s) {
+    if(s&&s.vendor&&s.vendor.password!=null){ s=Object.assign({},s,{vendor:Object.assign({},s.vendor)}); delete s.vendor.password; }
     try { localStorage.setItem("sam_sess",JSON.stringify(s)); } catch(e){}
     setSess(s);
   }
@@ -2618,29 +2635,34 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
     }
   }
   function global_SAAuth(){ return (typeof window!=="undefined" && window.SAAuth) ? window.SAAuth : null; }
-  /* Respaldo local (sin conexión al Control de usuarios): valida contra la hoja. */
+  /* Respaldo (sin conexión al Control de usuarios): la contraseña de Epi la comprueba el servidor (loginEpi).
+     El navegador ya no recibe contraseñas: solo sabe si entró, quién es y su rol. */
   function claveDebil(x){ x=String(x||"").toLowerCase(); return /^(\d)\1*$/.test(x) || /^(0?123456789?0?|12345678|87654321|password|contrase(n|ñ)a|qwerty\w*|spacio\s*am\d*|spacioam\d*|epi\d*)$/.test(x); }
-  function localOk(){
-    var input = email.toLowerCase().trim();
-    return (vendors||[]).some(function(x){ var em=String(x.email||"").toLowerCase(); return em===input && x.password===pass && x.active; });
+  function epiServidor(){
+    return apiCall("loginEpi",{email:email.trim(), clave:pass},{tries:2,timeout:30000})
+      .then(function(d){ return (d&&d.ok&&d.vendor)?d:null; })
+      .catch(function(){ return null; });
   }
-  function loginLocal(){
-    var input = email.toLowerCase().trim();
-    var v = (vendors||[]).find(function(x){
-      var em = String(x.email||"").toLowerCase();
-      var user = em.split("@")[0];
-      return (em===input||user===input) && x.password===pass && x.active;
+  function entrarEpi(d){
+    var v=Object.assign({},d.vendor); delete v.password;
+    onLogin({role:d.role==="admin"||v.isAdmin?"admin":"vendor",vendor:v});
+  }
+  /* Intenta entrar con la contraseña de Epi; si no, muestra el error. */
+  function loginLocal(msg){
+    return epiServidor().then(function(d){
+      setBusy(false);
+      if(d){ entrarEpi(d); return true; }
+      setErr(msg||L("Correo o contraseña incorrectos.","Wrong email or password."));
+      return false;
     });
-    if (v) { onLogin({role:v.isAdmin?"admin":"vendor",vendor:v}); return true; }
-    return false;
   }
 
   function loginUser() {
     if(busy) return;
     setErr("");
     var SA=global_SAAuth();
-    if(!SA){ if(!loginLocal()) setErr(L("Correo o contraseña incorrectos.","Wrong email or password.")); return; }
     setBusy(true);
+    if(!SA){ loginLocal(); return; }
     SA.login(email.trim(), pass).then(function(res){
       res=res||{};
       /* El backend pide definir la contraseña inicial. */
@@ -2653,20 +2675,21 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
       }
       /* Su cuenta unificada aún no tiene contraseña y la de Epi es correcta: se le pide crear una contraseña
          nueva y segura (las iniciales 1234 / spacioam no sirven). Puede dejarlo para después y entra igual. */
-      if((res.error==="needs_password"||res.error==="bad_pass"||res.error==="no_user") && localOk()){
-        setBusy(false); setDesdeLocal(true); setNp1(""); setNp2(""); setInitEmail(email.trim()); return;
-      }
-      /* Código temporal de reinicio (o cuenta sin contraseña): el login unificado pide crear una nueva. */
-      if(res.error==="needs_password"){
-        setBusy(false); setDesdeLocal(false); setNp1(""); setNp2(""); setInitEmail(email.trim()); return;
+      if(res.error==="needs_password"||res.error==="bad_pass"||res.error==="no_user"){
+        epiServidor().then(function(d){
+          setBusy(false);
+          if(d){ setDesdeLocal(true); setNp1(""); setNp2(""); setInitEmail(email.trim()); return; }
+          /* Código temporal de reinicio (o cuenta sin contraseña): el login unificado pide crear una nueva. */
+          if(res.error==="needs_password"){ setDesdeLocal(false); setNp1(""); setNp2(""); setInitEmail(email.trim()); return; }
+          setErr((res.error&&res.message)||L("Correo o contraseña incorrectos.","Wrong email or password."));
+        });
+        return;
       }
       if(res.error==="reset_expired"){ setBusy(false); setErr(L("El código temporal venció. Pide uno nuevo al administrador.","The temporary code expired. Ask the admin for a new one.")); return; }
-      /* Falló el servicio: intenta respaldo local antes de dar error. */
-      setBusy(false);
-      if(!loginLocal()) setErr((res.error&&res.message)||L("Correo o contraseña incorrectos.","Wrong email or password."));
+      /* Falló el servicio: intenta con la contraseña de Epi (la revisa el servidor) antes de dar error. */
+      loginLocal((res.error&&res.message)||L("Correo o contraseña incorrectos.","Wrong email or password."));
     }).catch(function(){
-      setBusy(false);
-      if(!loginLocal()) setErr(L("No se pudo conectar. Revisa tu internet e intenta de nuevo.","Couldn't connect. Check your internet and try again."));
+      loginLocal(L("No se pudo conectar. Revisa tu internet e intenta de nuevo.","Couldn't connect. Check your internet and try again."));
     });
   }
   /* Guarda la contraseña inicial en el Control de usuarios y entra. */
@@ -2692,9 +2715,15 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
       }).catch(function(){ setBusy(false); setInitEmail(""); setErr(L("Contraseña guardada. Intenta iniciar sesión.","Password saved. Try signing in.")); });
     }).catch(function(){ setBusy(false); setErr(L("No se pudo conectar.","Couldn't connect.")); });
   }
+  /* El PIN de administrador lo comprueba el servidor (loginAdminEpi); el navegador ya no lo conoce. */
   function loginAdmin() {
-    if(adminPin2===adminPin) onLogin({role:"admin"});
-    else setAdminErr("Contraseña incorrecta.");
+    if(busy) return;
+    setBusy(true);
+    apiCall("loginAdminEpi",{clave:adminPin2},{tries:2,timeout:30000}).then(function(d){
+      setBusy(false);
+      if(d&&d.ok) onLogin({role:"admin"});
+      else setAdminErr(d&&d.error==="too_many"?"Demasiados intentos. Espera 15 minutos.":"Contraseña incorrecta.");
+    }).catch(function(){ setBusy(false); setAdminErr("No se pudo conectar. Intenta de nuevo."); });
   }
 
   if (sso) return (
@@ -2744,7 +2773,7 @@ function Login({vendors, adminPin, onLogin, sheetsOk}) {
                 {err&&<div style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.red,marginTop:-4}}>⚠ {err}</div>}
                 <LoginBtn onClick={submitInitial} dis={busy||!np1||!np2}>{busy?L("Guardando…","Saving…"):L("Crear y entrar","Create and enter")}</LoginBtn>
                 {desdeLocal
-                  ? <button onClick={function(){setInitEmail("");setNp1("");setNp2("");setErr("");setDesdeLocal(false);loginLocal();}} style={{background:"none",border:"none",color:C.earth,fontSize:12,cursor:"pointer",letterSpacing:".04em"}}>{L("Ahora no, entrar igual","Not now, sign in anyway")}</button>
+                  ? <button onClick={function(){setInitEmail("");setNp1("");setNp2("");setErr("");setDesdeLocal(false);setBusy(true);loginLocal();}} style={{background:"none",border:"none",color:C.earth,fontSize:12,cursor:"pointer",letterSpacing:".04em"}}>{L("Ahora no, entrar igual","Not now, sign in anyway")}</button>
                   : <button onClick={function(){setInitEmail("");setNp1("");setNp2("");setErr("");}} style={{background:"none",border:"none",color:C.earth,fontSize:12,cursor:"pointer",letterSpacing:".04em"}}>← {L("Volver","Back")}</button>}
               </div>
             </>
@@ -8041,17 +8070,24 @@ function CompanyCfg({company,onSave}) {
   );
 }
 
+/* El PIN lo comprueba y lo guarda el servidor (cambiarPinEpi): el navegador ya no lo recibe. */
 function SecurityCfg({adminPin,onSave}) {
   const [cur,  setCur]  = useState("");
   const [np,   setNp]   = useState("");
   const [cp,   setCp]   = useState("");
   const [msg,  setMsg]  = useState(null);
+  const [busy, setBusy] = useState(false);
   function save() {
-    if(cur!==adminPin) { setMsg({ok:false,t:"PIN actual incorrecto."}); return; }
+    if(busy) return;
     if(np.length<4)    { setMsg({ok:false,t:"El nuevo PIN debe tener al menos 4 caracteres."}); return; }
     if(np!==cp)        { setMsg({ok:false,t:"Los PINs nuevos no coinciden."}); return; }
-    onSave(np); setCur(""); setNp(""); setCp("");
-    setMsg({ok:true,t:"✓ PIN actualizado correctamente."}); setTimeout(function(){setMsg(null);},3000);
+    setBusy(true);
+    apiCall("cambiarPinEpi",{actual:cur, nueva:np},{tries:1,timeout:30000}).then(function(d){
+      setBusy(false);
+      if(!d||!d.ok){ setMsg({ok:false,t:(d&&d.error)==="too_many"?"Demasiados intentos. Espera 15 minutos.":(d&&d.error)==="weak"?"El nuevo PIN debe tener al menos 4 caracteres.":"PIN actual incorrecto."}); return; }
+      setCur(""); setNp(""); setCp("");
+      setMsg({ok:true,t:"✓ PIN actualizado correctamente."}); setTimeout(function(){setMsg(null);},3000);
+    }).catch(function(){ setBusy(false); setMsg({ok:false,t:"No se pudo conectar. Intenta de nuevo."}); });
   }
   return (
     <Card title="Cambiar PIN de administrador">
@@ -9433,15 +9469,17 @@ function VendorAccount({vendor,allVendors,allReps,onSvV}) {
     setCtMsg({ok:true,t:"✓ Datos de contacto actualizados."}); setTimeout(function(){setCtMsg(null);},3000);
   }
 
+  /* La contraseña actual la comprueba el servidor (cambiarClaveEpi); la lista del equipo ya no la trae. */
   function savePass() {
-    if(cur!==vendor.password) { setPwMsg({ok:false,t:"Contraseña actual incorrecta."}); return; }
     if(np.length<6) { setPwMsg({ok:false,t:"Mínimo 6 caracteres."}); return; }
     if(np!==cp) { setPwMsg({ok:false,t:"Las contraseñas no coinciden."}); return; }
-    onSvV(allVendors.map(function(v){if(v.id===vendor.id){var u=Object.assign({},v);u.password=np;return u;}return v;}));
-    vendor.password=np;
-    saMirror("setPassword", cur, np);
-    setCur(""); setNp(""); setCp("");
-    setPwMsg({ok:true,t:"✓ Contraseña actualizada."}); setTimeout(function(){setPwMsg(null);},3000);
+    var actual=cur, nueva=np;
+    apiCall("cambiarClaveEpi",{email:vendor.email, actual:actual, nueva:nueva},{tries:1,timeout:30000}).then(function(d){
+      if(!d||!d.ok){ setPwMsg({ok:false,t:(d&&d.error)==="too_many"?"Demasiados intentos. Espera 15 minutos.":"Contraseña actual incorrecta."}); return; }
+      saMirror("setPassword", actual, nueva);
+      setCur(""); setNp(""); setCp("");
+      setPwMsg({ok:true,t:"✓ Contraseña actualizada."}); setTimeout(function(){setPwMsg(null);},3000);
+    }).catch(function(){ setPwMsg({ok:false,t:"No se pudo conectar. Intenta de nuevo."}); });
   }
 
   return (
