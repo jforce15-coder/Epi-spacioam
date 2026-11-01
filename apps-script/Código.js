@@ -22,7 +22,7 @@ function doPost(e) { return route(e); }
 function route(e) {
   try {
     var p = e.postData ? JSON.parse(e.postData.contents) : e.parameter;
-    var __diag = accesosDiag_(p); if (__diag) return __diag;   // fase 1b: resumen de accesos (robot)
+    var __diag = accesosDiag_(p) || cupoDiag_(p); if (__diag) return __diag;   // fase 1b: resumen de accesos (robot)
     var __ses = sesionDe_(p); registrarAcceso_(p.action, __ses ? true : esRobot_(p) ? 'r' : false);
     var __bloq = (typeof p.action === 'string' && p.action.indexOf('.') > 0) ? null : exigirSesion_(p.action, !!__ses, p, ['ping', 'nuevaClaveTecnico', 'loginEpi', 'loginAdminEpi', 'cambiarClaveEpi', 'cambiarPinEpi', '']); if (__bloq) return __bloq;   // fase 1c: públicas = webhooks de Hospitable, ping, entrar y cambio de clave (el servidor comprueba la contraseña)
     var r = {};
@@ -233,7 +233,7 @@ function testNotify() {
 function aiSummary(p) {
   var apiKey = PropertiesService.getScriptProperties().getProperty("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("Falta ANTHROPIC_API_KEY en Propiedades del script");
-  var resp = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+  var resp = uf_("https://api.anthropic.com/v1/messages", {
     method: "post",
     contentType: "application/json",
     headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
@@ -393,7 +393,7 @@ function fetchHospitableListings_() {
   if (!token) return { ok: false, error: "Falta HOSPITABLE_TOKEN en Propiedades del script." };
   var out = [], page = 1, guard = 0;
   while (guard++ < 25) {
-    var res = UrlFetchApp.fetch("https://public.api.hospitable.com/v2/properties?per_page=100&page=" + page, {
+    var res = uf_("https://public.api.hospitable.com/v2/properties?per_page=100&page=" + page, {
       method: "get",
       headers: { "Authorization": "Bearer " + token, "Accept": "application/json" },
       muteHttpExceptions: true
@@ -456,7 +456,7 @@ function cronSyncListings() {
 /* Raspa UNA página de portafolio → {cuartos, banos, fotos[]} */
 function scrapePortfolio_(url) {
   if (!url || url.indexOf("portfolio.spacioam.com") < 0) return null;
-  var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
+  var res = uf_(url, { muteHttpExceptions: true, followRedirects: true });
   if (res.getResponseCode() !== 200) return null;
   var html = res.getContentText();
 
@@ -480,7 +480,7 @@ function getOwnerListingLinks_() {
   if (!OWNER_SHEET_ID) return {};
   var url = "https://docs.google.com/spreadsheets/d/" + OWNER_SHEET_ID +
     "/gviz/tq?tqx=out:csv&sheet=" + encodeURIComponent("SETUP");
-  var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  var res = uf_(url, { muteHttpExceptions: true });
   if (res.getResponseCode() !== 200) return {};
   var rows = Utilities.parseCsv(res.getContentText());
   if (!rows.length) return {};
@@ -974,7 +974,7 @@ function syncHospitable(days) {
   var rawTasks = null, usedUrl = "", lastErr = "";
   for (var i = 0; i < urls.length; i++) {
     try {
-      var resp = UrlFetchApp.fetch(urls[i], { method: "GET", headers: headers, muteHttpExceptions: true });
+      var resp = uf_(urls[i], { method: "GET", headers: headers, muteHttpExceptions: true });
       if (resp.getResponseCode() === 200) {
         var body = JSON.parse(resp.getContentText());
         rawTasks = body.data || body.tasks || body.items || body;
@@ -987,7 +987,7 @@ function syncHospitable(days) {
   }
   if (!rawTasks) {
     try {
-      var rRes = UrlFetchApp.fetch(
+      var rRes = uf_(
         "https://api.hospitable.com/v1/reservations?start_date=" + startStr +
         "&end_date=" + endStr + "&limit=100&include=property,guest",
         { method: "GET", headers: headers, muteHttpExceptions: true }
@@ -1684,7 +1684,7 @@ function rvFetchAll_(token, props, dias) {
 }
 
 function rvGet_(token, url) {
-  var res = UrlFetchApp.fetch(url, {
+  var res = uf_(url, {
     method: "get",
     headers: { "Authorization": "Bearer " + token, "Accept": "application/json" },
     muteHttpExceptions: true
@@ -1722,7 +1722,7 @@ function rvProperties_(token) {
   try {
     var page = 1, guard = 0;
     while (guard++ < 25) {
-      var res = UrlFetchApp.fetch("https://public.api.hospitable.com/v2/properties?per_page=100&page=" + page, {
+      var res = uf_("https://public.api.hospitable.com/v2/properties?per_page=100&page=" + page, {
         method: "get",
         headers: { "Authorization": "Bearer " + token, "Accept": "application/json" },
         muteHttpExceptions: true
@@ -2318,7 +2318,7 @@ function syncReservas(days) {
                 "&include=guest,properties,listings";
       var res;
       try {
-        res = UrlFetchApp.fetch(url, {
+        res = uf_(url, {
           method: "get",
           headers: { "Authorization": "Bearer " + token, "Accept": "application/json" },
           muteHttpExceptions: true
@@ -4958,7 +4958,7 @@ function registrarUsoIA_(funcion, modelo, usage, detalle, ref) {
   try {
     var p = PropertiesService.getScriptProperties(), url = p.getProperty('ALMA_URL') || 'https://script.google.com/macros/s/AKfycbzTdkEpRPgnwaUIHWbQmrysPEqGYqTqDKYwMaQlnun-OT7B2hIa6KdSNS-aedWN-I0cZQ/exec', k = p.getProperty('USO_KEY');
     if (!url || !k) return;
-    UrlFetchApp.fetch(url, {
+    uf_(url, {
       method: 'post', contentType: 'application/json', muteHttpExceptions: true,
       payload: JSON.stringify({ usoIA: 1, k: k, app: p.getProperty('USO_APP') || 'EPI', funcion: funcion || 'IA', modelo: modelo || '',
         usage: usage || {}, detalle: detalle || '', ref: ref || '' })
