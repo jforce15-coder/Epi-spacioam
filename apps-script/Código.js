@@ -685,6 +685,7 @@ function deleteReport__base(id) {
 
 function getConfig(opts) {
   opts = opts || {};
+  try { if (!PropertiesService.getScriptProperties().getProperty('ADELANTOS_RESTAURADOS_20261101')) adelantosRestaurar_(false); } catch (e) { console.error('restaurar adelantos: ' + e); }   // una sola vez (adelantos_restaurar.js)
   var slim = !!opts.slim;
   /* «cfg2»: el caché de antes guardaba la lista con contraseñas; con otra llave nunca se vuelve a servir. */
   var ck = "cfg2:" + (slim ? "S" : "F");
