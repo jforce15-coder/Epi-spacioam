@@ -1586,6 +1586,7 @@ async function loadAllData(opts) {
       codigos:   d.codigos   || {},
       feedback:  d.feedback  || [],
       adelantos: adv_load(),
+      adelantosExiste: adv_load()!==null,
       pagos:     pg_load(),
       notifprefs: d.notifprefs || {},
       reviews:   d.reviews || [],
@@ -1639,7 +1640,10 @@ async function loadAllData(opts) {
     feedback: Array.isArray(cfg.feedback) ? cfg.feedback : [],
     hospurlday:  cfg.hospurlday  || "",
     hospurlweek: cfg.hospurlweek || "",
+    /* null = no llegaron (respuesta a medias o celda rota): el app NO siembra ni guarda encima.
+       adelantosExiste lo manda el servidor; solo «false» quiere decir que la clave no existe. */
     adelantos: Array.isArray(cfg.adelantos) ? cfg.adelantos : null,
+    adelantosExiste: cfg.adelantosExiste,
     pagos: pg_merge(cfg),
     notifprefs: (cfg.notifprefs && typeof cfg.notifprefs==="object") ? cfg.notifprefs : {},
     reviews: rv_merge(cfg),
@@ -2061,7 +2065,9 @@ function App() {
 
   /* Adelantos (advances): se cargan vía loadAllData (localStorage en demo, Sheets en vivo)
      y se migran/ligan a su técnico en el .then de carga. */
-  async function svAdelantos(v){ setAdelantos(v); adv_persist(v); }
+  /* opts.borrar = ids que se quitan a propósito (eliminar o unificar). Sin eso, el
+     servidor no deja que desaparezca un adelanto sin pagar. */
+  async function svAdelantos(v, opts){ setAdelantos(v); return adv_persist(v, opts); }
   /* Comprobantes de pago — historial consultable por admin y técnico. */
   async function svPagos(v, opts){ setPagos(v); return pg_persist(v, opts); }
   /* Preferencias de notificaciones — qué perfiles reciben cada tipo de correo. */
@@ -2119,11 +2125,11 @@ function App() {
       if(Array.isArray(d.reviews)) setReviews(d.reviews);
       if(Array.isArray(d.rvCasos)) setRvCasos(d.rvCasos);
       if(d.rvIA && typeof d.rvIA==="object") setRvIA(d.rvIA);
-      /* Adelantos: tomar de la fuente (Sheets/local) o sembrar; luego ligar a técnicos. */
-      var advRaw=(d.adelantos && d.adelantos.length)?d.adelantos:adv_seed();
-      var mig=adv_migrate(advRaw, d.vendors||DEF_V);
-      setAdelantos(mig.list);
-      if(mig.changed || !(d.adelantos && d.adelantos.length)) { try{ adv_persist(mig.list); }catch(_){} }
+      /* Adelantos: solo se usan (y se guardan) si llegaron de verdad. Si no llegaron,
+         se conserva lo que haya y no se escribe nada en Sheets. */
+      var advC=adv_desdeCarga(d, d.vendors||DEF_V);
+      if(advC){ setAdelantos(advC.list); if(advC.changed){ try{ adv_persist(advC.list); }catch(_){} } }
+      else setAdelantos(function(prev){ return (prev&&prev.length)?prev:(adv_load()||[]); });
       /* Historial de pagos: combina lo del Sheet con cualquier comprobante local que aún no
          se haya persistido (p.ej. pagos recién generados que no cupieron en la celda antigua).
          Los que falten en el Sheet se re-guardan (ya con el formato repartido) para no perderlos. */
@@ -2230,7 +2236,7 @@ function App() {
     if(!adelantos || !adelantos.length || !reps) return;
     var r=autoUnify(adelantos, reps);
     unifiedOnce.current=true;
-    if(r.changed) svAdelantos(r.list);
+    if(r.changed) svAdelantos(r.list, {borrar:r.borrar});
   },[adelantos, reps]);
 
   async function upsert(r) {
@@ -2377,6 +2383,8 @@ function App() {
       if(d.hospurlday)  setHospUrlDay(d.hospurlday||"");
       if(d.hospurlweek) setHospUrlWeek(d.hospurlweek||"");
       if(d.feedback)  setFeedback(d.feedback);
+      /* Si al abrir no llegaron los adelantos, refrescar es la segunda oportunidad. */
+      if(!ADV_LEIDOS){ var advR=adv_desdeCarga(d, d.vendors||DEF_V); if(advR){ setAdelantos(advR.list); if(advR.changed){ try{ adv_persist(advR.list); }catch(_){} } } }
       setSheetsOk(true);
     } catch(e) { setSheetsOk(false); }
     finally { setSyncing(false); setSyncMsg(""); }
@@ -18477,9 +18485,31 @@ function PhotoLightbox({photos, initialIdx, onClose}) {
    Local store (Sheets-ready via saveConfig key "adelantos").
    ════════════════════════════════════════════════════════════════════ */
 function adv_load(){ try{var v=localStorage.getItem("sam_adelantos");return v?JSON.parse(v):null;}catch(e){return null;} }
-function adv_persist(list){
+/* ¿Se leyeron los adelantos del servidor en esta sesión? Mientras no, nada se guarda en Sheets:
+   el 25-oct una carga sin adelantos sembró la lista de arranque encima y se perdió un adelanto activo. */
+var ADV_LEIDOS=false;
+function adv_avisar(msg){ try{ apiCall("logEvento",{tipo:"error",detalle:msg,usuario:"app"}).catch(function(){}); }catch(_){} }
+/* opts.borrar = [ids] que se quitan a propósito. El servidor rechaza cualquier otro adelanto sin pagar que desaparezca. */
+function adv_persist(list, opts){
+  if(!Array.isArray(list)) return false;
   try{ localStorage.setItem("sam_adelantos", JSON.stringify(list)); }catch(e){}
-  if(!IS_CLAUDE_SANDBOX){ try{ apiCall("saveConfig",{key:"adelantos",value:list}); }catch(e){} }
+  if(IS_CLAUDE_SANDBOX) return true;
+  if(!ADV_LEIDOS){ adv_avisar("Se evitó guardar adelantos: todavía no se habían leído del servidor ("+list.length+" en el teléfono)."); return false; }
+  var body={key:"adelantos",value:list};
+  var borrar=(opts&&Array.isArray(opts.borrar))?opts.borrar.filter(function(x){return x!=null;}):[];
+  if(borrar.length) body.borrar=borrar;
+  try{ apiCall("saveConfig",body).catch(function(e){ adv_avisar("El servidor no guardó los adelantos: "+((e&&e.message)||e)); }); }catch(e){}
+  return true;
+}
+/* Lo que llegó en la carga → lista lista para usar, o null si los adelantos NO llegaron.
+   Solo una lista real (o la confirmación del servidor de que la clave no existe) habilita guardar. */
+function adv_desdeCarga(d, vendors){
+  var base=null;
+  if(d && Array.isArray(d.adelantos)) base=d.adelantos;
+  else if(d && d.adelantosExiste===false) base=[];
+  if(!base) return null;
+  ADV_LEIDOS=true;
+  return adv_migrate(base, vendors);
 }
 function normNm(s){ return (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim(); }
 /* Clave de coincidencia SEGURA: tras normNm (tildes/espacios/mayúsculas) además
@@ -18490,15 +18520,6 @@ function completeness(p){ var n=0; if(!p)return 0; if(p.listingUrl)n++; if(p.add
 /* Todos los adelantos legacy iniciaron el 1 de junio 2026 */
 var ADV_DEFAULT_START = "2026-06-01";
 function advStart(adv){ return adv.fechaInicio || adv.fechaDeposito || ADV_DEFAULT_START; }
-/* Adelantos ligados a su técnico real (por correo) */
-function adv_seed(){
-  function mk(name,email,saldo,semanal){ return {id:"adv_"+normNm(name).replace(/[^a-z]/g,"")+"_"+Date.now()+Math.floor(Math.random()*1000), vendorEmail:email, vendorName:name, dpiNumber:"", dpiPhoto:null, monto:saldo, cobroSemanal:semanal, cuotas:Math.ceil(saldo/semanal), fechaInicio:ADV_DEFAULT_START, fechaDeposito:ADV_DEFAULT_START, status:"activo", createdAt:Date.now(), pausas:[], contractText:""}; }
-  return [
-    mk("Joselyn Sian","andyvas85@gmail.com",1950,250),
-    mk("Lilia del Cid","dubonmar20@gmail.com",575,525),
-    mk("Jackeline Ruano","kr9435454@gmail.com",900,100),
-  ];
-}
 /* Normaliza/migra: liga adelantos legacy a su técnico por nombre, agrega fechaInicio y pausas */
 function adv_migrate(list, vendors){
   var changed=false;
@@ -18738,14 +18759,14 @@ function autoUnify(list, reps){
       groups[k].forEach(function(a){ if(a.id!==merged.id) mergedById["__drop_"+a.id]=true; });
     }
   });
-  if(!changed) return {list:list, changed:false};
-  var out=[];
+  if(!changed) return {list:list, changed:false, borrar:[]};
+  var out=[], borrar=[];
   (list||[]).forEach(function(a){
-    if(mergedById["__drop_"+a.id]) return;
+    if(mergedById["__drop_"+a.id]){ borrar.push(a.id); return; }
     if(mergedById[a.id]){ out.push(mergedById[a.id]); return; }
     out.push(a);
   });
-  return {list:out, changed:true};
+  return {list:out, changed:true, borrar:borrar};
 }
 /* Lista de contratos individuales de un adelanto (unificado o no) para visualizarlos. */
 function advContracts(adv){
@@ -21054,14 +21075,14 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
   /* Aprobar (solicitud del técnico): activa y unifica con cualquier adelanto activo previo. */
   function approve(a){
     var next=list.map(function(x){return x.id===a.id?Object.assign({},x,{status:"activo", fechaDeposito:x.fechaDeposito||todayStr(), fechaInicio:x.fechaInicio||x.fechaDeposito||todayStr()}):x;});
-    var u=autoUnify(next, reps); onSvAdelantos(u.list);
+    var u=autoUnify(next, reps); onSvAdelantos(u.list, {borrar:u.borrar});
     try{ notifyTemplate(resolveNotifRecipients("adelantoDepositado", vendors, [a.vendorEmail]), "adelantoDepositado", {tecnico:a.vendorName, monto:"Q"+(a.monto||0).toLocaleString(), fecha:fmtDate(todayStr()), cuota:"Q"+(a.cobroSemanal||0).toLocaleString(), cuotas:(a.cuotas||"")+" semanas"}); }catch(_){}
   }
   /* Activar tras el depósito (adelanto iniciado por el admin y ya firmado por el técnico). */
   function activateDeposit(a){
     if(!advDeposits(a).length) return;
     var next=list.map(function(x){return x.id===a.id?Object.assign({},x,{status:"activo", fechaInicio:todayStr(), fechaDeposito:x.fechaDeposito||todayStr()}):x;});
-    var u=autoUnify(next, reps); onSvAdelantos(u.list);
+    var u=autoUnify(next, reps); onSvAdelantos(u.list, {borrar:u.borrar});
     try{ notifyTemplate(resolveNotifRecipients("adelantoDepositado", vendors, [a.vendorEmail]), "adelantoDepositado", {tecnico:a.vendorName, monto:"Q"+(a.monto||0).toLocaleString(), fecha:fmtDate(todayStr()), cuota:"Q"+(a.cobroSemanal||0).toLocaleString(), cuotas:(a.cuotas||"")+" semanas"}); }catch(_){}
   }
   /* Guarda el comprobante de depósito (top-level, o en un sub-contrato si es unificado). */
@@ -21083,7 +21104,7 @@ function AdvancesAdmin({adelantos, reps, vendors, onSvAdelantos}){
   function unpauseWeek(a, k){
     update(a.id, {pausas:(a.pausas||[]).filter(function(x){return x!==k;})});
   }
-  function delAdv(a){ onSvAdelantos(list.filter(function(x){return x.id!==a.id;})); }
+  function delAdv(a){ onSvAdelantos(list.filter(function(x){return x.id!==a.id;}), {borrar:[a.id]}); }
   function createAdv(adv){ onSvAdelantos([adv].concat(list)); }
 
   var totalSaldo = active.reduce(function(s,a){return s+advanceState(a,reps).saldo;},0);

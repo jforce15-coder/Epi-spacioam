@@ -37,7 +37,7 @@ function route(e) {
     else if (p.action === "deleteReport")   r = deleteReport(p.id);
     else if (p.action === "getConfig")      r = getConfig({ slim: truthy_(p.slim) });
     else if (p.action === "getHeavy")       r = getHeavy_();
-    else if (p.action === "saveConfig")     r = saveConfig(p.key, p.value);
+    else if (p.action === "saveConfig")     r = saveConfig(p.key, p.value, { borrar: p.borrar });
     else if (p.action === "uploadFile")     r = uploadFile(p.b64, p.name, p.mime, p.subfolder);
     else if (p.action === "syncHospitable") r = syncHospitable(p.days || 14);
     else if (p.action === "syncReservas")    r = syncReservas(p.days || 21);
@@ -723,6 +723,10 @@ function getConfig(opts) {
      celda de Config no aguantaba el histórico y el guardado fallaba en silencio:
      el técnico veía una ruta en su teléfono y el administrador otra distinta. */
   try { cfg.schedules = schedRead_(); } catch (e) { }
+  /* Marca para el app: ¿la clave «adelantos» existe en la hoja? Si existe pero no
+     llegó como lista (JSON roto, respuesta a medias), el app NO debe sembrar ni
+     guardar encima. Solo con «false» sabe que de verdad está vacía. */
+  cfg.adelantosExiste = data.some(function (row) { return row[0] === "adelantos"; });
   epiLimpiarCfg_(cfg);   // nunca sale una contraseña ni el PIN
   cachePut_(ck, cfg);
   return cfg;
@@ -741,7 +745,19 @@ function getHeavy_() {
   return r;
 }
 
-function saveConfig(key, value) {
+function saveConfig(key, value, opts) {
+  /* Adelantos y comprobantes de pago: dinero de las personas. Se guardan con candado
+     (uno a la vez), revisión de lo que se pierde y copia de lo anterior. */
+  if (CFG_RX_HIST_.test(String(key))) {
+    var lock = LockService.getScriptLock();
+    lock.waitLock(20000);
+    try { return saveConfigPlano_(key, value, opts); } finally { lock.releaseLock(); }
+  }
+  return saveConfigPlano_(key, value, opts);
+}
+
+function saveConfigPlano_(key, value, opts) {
+  opts = opts || {};
   /* La programación ya no cabe en una celda: vive en su propia hoja. Todos los
      que llamaban saveConfig("schedules", …) siguen funcionando igual. */
   cacheBump_();
@@ -766,10 +782,29 @@ function saveConfig(key, value) {
     if (typeof arrIn === "string") { try { arrIn = JSON.parse(arrIn); } catch (e) { arrIn = null; } }
     if (Array.isArray(arrIn)) value = epiGuardarClavesDeLista_(arrIn);
   }
+  var esDinero = CFG_RX_HIST_.test(String(key));
+  if (esDinero) {
+    if (typeof value === "string") { try { value = JSON.parse(value); } catch (e) { } }
+    if (!Array.isArray(value))
+      throw new Error("Guardado bloqueado: «" + key + "» debe ser una lista. No se tocó la hoja.");
+  }
   var val  = (typeof value === "object") ? JSON.stringify(value) : String(value);
   var data = sheet.getDataRange().getValues();
   for (var i = 0; i < data.length; i++) {
     if (data[i][0] === key) {
+      if (esDinero) {
+        var anterior = String(data[i][1] == null ? "" : data[i][1]);
+        if (key === "adelantos") {
+          var prevAdv = null;
+          try { prevAdv = JSON.parse(anterior || "[]"); } catch (e) { prevAdv = null; }   // celda rota: no hay con qué comparar, pero queda la copia
+          var motivo = advCandado_(prevAdv, value, opts.borrar);
+          if (motivo) {
+            try { bitLog_("error", "Se bloqueó guardar adelantos: " + motivo, "servidor"); } catch (e) { }
+            throw new Error("Guardado bloqueado (adelantos): " + motivo);
+          }
+        }
+        if (anterior !== val && anterior !== "" && anterior !== "[]") cfgHistGuardar_(key, anterior);
+      }
       /* ═══ CANDADO ANTI-BORRADO ═══
          No permitir que "vendors" (usuarios) ni "props" (propiedades) pasen de una
          lista grande a una diminuta. Esto es el síntoma de un guardado hecho con los
@@ -795,6 +830,105 @@ function saveConfig(key, value) {
   sheet.appendRow([key, val]);
   cacheBump_();
   return { saved: true };
+}
+
+/* ═══ CANDADO DE ADELANTOS Y PAGOS ═══════════════════════════════════════════
+   El 25-oct la lista de adelantos se reemplazó por la lista de arranque del app
+   y se perdió el adelanto activo de Caren Chacón. Desde entonces:
+     · «adelantos» y «pagos», «pagos_2»… solo aceptan listas.
+     · En «adelantos» no puede desaparecer un adelanto abierto (ni bajar cuántos
+       hay abiertos) salvo que el app lo diga en «borrar: [ids]» (borrado a propósito
+       o unificación). Pasar a pagado/liquidado/cancelado sí está permitido.
+     · Antes de cada sobrescritura, el valor anterior se copia a «Config_historial». */
+var CFG_RX_HIST_ = /^(adelantos|pagos(_\d+)?)$/;
+var ADV_CERRADOS_ = { pagado: 1, liquidado: 1, cancelado: 1 };
+var CFG_HIST_HOJA_ = "Config_historial";
+var CFG_HIST_PARTE_ = 45000;      // una celda aguanta 50.000 caracteres
+var CFG_HIST_MAX_FILAS_ = 1500;   // lo más viejo se poda
+
+/* Devuelve "" si se puede guardar, o el motivo si no. prev = lo que hay en la hoja. */
+function advCandado_(prev, next, borrar) {
+  if (!Array.isArray(next)) return "el valor nuevo no es una lista";
+  if (!Array.isArray(prev)) return "";
+  var quitar = {};
+  (Array.isArray(borrar) ? borrar : []).forEach(function (id) { if (id != null) quitar[String(id)] = 1; });
+  var abierto = function (a) { return !!a && !ADV_CERRADOS_[String(a.status || "").toLowerCase()]; };
+  var nuevos = {};
+  next.forEach(function (a) { if (a && a.id != null) nuevos[String(a.id)] = a; });
+  var abiertosAntes = 0, explicados = 0, perdidos = [];
+  prev.forEach(function (a) {
+    if (!abierto(a)) return;
+    abiertosAntes++;
+    var id = a.id != null ? String(a.id) : null;
+    if (id && quitar[id]) { explicados++; return; }
+    if (id && nuevos[id]) { if (!abierto(nuevos[id])) explicados++; return; }
+    if (id) perdidos.push((a.vendorName || "sin nombre") + " (" + id + ")");
+  });
+  if (perdidos.length) return "desaparecería(n) " + perdidos.length + " adelanto(s) sin pagar: " + perdidos.join(", ");
+  var abiertosDespues = next.filter(abierto).length;
+  if (abiertosDespues < abiertosAntes - explicados)
+    return "bajarían los adelantos sin pagar de " + abiertosAntes + " a " + abiertosDespues;
+  if (!next.length && prev.length && !Object.keys(quitar).length)
+    return "se vaciaría la lista (había " + prev.length + ")";
+  return "";
+}
+
+/* Copia el valor anterior de una clave a «Config_historial»: fecha · clave · parte · partes · valor.
+   Si no cabe en una celda se parte en varias filas con la misma fecha. */
+function cfgHistGuardar_(key, anterior) {
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var h = ss.getSheetByName(CFG_HIST_HOJA_);
+    if (!h) {
+      h = ss.insertSheet(CFG_HIST_HOJA_);
+      h.appendRow(["Fecha", "Clave", "Parte", "Partes", "Valor anterior"]);
+      h.setFrozenRows(1);
+    }
+    var fecha = Utilities.formatDate(new Date(), "GMT-6", "yyyy-MM-dd HH:mm:ss");
+    var partes = Math.max(1, Math.ceil(anterior.length / CFG_HIST_PARTE_));
+    var filas = [];
+    for (var k = 0; k < partes; k++)
+      filas.push([fecha, key, k + 1, partes, "'" + anterior.substr(k * CFG_HIST_PARTE_, CFG_HIST_PARTE_)]);
+    h.getRange(h.getLastRow() + 1, 1, filas.length, 5).setValues(filas);
+    var sobran = h.getLastRow() - 1 - CFG_HIST_MAX_FILAS_;
+    if (sobran > 0) h.deleteRows(2, sobran);
+  } catch (e) {
+    /* Sin copia no se sobrescribe: mejor un guardado fallido que un borrado sin respaldo. */
+    throw new Error("No se pudo guardar la copia en " + CFG_HIST_HOJA_ + ": " + e);
+  }
+}
+
+/* RECUPERACIÓN MANUAL — ejecútala en el editor de Apps Script (no restaura nada sola).
+   Muestra en el registro cada versión guardada de «adelantos» en Config_historial,
+   de la más nueva a la más vieja: fecha, cuántos hay, quién y en qué estado, y el JSON
+   completo para copiarlo a la celda «adelantos» de Config si hace falta. */
+function adelantosDesdeHistorial() {
+  var h = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(CFG_HIST_HOJA_);
+  if (!h || h.getLastRow() < 2) { Logger.log("Todavía no hay copias en " + CFG_HIST_HOJA_ + "."); return []; }
+  var filas = h.getRange(2, 1, h.getLastRow() - 1, 5).getValues();
+  var grupos = {}, orden = [];
+  filas.forEach(function (f) {
+    if (String(f[1]) !== "adelantos") return;
+    var fecha = (f[0] instanceof Date) ? Utilities.formatDate(f[0], "GMT-6", "yyyy-MM-dd HH:mm:ss") : String(f[0]);
+    var g = fecha + "|" + f[3];
+    if (!grupos[g]) { grupos[g] = { fecha: fecha, partes: Number(f[3]) || 1, trozos: {} }; orden.push(g); }
+    grupos[g].trozos[Number(f[2]) || 1] = String(f[4]);
+  });
+  if (!orden.length) { Logger.log("No hay copias de «adelantos» en " + CFG_HIST_HOJA_ + "."); return []; }
+  var versiones = [];
+  orden.reverse().forEach(function (g, n) {
+    var v = grupos[g], txt = "";
+    for (var k = 1; k <= v.partes; k++) txt += (v.trozos[k] || "");
+    var lista = null;
+    try { lista = JSON.parse(txt); } catch (e) { }
+    Logger.log("── Versión " + (n + 1) + " · " + v.fecha + (lista ? " · " + lista.length + " adelanto(s)" : " · JSON incompleto o roto"));
+    (lista || []).forEach(function (a) {
+      Logger.log("   " + (a.vendorName || "?") + " · Q" + (a.monto || 0) + " · " + (a.status || "?") + " · " + a.id);
+    });
+    for (var i = 0; i < txt.length; i += 8000) Logger.log(txt.substr(i, 8000));
+    versiones.push({ fecha: v.fecha, adelantos: lista, json: txt });
+  });
+  return versiones;
 }
 
 function uploadFile(b64, name, mime, subfolder) {
