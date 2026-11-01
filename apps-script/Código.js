@@ -1348,7 +1348,8 @@ function saveReviews___base(list) {
 var RC_SHEET = "Rating - revisiones";
 var RC_COLS = ["ID", "Review ID", "Propiedad", "Check-in", "Técnico", "Nota limpieza",
                "Tipo", "Motivo del técnico", "Fecha solicitud", "Estado",
-               "Decisión del administrador", "Reasignada a", "Resuelta por", "Fecha resolución"];
+               "Decisión del administrador", "Reasignada a", "Resuelta por", "Fecha resolución",
+               "Análisis", "Veredicto", "Automática"];
 
 function rcSheet_() {
   var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
@@ -1364,7 +1365,7 @@ function rcSheet_() {
       .setVerticalAlignment("middle");
     sh.setFrozenRows(1);
     sh.setRowHeight(1, 30);
-    var anchos = [110, 110, 200, 90, 150, 90, 110, 380, 105, 105, 380, 150, 150, 105];
+    var anchos = [110, 110, 200, 90, 150, 90, 110, 380, 105, 105, 380, 150, 150, 105, 420, 120, 90];
     for (var c = 0; c < anchos.length; c++) sh.setColumnWidth(c + 1, anchos[c]);
   }
   return sh;
@@ -1384,7 +1385,8 @@ function rcRead_() {
       tipo: String(r[6] || ""), motivo: String(r[7] || ""), fecha: rvDate_(r[8]),
       estado: String(r[9] || "pendiente"), decision: String(r[10] || ""),
       reasignadaA: String(r[11] || ""), resueltaPor: String(r[12] || ""),
-      fechaResol: rvDate_(r[13])
+      fechaResol: rvDate_(r[13]),
+      analisis: String(r[14] || ""), veredicto: String(r[15] || ""), automatica: String(r[16] || "")
     });
   }
   return out;
@@ -1393,6 +1395,7 @@ function rcRead_() {
 function saveCasos_(){ try { return saveCasos___base.apply(this, arguments); } finally { cacheBump_(); } }
 function saveCasos___base(list) {
   list = Array.isArray(list) ? list : [];
+  list = acAplicar_(list);   /* analisis_caso.js: junta contexto y resuelve solas las claras */
   var sh = rcSheet_();
   if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, RC_COLS.length).clearContent();
   if (list.length) {
@@ -1400,7 +1403,8 @@ function saveCasos___base(list) {
       return [c.id || "", c.reviewId || "", c.propiedad || "", c.checkIn || "", c.tecnico || "",
               c.nota == null ? "" : c.nota, c.tipo || "", c.motivo || "", c.fecha || "",
               c.estado || "pendiente", c.decision || "", c.reasignadaA || "",
-              c.resueltaPor || "", c.fechaResol || ""];
+              c.resueltaPor || "", c.fechaResol || "",
+              c.analisis || "", c.veredicto || "", c.automatica || ""];
     }));
   }
   return { total: list.length };

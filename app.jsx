@@ -22497,6 +22497,7 @@ function RatingCasesPanel({casos, onSvCasos, reps, vendors, me}) {
               </div>
             </div>
             <div style={{fontSize:11.5,color:C.black,lineHeight:1.65,marginTop:8,background:"#fff",borderRadius:7,padding:"9px 11px"}}>“{c.motivo}”</div>
+            {c.analisis&&<div style={{fontSize:11,color:C.earth,lineHeight:1.6,marginTop:6,background:"#F3EDE6",borderRadius:7,padding:"8px 11px"}}><b>Análisis automático ({String(c.veredicto||"").replace("_"," ")}):</b> {c.analisis}</div>}
             {abierto ? (
               <div style={{marginTop:10,borderTop:"1px solid "+C.line,paddingTop:10,display:"flex",flexDirection:"column",gap:9}}>
                 <div style={{display:"flex",alignItems:"center",gap:9,flexWrap:"wrap"}}>
@@ -22548,6 +22549,7 @@ function RatingCasesPanel({casos, onSvCasos, reps, vendors, me}) {
                     </div>
                     <div style={{fontSize:10.5,color:C.taupe,marginTop:3}}>check-in {fmtDate(c.checkIn)} · resuelta {fmtDate(c.fechaResol)}{c.resueltaPor?" por "+c.resueltaPor:""}</div>
                     {c.decision&&<div style={{fontSize:11,color:C.earth,lineHeight:1.6,marginTop:4}}>{c.decision}</div>}
+                    {c.automatica==="sí"&&<div style={{fontSize:10,color:C.orange,fontWeight:700,marginTop:3}}>Decidida sola por el análisis automático — puedes revertirla</div>}
                     <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginTop:7}}>
                       <VerLimpiezaBtn c={c} chico/>
                       <button onClick={function(){revertir(c);}} style={{padding:"5px 11px",borderRadius:8,border:"1px solid "+C.gray,background:"#fff",color:C.red,fontSize:10.5,fontWeight:600,cursor:"pointer"}}>↩ Revertir decisión</button>
