@@ -2137,7 +2137,13 @@ function App() {
       var pgFinal=pgSheet;
       if(!IS_CLAUDE_SANDBOX){
         try{
-          var pgLocal=pg_load()||[];
+          var pgLocalTodo=pg_load()||[];
+          var pgLocal=pgSinAnulados(pgLocalTodo);
+          if(pgLocal.length!==pgLocalTodo.length){
+            /* Este navegador guardaba comprobantes ya anulados: se borran de su copia y el tope se recalcula sin ellos. */
+            try{ localStorage.setItem("sam_pagos", JSON.stringify(pgLocal)); }catch(_){}
+            PG_SEEN_MAX=Math.max(pgSheet.length, pgLocal.length);
+          }
           var seen={}; pgSheet.forEach(function(p){ if(p&&(p.folio||p.id)!=null) seen[String(p.folio||p.id)]=true; });
           var missing=pgLocal.filter(function(p){ return p&&(p.folio||p.id)!=null && !seen[String(p.folio||p.id)]; });
           if(missing.length){
@@ -3130,6 +3136,37 @@ function AdminApp({schedVers,pagosReady,reservas,onSvReservas,ausencias,onSvAuse
      entregar ni firmar: cada quien necesita el suyo, con su folio. */
   function markPaidBatch(repsToMark, meta){
     meta=meta||{};
+    /* Candado (8-nov-2026: se pagó en lote sin rango y salieron trabajos de junio y uno futuro).
+       Sin rango elegido, con trabajos fuera del rango, sin fecha o con fecha futura, no se paga.
+       Y antes de pagar se confirma cuánto, a cuántas personas y de qué fechas. */
+    var desde=String(meta.rangoDesde||"").slice(0,10), hasta=String(meta.rangoHasta||"").slice(0,10);
+    if(!desde||!hasta){ alert("Para pagar en lote primero elige el rango de fechas (desde y hasta) en «Rango de fechas».\n\nNo se pagó nada."); return; }
+    var hoyLote=SCHED.hoyGT();
+    var lista=(repsToMark||[]).filter(function(r){ return r&&!r.paid; });
+    var sinFecha=lista.filter(function(r){ return !/^\d{4}-\d{2}-\d{2}/.test(String(r.fecha||"")); });
+    var fuera=lista.filter(function(r){ var f=String(r.fecha||"").slice(0,10); return f&&(f<desde||f>hasta); });
+    var futuros=lista.filter(function(r){ return String(r.fecha||"").slice(0,10)>hoyLote; });
+    if(sinFecha.length||fuera.length||futuros.length){
+      alert("No se pagó nada:"+(futuros.length?"\n· "+futuros.length+" trabajo"+(futuros.length===1?"":"s")+" con fecha futura (después de hoy).":"")
+        +(fuera.length?"\n· "+fuera.length+" trabajo"+(fuera.length===1?"":"s")+" fuera del rango "+fmtDate(desde)+" al "+fmtDate(hasta)+".":"")
+        +(sinFecha.length?"\n· "+sinFecha.length+" trabajo"+(sinFecha.length===1?"":"s")+" sin fecha.":"")
+        +"\n\nAjusta el rango (no puede pasar de hoy) y vuelve a intentarlo.");
+      return;
+    }
+    if(!lista.length) return;
+    var personas={}, totalLote=0;
+    lista.forEach(function(r){
+      var v=(vendors||[]).find(function(x){ return repMatchesVendor(r,x); });
+      personas[String((v&&v.id)||r.reportadoPor||"—").toLowerCase()]=1;
+      totalLote+=pgEffTotal(r,vendors,props);
+    });
+    var nPers=Object.keys(personas).length;
+    if(!window.confirm("¿Marcar como PAGADOS "+lista.length+" trabajo"+(lista.length===1?"":"s")+"?\n\n"
+      +"· Personas: "+nPers+" (sale un comprobante para cada una y se le avisa por correo)\n"
+      +"· Total: "+pgMoney(totalLote)+" (antes del descuento de adelantos)\n"
+      +"· Fechas: del "+fmtDate(desde)+" al "+fmtDate(hasta)+"\n\n"
+      +"Revisa que el rango sea la semana que vas a pagar.")) return;
+    repsToMark=lista;
     var updated=(repsToMark||[]).map(function(r){
       var at=autoTarifa(r.reportadoPor||"",vendors);
       return Object.assign({},r,{paid:true,total:r.total||at.tarifa||String(pgEffTotal(r,vendors,props)||"")});
@@ -3152,6 +3189,13 @@ function AdminApp({schedVers,pagosReady,reservas,onSvReservas,ausencias,onSvAuse
       return pago;
     });
     if(onSvPagos) onSvPagos(hist);
+    /* Queda en la Bitácora: quién, cuándo, folios y total. */
+    try{
+      var _fol=nuevos.map(function(p){ return p.folio; });
+      var _b=nuevos.reduce(function(s,p){ return s+(p.totalBruto||0); },0), _d=nuevos.reduce(function(s,p){ return s+(p.totalDescuento||0); },0);
+      apiCall("logEvento",{tipo:"pagos",detalle:"Pago en lote: "+updated.length+" trabajo"+(updated.length===1?"":"s")+" · "+nuevos.length+" comprobante"+(nuevos.length===1?"":"s")+" ("+_fol.join(", ")+") · bruto "+pgMoney(_b)+" · descuento de adelantos "+pgMoney(_d)+" · neto "+pgMoney(_b-_d)+" · del "+fmtDate(desde)+" al "+fmtDate(hasta),
+        usuario:"app · "+adminName, extra:{folios:_fol, trabajos:updated.length, bruto:_b, descuento:_d, neto:_b-_d, desde:desde, hasta:hasta}}).catch(function(){});
+    }catch(_){}
     nuevos.forEach(notifyComprobante);
     setPagoDetail(nuevos[0]);
   }
@@ -18943,6 +18987,13 @@ function pg_load(){
    trajo todos los campos que decía traer. */
 var PG_SEEN_MAX=0;
 var PG_COMPLETE=true;
+/* Comprobantes anulados («pagos_anulados» en la config; p.ej. el lote del 8-nov-2026). Nunca vuelven al historial
+   activo, aunque este navegador tenga la copia vieja. Se comparan por id (el folio no se reutiliza: ver pgFolio). */
+var PG_ANULADOS={};
+var PG_ANULADOS_FOLIOS=[];
+function pgSinAnulados(list){
+  return (list||[]).filter(function(p){ return !(p&&p.id!=null&&PG_ANULADOS[String(p.id)]); });
+}
 /* El historial de pagos se guarda como JSON en la config del Sheet. Una sola celda de Google
    Sheets tope ~50,000 caracteres; con el historial creciendo, un solo campo "pagos" se llena
    y los pagos nuevos dejaban de guardarse en silencio (se veían en el dispositivo que los creó
@@ -18971,6 +19022,11 @@ function pg_shard(list){
    que solo tienen el campo "pagos". */
 function pg_merge(cfg){
   if(!cfg) return null;
+  var anul=salvageArray(cfg.pagos_anulados);
+  if(Array.isArray(anul)){
+    PG_ANULADOS={}; PG_ANULADOS_FOLIOS=[];
+    anul.forEach(function(p){ if(p&&p.id!=null) PG_ANULADOS[String(p.id)]=1; if(p&&p.folio) PG_ANULADOS_FOLIOS.push(String(p.folio)); });
+  }
   var base=salvageArray(cfg.pagos);
   var out=Array.isArray(base)?base.slice():[];
   var n=parseInt(cfg.pagos_n,10)||1;
@@ -18992,6 +19048,7 @@ function pg_merge(cfg){
     var k=String(p.folio||p.id||("x"+ded.length));
     if(seen[k]) return; seen[k]=1; ded.push(p);
   });
+  ded=pgSinAnulados(ded);
   ded.sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
   PG_SEEN_MAX=Math.max(PG_SEEN_MAX, ded.length);
   return ded.length?ded:base;
@@ -18999,6 +19056,7 @@ function pg_merge(cfg){
 /* Guardar el historial. opts.permitirBorrar sirve para las bajas de verdad
    (recalcular un comprobante), lo único que puede acortar la lista. */
 function pg_persist(list, opts){
+  list=pgSinAnulados(list);
   var n=(list||[]).length;
   var permitido=!!(opts&&opts.permitirBorrar);
   var acorta=n<PG_SEEN_MAX-1;
@@ -19027,10 +19085,14 @@ function pg_persist(list, opts){
 function pgMoney(n){ return epiMoney(n); }
 /* Igual que pgMoney pero sin el símbolo (para etiquetas que ya lo llevan). */
 function advQ(n){ return pgMoney(n).slice(1); }
+/* Folio siguiente = el número más alto del año + 1 (contando los anulados). Antes era «cuántos hay + 1»: al quitar
+   comprobantes del historial se repetían folios, y dos comprobantes con el mismo folio se pisaban al cargar. */
 function pgFolio(list){
-  var yr=new Date().getFullYear();
-  var seq=((list||[]).filter(function(p){return String(p.folio||"").indexOf("CP-"+yr)===0;}).length)+1;
-  return "CP-"+yr+"-"+String(seq).padStart(4,"0");
+  var yr=new Date().getFullYear(), pre="CP-"+yr+"-", max=0;
+  (list||[]).map(function(p){ return String(p&&p.folio||""); }).concat(PG_ANULADOS_FOLIOS).forEach(function(f){
+    if(f.indexOf(pre)!==0) return; var n=parseInt(f.slice(pre.length),10); if(n>max) max=n;
+  });
+  return pre+String(max+1).padStart(4,"0");
 }
 /* Monto pagable de un trabajo (usa la auto-tarifa como respaldo, igual que el dashboard) */
 function pgEffTotal(r, vendors, props){
@@ -19724,7 +19786,7 @@ function RecuperarPagos({pagos, onSvPagos}){
     try{
       var cfg=await apiCall("getConfig")||{};
       var delSheet=pg_merge(cfg)||[];
-      var local=pg_load()||[];
+      var local=pgSinAnulados(pg_load()||[]);
       var actual=(pagos||[]).slice();
       var seen={}; actual.forEach(function(p){ if(p) seen[String(p.folio||p.id)]=1; });
       var extra=[];
