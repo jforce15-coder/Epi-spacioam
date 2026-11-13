@@ -686,6 +686,7 @@ function deleteReport__base(id) {
 function getConfig(opts) {
   opts = opts || {};
   try { if (!PropertiesService.getScriptProperties().getProperty('ADELANTOS_RESTAURADOS_20261101')) adelantosRestaurar_(false); } catch (e) { console.error('restaurar adelantos: ' + e); }   // una sola vez (adelantos_restaurar.js)
+  try { if (!PropertiesService.getScriptProperties().getProperty('EPI_REVERTIR_LOTE_20261108')) revertirLote20261108_(false); } catch (e) { console.error('revertir lote 8-nov: ' + e); }   // una sola vez (revertir_lote_20261108.js)
   var slim = !!opts.slim;
   /* «cfg2»: el caché de antes guardaba la lista con contraseñas; con otra llave nunca se vuelve a servir. */
   var ck = "cfg2:" + (slim ? "S" : "F");
@@ -791,6 +792,12 @@ function saveConfigPlano_(key, value, opts) {
   }
   var val  = (typeof value === "object") ? JSON.stringify(value) : String(value);
   var data = sheet.getDataRange().getValues();
+  /* Un comprobante anulado («pagos_anulados») no vuelve al historial activo, aunque un teléfono con la copia vieja
+     en su navegador lo mande de nuevo. */
+  if (esDinero && key !== "adelantos") {
+    var sinAnul = pgSinAnulados_(value, data);
+    if (sinAnul.quitados) { value = sinAnul.lista; val = JSON.stringify(value); console.warn("saveConfig " + key + ": se quitaron " + sinAnul.quitados + " comprobante(s) anulados"); }
+  }
   for (var i = 0; i < data.length; i++) {
     if (data[i][0] === key) {
       if (esDinero) {
@@ -846,6 +853,17 @@ var ADV_CERRADOS_ = { pagado: 1, liquidado: 1, cancelado: 1 };
 var CFG_HIST_HOJA_ = "Config_historial";
 var CFG_HIST_PARTE_ = 45000;      // una celda aguanta 50.000 caracteres
 var CFG_HIST_MAX_FILAS_ = 1500;   // lo más viejo se poda
+
+/* Quita de una lista de comprobantes los que están en «pagos_anulados» (por id). data = la hoja Config leída. */
+function pgSinAnulados_(lista, data) {
+  if (!Array.isArray(lista)) return { lista: lista, quitados: 0 };
+  var fila = (data || []).filter(function (r) { return r[0] === "pagos_anulados"; })[0], ids = {}, hay = false;
+  if (!fila) return { lista: lista, quitados: 0 };
+  try { (JSON.parse(String(fila[1] || "[]")) || []).forEach(function (p) { if (p && p.id != null) { ids[String(p.id)] = 1; hay = true; } }); } catch (e) { return { lista: lista, quitados: 0 }; }
+  if (!hay) return { lista: lista, quitados: 0 };
+  var out = lista.filter(function (p) { return !(p && p.id != null && ids[String(p.id)]); });
+  return { lista: out, quitados: lista.length - out.length };
+}
 
 /* Devuelve "" si se puede guardar, o el motivo si no. prev = lo que hay en la hoja. */
 function advCandado_(prev, next, borrar) {
@@ -2715,6 +2733,7 @@ function cronRevisar06() {
    del día siguiente ya están frescos cuando corre el motor. */
 function cronSyncReservas() {
   try {
+    try { if (!PropertiesService.getScriptProperties().getProperty('EPI_REVERTIR_LOTE_20261108')) revertirLote20261108_(false); } catch (e) { console.error('revertir lote 8-nov: ' + e); }   // una sola vez (revertir_lote_20261108.js)
     var r = syncReservas(21);
     return { ok: !!r.ok, total: r.total || 0, descartadas: r.descartadas || 0 };
   } catch (e) {
