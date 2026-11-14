@@ -3,8 +3,8 @@
 Sitio estático para GitHub Pages (sin build). GitHub sirve estos archivos tal cual.
 
 ## Archivos
-- index.html — página principal (carga app.js)
-- app.js — la app completa, ya compilada (no necesita Babel)
+- index.html — página principal (carga app.build.js; si falta, compila app.jsx en el teléfono)
+- app.jsx — la app; app.build.js la compila GitHub (compilar-app.yml)
 - public/fonts/ — tipografía Valky
 - apps-script/ — código para pegar en Google Apps Script (referencia)
 - CNAME — dominio epi.spacioam.com

@@ -7399,10 +7399,8 @@ function PropList({props, onSave}) {
 
 
 /* ─── Compartir datos con el dashboard de propietarios (mi-spacioam)
-   Lee la pestaña SETUP del Sheet del dashboard (lectura pública vía gviz) y
-   trae el "Listing link" de cada propiedad, emparejando por nombre. Así ambos
-   proyectos comparten los enlaces de los anuncios sin backend adicional. */
-var OWNER_SHEET_ID = "1l9wLH8880NlN9ac2jvne2U6cqej6gycqAD77Z25cLF4";
+   La hoja de Mi es privada (14-nov-2026): el Apps Script de Epi la lee como su dueño y entrega solo
+   el nombre de cada propiedad y su "Listing link" (acción listaDashboard). Nada de correos ni números. */
 function parseCSVrows(text){
   var rows=[],row=[],cur="",q=false;
   for(var i=0;i<text.length;i++){var c=text[i];
@@ -7412,35 +7410,11 @@ function parseCSVrows(text){
   if(cur.length||row.length){row.push(cur);rows.push(row);}
   return rows;
 }
-async function fetchOwnerListings(){
-  var url="https://docs.google.com/spreadsheets/d/"+OWNER_SHEET_ID+"/gviz/tq?tqx=out:csv&sheet="+encodeURIComponent("SETUP");
-  var res=await fetch(url);
-  if(!res.ok) throw new Error("No se pudo leer el Sheet del dashboard ("+res.status+")");
-  var rows=parseCSVrows(await res.text());
-  if(!rows.length) return {};
-  var head=rows[0].map(function(h){return (h||"").trim();});
-  var iName=head.indexOf("property_name"), iLink=head.indexOf("Listing link");
-  if(iName<0||iLink<0) throw new Error("El Sheet no tiene las columnas property_name / Listing link");
-  var map={};
-  for(var r=1;r<rows.length;r++){
-    var nm=(rows[r][iName]||"").trim(), lk=(rows[r][iLink]||"").trim();
-    if(nm&&lk&&!map[normNm(nm)]) map[normNm(nm)]=lk;
-  }
-  return map;
-}
-/* Lista cruda del dashboard de propietarios (nombre + enlace), sin normalizar,
-   para las verificaciones. */
+/* Lista del dashboard de propietarios (nombre + enlace), sin normalizar, para las verificaciones. */
 async function fetchOwnerRaw(){
-  var url="https://docs.google.com/spreadsheets/d/"+OWNER_SHEET_ID+"/gviz/tq?tqx=out:csv&sheet="+encodeURIComponent("SETUP");
-  var res=await fetch(url);
-  if(!res.ok) throw new Error("No se pudo leer el dashboard ("+res.status+")");
-  var rows=parseCSVrows(await res.text()); if(!rows.length) return [];
-  var head=rows[0].map(function(h){return (h||"").trim();});
-  var iName=head.indexOf("property_name"), iLink=head.indexOf("Listing link");
-  if(iName<0) throw new Error("El dashboard no tiene la columna property_name");
-  var out=[],seen={};
-  for(var r=1;r<rows.length;r++){ var nm=(rows[r][iName]||"").trim(); if(!nm) continue; var k=normNm(nm); if(seen[k])continue; seen[k]=1; out.push({name:nm,link:iLink>=0?(rows[r][iLink]||"").trim():""}); }
-  return out;
+  var d=await apiCall("listaDashboard",{},{tries:2,timeout:30000});
+  if(!Array.isArray(d)) throw new Error("No se pudo leer el dashboard");
+  return d;
 }
 /* El aviso. Dice qué hay ya subido y qué pasa si sigue: el anterior se borra.
    Dos salidas, ninguna escondida. */

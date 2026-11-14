@@ -1,0 +1,23 @@
+# La hoja de Mi es privada (14-nov-2026): Epi no la lee por gviz ni por un CSV público, y su front ni la nombra.
+# El Apps Script la lee como el dueño (SpreadsheetApp) y la app pide solo nombre + enlace (listaDashboard).
+# El mismo check vive en Mi y en el Hub (.github/hoja-mi-privada.js).
+
+name: Hoja de Mi privada
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  revisar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Nadie lee la hoja de Mi por gviz/CSV público (y el front no la nombra)
+        run: node .github/hoja-mi-privada.js . --estricto

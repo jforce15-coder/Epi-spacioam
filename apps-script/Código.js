@@ -12,8 +12,8 @@ var FOLDER_ID        = "11odF5bZPpxh_boSg1Emtfh8gA67yFL1j";
    un error claro en vez de romperse. */
 var HOSPITABLE_TOKEN = PropertiesService.getScriptProperties().getProperty("HOSPITABLE_TOKEN") || "";
 
-/* ID del Sheet del dashboard de propietarios (mi-spacioam) — lectura pública.
-   De aquí se trae el "Listing link" de cada propiedad. */
+/* ID del Sheet del dashboard de propietarios (mi-spacioam). Es PRIVADO (14-nov-2026): se lee con SpreadsheetApp
+   (este script corre como el dueño), nunca por gviz público. De aquí se trae el "Listing link" de cada propiedad. */
 var OWNER_SHEET_ID = "1l9wLH8880NlN9ac2jvne2U6cqej6gycqAD77Z25cLF4";
 
 function doGet(e)  { return route(e); }
@@ -36,6 +36,7 @@ function route(e) {
     else if (p.action === "saveReport")     r = saveReport(p.data);
     else if (p.action === "deleteReport")   r = deleteReport(p.id);
     else if (p.action === "getConfig")      r = getConfig({ slim: truthy_(p.slim) });
+    else if (p.action === "listaDashboard") r = listaDashboard_();
     else if (p.action === "getHeavy")       r = getHeavy_();
     else if (p.action === "saveConfig")     r = saveConfig(p.key, p.value, { borrar: p.borrar });
     else if (p.action === "uploadFile")     r = uploadFile(p.b64, p.name, p.mime, p.subfolder);
@@ -475,24 +476,36 @@ function scrapePortfolio_(url) {
   return { cuartos: cuartos, banos: banos, fotos: fotos };
 }
 
+/* SETUP del dashboard de propietarios: solo nombre y "Listing link" de cada fila (nunca correos ni números).
+   La hoja de Mi es privada: se lee como el dueño con SpreadsheetApp. */
+function ownerSetupFilas_() {
+  if (!OWNER_SHEET_ID) return [];
+  var sh = SpreadsheetApp.openById(OWNER_SHEET_ID).getSheetByName("SETUP");
+  if (!sh) return [];
+  var v = sh.getDataRange().getDisplayValues();
+  if (!v.length) return [];
+  var head = v[0].map(function (h) { return String(h || "").trim(); });
+  var iName = head.indexOf("property_name"), iLink = head.indexOf("Listing link");
+  if (iName < 0) return [];
+  return v.slice(1).map(function (r) {
+    return { name: String(r[iName] || "").trim(), link: iLink >= 0 ? String(r[iLink] || "").trim() : "" };
+  }).filter(function (x) { return x.name; });
+}
+
 /* Lee los "Listing link" del Sheet del dashboard de propietarios */
 function getOwnerListingLinks_() {
-  if (!OWNER_SHEET_ID) return {};
-  var url = "https://docs.google.com/spreadsheets/d/" + OWNER_SHEET_ID +
-    "/gviz/tq?tqx=out:csv&sheet=" + encodeURIComponent("SETUP");
-  var res = uf_(url, { muteHttpExceptions: true });
-  if (res.getResponseCode() !== 200) return {};
-  var rows = Utilities.parseCsv(res.getContentText());
-  if (!rows.length) return {};
-  var head = rows[0].map(function (h) { return String(h || "").trim(); });
-  var iName = head.indexOf("property_name"), iLink = head.indexOf("Listing link");
-  if (iName < 0 || iLink < 0) return {};
-  var map = {};
-  for (var r = 1; r < rows.length; r++) {
-    var nm = String(rows[r][iName] || "").trim(), lk = String(rows[r][iLink] || "").trim();
-    if (nm && lk && !map[normName_(nm)]) map[normName_(nm)] = lk;
-  }
+  var map = {}, filas = [];
+  try { filas = ownerSetupFilas_(); } catch (e) { console.warn("getOwnerListingLinks_: " + e); return {}; }   // como antes: sin la hoja, sin enlaces
+  filas.forEach(function (x) { if (x.link && !map[normName_(x.name)]) map[normName_(x.name)] = x.link; });
   return map;
+}
+
+/* Acción «listaDashboard»: la lista del dashboard (nombre + enlace, una vez por propiedad) para las verificaciones de
+   Propiedades. Antes la app la bajaba directo de la hoja de Mi por gviz (por eso la hoja tenía que ser pública). */
+function listaDashboard_() {
+  var seen = {}, out = [];
+  ownerSetupFilas_().forEach(function (x) { var k = normName_(x.name); if (seen[k]) return; seen[k] = 1; out.push(x); });
+  return out;
 }
 
 function normName_(s) {
