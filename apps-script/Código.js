@@ -44,6 +44,7 @@ function route(e) {
     else if (p.action === "syncReservas")    r = syncReservas(p.days || 21);
     else if (p.action === "programar")       r = cronProgramar18();
     else if (p.action === "revisarMatutina") r = cronRevisar06();
+    else if (p.action === "redSalidas")      r = redSalidas_(p.fecha, { tentativas: p.tentativas !== false });   // red de salidas (el Hub la pide a las 7:00 y 19:00; redsalidas.js)
     else if (p.action === "syncProperties") r = syncPropertiesFull_();
     else if (p.action === "syncListings")   r = syncListingsFull_();
     else if (p.action === "syncReviews")    r = syncReviewsFull_(p.days || 365);
@@ -2337,6 +2338,11 @@ function syncReservas(days) {
 
   var uuids = Object.keys(porId);
   var reservas = [], sinNombre = 0, porPlataforma = {};
+  /* Páginas que Hospitable no entregó (ni con reintentos). Antes un error a media
+     paginación cortaba en silencio y se guardaba lo poco que había llegado como si
+     fuera todo: el 13-nov quedó 1 reserva, el 14-nov ninguna, y el motor de las 6 pm
+     borró la programación de dos días (Narama 623, 15-nov). Ver redsalidas.js. */
+  var fallos = [];
 
   /* 2 · Reservas por lotes CON include: sin include=properties,listings el
      nombre de la propiedad no viene de ninguna forma. */
@@ -2352,17 +2358,8 @@ function syncReservas(days) {
       var url = "https://public.api.hospitable.com/v2/reservations?" + qs +
                 "&start_date=" + d1 + "&end_date=" + d2 + "&per_page=100&page=" + pagina +
                 "&include=guest,properties,listings";
-      var res;
-      try {
-        res = uf_(url, {
-          method: "get",
-          headers: { "Authorization": "Bearer " + token, "Accept": "application/json" },
-          muteHttpExceptions: true
-        });
-      } catch (e) { break; }
-      if (res.getResponseCode() !== 200) break;
-      var j = {};
-      try { j = JSON.parse(res.getContentText()); } catch (e2) { break; }
+      var j = resPagina_(url, token);
+      if (!j) { fallos.push("lote " + (l + 1) + " pág. " + pagina); break; }
       var pag = j.data || [];
       data = data.concat(pag);
       var meta = j.meta && j.meta.pagination ? j.meta.pagination : null;
@@ -2444,6 +2441,14 @@ function syncReservas(days) {
      ahí, el guardado fallaría entero y el motor se quedaría sin reservas. Antes de
      llegar, se recortan las salidas más lejanas — nunca las próximas. */
   limpias.sort(function (a, b) { return String(a.checkOut).localeCompare(String(b.checkOut)); });
+
+  /* Una lectura incompleta o con una caída brusca de salidas NO pisa la copia buena:
+     el motor sigue con la última copia completa y el administrador se entera. */
+  var dudosa = resLecturaDudosa_(limpias, fallos, fmt(hoy));
+  if (dudosa) {
+    try { bitLog_("error", "Sincronización de reservas NO guardada: " + dudosa + " Se conserva la copia anterior.", "sync reservas"); } catch (e4) {}
+    return { ok: false, incompleta: true, error: dudosa, reservas: [], propiedades: propiedades, total: 0, fallos: fallos };
+  }
   var recortadas = 0;
   while (JSON.stringify(limpias).length > 45000 && limpias.length > 1) { limpias.pop(); recortadas++; }
 
@@ -2500,9 +2505,14 @@ function ratingsGuardados_() {
    Notifica SOLO el día siguiente; los otros dos quedan tentativos. */
 function cronProgramar18() {
   try {
-    syncReservas(21);
+    var sync = syncReservas(21);
     var cfg = getConfig();
     var reservas  = Array.isArray(cfg.reservas)  ? cfg.reservas  : [];
+    /* Si Hospitable no respondió completo, se programa con la última copia buena
+       solo si es reciente (cronSyncReservas corre cada 3 h); si es vieja, no se toca
+       la programación que ya existe (red de salidas, redsalidas.js). */
+    var lectura = redLecturaDe_(sync, cfg);
+    if (!lectura.ok && !lectura.usable) reservas = [];
     var vendors   = Array.isArray(cfg.vendors)   ? cfg.vendors   : [];
     var props     = Array.isArray(cfg.props)     ? cfg.props     : [];
     var ausencias = Array.isArray(cfg.ausencias) ? cfg.ausencias : [];
@@ -2512,6 +2522,7 @@ function cronProgramar18() {
     reservas = reservas.filter(function (r0) { return r0 && String(r0.propiedad || "").trim(); });
     if (!reservas.length || !vendors.length) {
       var falta = "No programé nada: " + (!vendors.length ? "no hay técnicos activos."
+        : !lectura.ok ? "no pude leer Hospitable (" + (lectura.error || "sin respuesta") + ") y la última copia buena es de hace " + redHoras_(lectura.edadH) + "."
         : "ninguna reserva trae la propiedad identificada (revisar la sincronización con Hospitable).");
       try { bitLog_("error", falta, "cron 6pm"); } catch (e3) { }
       try { avisarAdmins_(vendors, [{ msg: falta }], Utilities.formatDate(new Date(), "GMT-6", "yyyy-MM-dd")); } catch (e2) {}
@@ -2522,6 +2533,8 @@ function cronProgramar18() {
         var hoyG = Utilities.formatDate(new Date(), "GMT-6", "yyyy-MM-dd");
         notificarDia_(existentes, vendors, SCHED.shift(hoyG, 1), "programacion");
       } catch (eG) {}
+      /* Y la red de salidas de mañana: con lo que haya, dice qué salida quedó sin limpieza. */
+      try { redAvisarCorreo_(vendors, redSalidas_(SCHED.shift(hoyG, 1), { lectura: lectura, tentativas: false })); } catch (eR) { console.error("red de salidas: " + eR); }
       return { ok: false, error: falta };
     }
 
@@ -2543,8 +2556,18 @@ function cronProgramar18() {
     var nuevas = r.asignaciones.map(function (x, i) {
       return Object.assign({}, x, { id: "sc_" + hoy.replace(/-/g, "") + "_" + i });
     });
+    /* Cerrojo de reemplazo: si el plan nuevo deja sin limpieza muchas salidas que el
+       plan anterior sí cubría, el problema son los datos, no las reservas. Se
+       conserva el plan anterior completo (13-nov: un plan de 0 borró el del 14 y 15). */
+    var cerrojo = redCerrojoReemplazo_(existentes, conservar, nuevas, hoy);
+    if (cerrojo) {
+      bitLog_("programacion", "Reparto de las 6:00 pm DETENIDO — " + cerrojo + " Se conserva la programación anterior.", "cerrojo");
+      try { avisarAdmins_(vendors, [{ nivel: "critica", msg: "El reparto de las 6:00 pm se detuvo: " + cerrojo + " Quedó la programación anterior; revísala en Programación." }], hoy); } catch (eC) {}
+      nuevas = [];
+      conservar = existentes;
+    }
     var todas = conservar.concat(nuevas);
-    schedGuardar_(todas, "Reparto automático de las 6:00 pm", "Sistema · motor 6 pm");
+    if (!cerrojo) schedGuardar_(todas, "Reparto automático de las 6:00 pm", "Sistema · motor 6 pm");
 
     /* Dos oleadas de aviso:
        · el día anterior se le confirma a TODO el que tenga ruta;
@@ -2582,7 +2605,12 @@ function cronProgramar18() {
       "cron 6pm", { alertas: r.alertas.length, sinAsignar: fuera.length, requeridas: pedidas, reservas: reservas.length });
 
     if (r.alertas.length) avisarAdmins_(vendors, r.alertas, hoy);
-    return { ok: true, programadas: nuevas.length, notificados: enviados, alertas: r.alertas.length };
+    /* Red de salidas de mañana: toda salida con su limpieza confirmada y con persona;
+       lo que falte queda como tentativa (si el motor la puede cubrir) y avisado. */
+    var red = null;
+    try { red = redSalidas_(manana, { lectura: lectura }); redAvisarCorreo_(vendors, red); } catch (eR) { console.error("red de salidas: " + eR); }
+    return { ok: true, programadas: nuevas.length, notificados: enviados, alertas: r.alertas.length, cerrojo: cerrojo || "",
+             redFaltan: red && red.faltan ? red.faltan.length : null };
   } catch (e) {
     console.error("cronProgramar18:", e);
     return { ok: false, error: e.toString() };
@@ -2716,6 +2744,14 @@ function cronRevisar06() {
     existentes = huer.lista;
     var canceladas = huer.canceladas;
 
+    /* Lo que la red de salidas dejó anoche como tentativa para hoy y nadie confirmó se
+       reparte aquí como siempre (confirmada y con correo al técnico). Si el motor no
+       la puede cubrir, la tentativa se queda para que el administrador decida. */
+    var redHoy = existentes.filter(function (s) {
+      return s && s.origen === "red" && String(s.fecha).slice(0, 10) === hoy && String(s.estado || "") === "tentativa" && !s.notificadoEn;
+    });
+    if (redHoy.length) existentes = existentes.filter(function (s) { return redHoy.indexOf(s) < 0; });
+
     var r = SCHED.revisionMatutina({
       hoy: hoy, reservas: reservas, props: props, vendors: vendors,
       ratings: ratingsGuardados_(), ausencias: ausencias, existentes: existentes, pesoRating: 0.7
@@ -2725,6 +2761,9 @@ function cronRevisar06() {
     var nuevas = r.nuevas.map(function (x, i) {
       return Object.assign({}, x, { id: "sc_am_" + hoy.replace(/-/g, "") + "_" + i });
     });
+    var yaRepartidas = {};
+    nuevas.forEach(function (x) { yaRepartidas[nk_(x.propiedad)] = 1; });
+    existentes = existentes.concat(redHoy.filter(function (s) { return !yaRepartidas[nk_(s.propiedad)]; }));
     schedGuardar_(existentes.concat(nuevas), "Revisión de las 6:00 am — " + nuevas.length + " limpieza(s) agregada(s)", "Sistema · motor 6 am");
     var enviados = notificarDia_(nuevas, vendors, hoy, "programacionCambio");
     var fueraAM = (r.sinAsignar || []).map(function (x) {
@@ -3078,6 +3117,8 @@ function cronVerificarCheckouts() {
                 "\n\nMientras no se resuelva, la programación puede estar trabajando con reservas viejas." });
       }
       bitLog_("error", "Verificación de checkouts: falló la lectura de Hospitable.", "cron verificación");
+      /* La red de salidas de hoy igual corre con la última copia buena (sin tentativas) y avisa. */
+      try { redAvisarCorreo_(vendors, redSalidas_(hoy, { lectura: redLecturaDe_(sync, cfg), tentativas: false })); } catch (eR) { console.error("red de salidas: " + eR); }
       return { ok: false };
     }
 
@@ -3126,7 +3167,13 @@ function cronVerificarCheckouts() {
       sobran.length + " programadas sin checkout.", "cron verificación",
       { faltan: faltan.length, sobran: sobran.length });
 
-    if (!faltan.length && !sobran.length) return { ok: true, faltan: 0, sobran: 0 };
+    /* Red de salidas de HOY: la salida sin limpieza confirmada con persona queda como
+       tentativa si el motor la puede cubrir, y va primero en el correo. */
+    var red = null;
+    try { red = redSalidas_(hoy, { lectura: { ok: true, reservas: reservas, edadH: 0 } }); } catch (eR) { console.error("red de salidas: " + eR); }
+    var redTxt = redTexto_(red);
+
+    if (!faltan.length && !sobran.length && !redTxt) return { ok: true, faltan: 0, sobran: 0 };
 
     var admins = vendors.filter(function (v) { return v.isAdmin && v.active && v.email; }).map(function (v) { return v.email; });
     if (!admins.length) return { ok: true, faltan: faltan.length, sobran: sobran.length, sinAdmins: true };
@@ -3139,7 +3186,8 @@ function cronVerificarCheckouts() {
       }
       return em || "sin técnico";
     }
-    var cuerpo = "Comparación de la programación del app con los checkouts que hoy devuelve Hospitable (del " + hoy + " al " + fin + ").\n\n";
+    var cuerpo = (redTxt ? redTxt + "\n\n" : "") +
+      "Comparación de la programación del app con los checkouts que hoy devuelve Hospitable (del " + hoy + " al " + fin + ").\n\n";
     if (faltan.length) {
       cuerpo += "CHECKOUT SIN LIMPIEZA PROGRAMADA (" + faltan.length + ")\n" +
         faltan.map(function (x) { return "• " + x.fecha + " — " + x.propiedad; }).join("\n") + "\n\n";
@@ -3153,10 +3201,11 @@ function cronVerificarCheckouts() {
 
     notify({
       to: admins,
-      subject: "Checkouts vs. programación — " + faltan.length + " sin programar" + (sobran.length ? " · " + sobran.length + " de más" : ""),
+      subject: (redTxt ? "Hoy: " + red.faltan.length + " salida(s) sin limpieza confirmada · " : "") +
+        "Checkouts vs. programación — " + faltan.length + " sin programar" + (sobran.length ? " · " + sobran.length + " de más" : ""),
       body: cuerpo
     });
-    return { ok: true, faltan: faltan.length, sobran: sobran.length };
+    return { ok: true, faltan: faltan.length, sobran: sobran.length, redFaltan: red && red.faltan ? red.faltan.length : null };
   } catch (e) {
     console.error("cronVerificarCheckouts:", e);
     try { bitLog_("error", "Verificación de checkouts falló: " + e, "cron verificación"); } catch (e2) {}
