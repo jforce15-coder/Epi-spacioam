@@ -10,6 +10,8 @@ on:
     paths:
       - "apps-script/**"
       - ".clasp.json"
+      - ".github/red-salidas.js"
+      - ".github/workflows/revisar-apps-script.yml"
 
 jobs:
   revisar:
@@ -73,3 +75,7 @@ jobs:
             if [ -z "$ahora" ]; then echo "✓ $dir sin funciones repetidas"; fi
           done < <(find . -path ./.git -prune -o -path '*/archivo/*' -prune -o -name appsscript.json -print0)
           exit $fallo
+
+      # 16-nov-2026 (Narama 623, 15-nov): una salida nunca se queda sin limpieza en silencio.
+      - name: Red de salidas (con dobles)
+        run: node .github/red-salidas.js apps-script
