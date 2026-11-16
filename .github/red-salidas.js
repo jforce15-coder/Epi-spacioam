@@ -48,7 +48,7 @@ function caja(o) {
   return { ctx, log, cfg: () => cfg, props };
 }
 
-const TEC = { id: 'v1', email: 'tec@x', primerNombre: 'Sucely', active: true, isAdmin: false };
+const TEC = { id: 'v1', email: 'tec@x', primerNombre: 'Ana', active: true, isAdmin: false };
 const ADM = { id: 'v0', email: 'adm@x', name: 'Admin', active: true, isAdmin: true };
 const res = (prop, ci, co) => ({ id: prop + co, propiedad: prop, checkIn: ci, checkOut: co, habitaciones: 1 });
 const fila = (id, fecha, prop, x) => Object.assign({ id, fecha, propiedad: prop, vendorEmail: 'tec@x', tipo: 'Limpieza', estado: 'tentativa', origen: 'motor' }, x || {});
@@ -139,7 +139,7 @@ const fila = (id, fecha, prop, x) => Object.assign({ id, fecha, propiedad: prop,
   const t = g && g.lista.filter(s => s.origen === 'red')[0];
   ok(t && t.estado === 'tentativa' && t.propiedad === 'Z13 - Narama - 623' && !t.notificadoEn && !('nuevaHoy' in t), 'Narama 623 queda como tentativa de la red, sin correo al técnico');
   const n = r.faltan.filter(f => /Narama/.test(f.propiedad))[0], m = r.faltan.filter(f => /Monaco/.test(f.propiedad))[0];
-  ok(n.propuesta === 'Sucely' && m.propuesta === '' && /No cabe/.test(m.razon), 'faltan dice la propuesta (Sucely) o la razón (no cabe)');
+  ok(n.propuesta === 'Ana' && m.propuesta === '' && /No cabe/.test(m.razon), 'faltan dice la propuesta (Ana) o la razón (no cabe)');
   ok(/SALIDAS DEL 2026-11-15 SIN LIMPIEZA CONFIRMADA \(2\)/.test(c.ctx.redTexto_(r)), 'el texto del aviso lo dice');
   ok(c.ctx.redAvisarCorreo_([TEC, ADM], r) && c.log.correos[0].to[0] === 'adm@x', 'el correo va solo a los administradores');
   const r2 = c.ctx.redSalidas_('2026-11-15');
