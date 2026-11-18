@@ -1193,7 +1193,7 @@ function compress(file) {
 }
 
 /* ═══ STORAGE — auto-detects environment */
-var SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxzYpBaTI_1S0VepOi810zrzB-fyC4R2Flug0ZEOOxNzZ9F7CLiSWaKXEtk1C17sfsX/exec";
+var SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzPnUMHeLudInuDl4p29MOd5B-BcnezH34evAqAPa7_oaxJkOo-7DHr8ezxhMyjTjSe/exec";   /* Epi en alma@ (traslado a Workspace, Hub-Spacioam docs/specs/traslado-workspace.md) */
 
 /* ═══ CANDADO ANTI-BORRADO DE USUARIOS ═══
    Solo es `true` cuando la lista REAL de usuarios se cargó desde Google Sheets.
