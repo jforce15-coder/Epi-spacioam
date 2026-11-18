@@ -5271,3 +5271,5 @@ function cambiarPinEpi_(actual, nueva, ses) {
   PropertiesService.getScriptProperties().setProperty("EPI_ADMIN_PIN", claveHash_(nueva));
   return { ok: true };
 }
+
+// Unir = publicar: lo que se une a main en apps-script/ llega solo a alma@ (Traslado a Workspace, 18-nov-2026).
