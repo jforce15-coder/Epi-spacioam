@@ -22,7 +22,7 @@ function doPost(e) { return route(e); }
 function route(e) {
   try {
     var p = e.postData ? JSON.parse(e.postData.contents) : e.parameter;
-    var __diag = accesosDiag_(p) || cupoDiag_(p); if (__diag) return __diag;   // fase 1b: resumen de accesos (robot)
+    var __diag = accesosDiag_(p) || cupoDiag_(p) || loginSecretoDiag_(p); if (__diag) return __diag;   // fase 1b: resumen de accesos (robot)
     var __ses = sesionDe_(p); registrarAcceso_(p.action, __ses ? true : esRobot_(p) ? 'r' : false);
     var __bloq = (typeof p.action === 'string' && p.action.indexOf('.') > 0) ? null : exigirSesion_(p.action, !!__ses, p, ['ping', 'nuevaClaveTecnico', 'loginEpi', 'loginAdminEpi', 'cambiarClaveEpi', 'cambiarPinEpi', '']); if (__bloq) return __bloq;   // fase 1c: públicas = webhooks de Hospitable, ping, entrar y cambio de clave (el servidor comprueba la contraseña)
     var r = {};
