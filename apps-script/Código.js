@@ -5040,9 +5040,12 @@ function subjectForType_(type, d) {
       (j = la respuesta ya parseada con JSON.parse)
    ══════════════════════════════════════════════════════════════════════ */
 
+var HUB_ALMA_URL_ = 'https://script.google.com/macros/s/AKfycbycTV0MsPWym02-ZcbpBBtwg9-WLw8dK9SAEDBslPd_9mgmizPQJS4-B_Q4uEkTWFqQ/exec';   // Hub en alma@ (traslado)
+var HUB_ALMA_URL_VIEJA_ = 'https://script.google.com/macros/s/AKfycbzTdkEpRPgnwaUIHWbQmrysPEqGYqTqDKYwMaQlnun-OT7B2hIa6KdSNS-aedWN-I0cZQ/exec';   // apagado
 function registrarUsoIA_(funcion, modelo, usage, detalle, ref) {
   try {
-    var p = PropertiesService.getScriptProperties(), url = p.getProperty('ALMA_URL') || 'https://script.google.com/macros/s/AKfycbzTdkEpRPgnwaUIHWbQmrysPEqGYqTqDKYwMaQlnun-OT7B2hIa6KdSNS-aedWN-I0cZQ/exec', k = p.getProperty('USO_KEY');
+    var p = PropertiesService.getScriptProperties(), url = p.getProperty('ALMA_URL'), k = p.getProperty('USO_KEY');
+    if (!url || url === HUB_ALMA_URL_VIEJA_) url = HUB_ALMA_URL_;   // la Propiedad manda, salvo que guarde la dirección vieja del Hub
     if (!url || !k) return;
     uf_(url, {
       method: 'post', contentType: 'application/json', muteHttpExceptions: true,
