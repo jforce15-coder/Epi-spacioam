@@ -22,7 +22,8 @@ function doPost(e) { return route(e); }
 function route(e) {
   try {
     var p = e.postData ? JSON.parse(e.postData.contents) : e.parameter;
-    var __diag = accesosDiag_(p) || cupoDiag_(p) || loginSecretoDiag_(p); if (__diag) return __diag;   // fase 1b: resumen de accesos (robot)
+    var __mud = typeof trasladoEntregar_ === 'function' && trasladoEntregar_(p); if (__mud) return __mud;   // traslado a Workspace: Propiedades solo a alma@ (traslado.js)
+    var __diag = accesosDiag_(p) || cupoDiag_(p) || loginSecretoDiag_(p) || (typeof epiTrasladoDiag_ === 'function' && epiTrasladoDiag_(p)); if (__diag) return __diag;   // fase 1b: resumen de accesos (robot)
     var __ses = sesionDe_(p); registrarAcceso_(p.action, __ses ? true : esRobot_(p) ? 'r' : false);
     var __bloq = (typeof p.action === 'string' && p.action.indexOf('.') > 0) ? null : exigirSesion_(p.action, !!__ses, p, ['ping', 'nuevaClaveTecnico', 'loginEpi', 'loginAdminEpi', 'cambiarClaveEpi', 'cambiarPinEpi', '']); if (__bloq) return __bloq;   // fase 1c: públicas = webhooks de Hospitable, ping, entrar y cambio de clave (el servidor comprueba la contraseña)
     var r = {};
@@ -259,7 +260,8 @@ function aiSummary(p) {
    3) cronRecoverPhotos   · por horas · cada hora
    4) cronSyncProperties  · por día · 3:00–4:00 a.m.   (cuartos/baños/fotos del anuncio)
    Verifica zona horaria (GMT-6 Guatemala) en Configuración del proyecto. */
-function cronSyncHospitable() {
+function cronSyncHospitable(e) {
+  if (typeof epiSaltarActivador_ === 'function' && epiSaltarActivador_(e)) return;   // traslado: otro proyecto atiende lo de fondo (trasladocorte.js)
   try {
     var r = syncHospitable(14);
     if (!r || !r.schedules || !r.schedules.length) return;
@@ -282,7 +284,8 @@ function cronSyncHospitable() {
   } catch (e) { console.error("cronSyncHospitable:", e); }
 }
 
-function cronRecoverPhotos() {
+function cronRecoverPhotos(e) {
+  if (typeof epiSaltarActivador_ === 'function' && epiSaltarActivador_(e)) return;   // traslado: otro proyecto atiende lo de fondo (trasladocorte.js)
   try { recoverPhotos(); } catch (e) { console.error("cronRecoverPhotos:", e); }
 }
 
@@ -293,7 +296,8 @@ function cronRecoverPhotos() {
      cuartos, baños y la galería de fotos de referencia. SIN token.
    • Guarda todo en la config "props" del app. Nunca borra ni renombra.
    Corre solo con el activador cronSyncProperties (ver BLOQUE 3). */
-function cronSyncProperties() {
+function cronSyncProperties(e) {
+  if (typeof epiSaltarActivador_ === 'function' && epiSaltarActivador_(e)) return;   // traslado: otro proyecto atiende lo de fondo (trasladocorte.js)
   try { syncPropertiesFull_(); } catch (e) { console.error("cronSyncProperties:", e); }
 }
 
@@ -451,7 +455,8 @@ function scanListingUrl_(o) {
 
 /* Cron opcional — sincroniza la lista de propiedades una vez al día.
    Crea el activador: ⏰ Activadores → cronSyncListings · por día · 3-4 a.m. */
-function cronSyncListings() {
+function cronSyncListings(e) {
+  if (typeof epiSaltarActivador_ === 'function' && epiSaltarActivador_(e)) return;   // traslado: otro proyecto atiende lo de fondo (trasladocorte.js)
   try { syncListingsFull_(); } catch (e) { console.error("cronSyncListings:", e); }
 }
 
@@ -1831,7 +1836,8 @@ function rvCat_(rv, names) {
 
 
 /* Activador diario recomendado: cronSyncReviews · por día · 4-5 a.m. */
-function cronSyncReviews() {
+function cronSyncReviews(e) {
+  if (typeof epiSaltarActivador_ === 'function' && epiSaltarActivador_(e)) return;   // traslado: otro proyecto atiende lo de fondo (trasladocorte.js)
   try {
     var r = syncReviewsFull_(365);
     console.log("cronSyncReviews:", JSON.stringify(r && { ok: r.ok, added: r.added, total: r.total, error: r.error }));
@@ -2503,7 +2509,8 @@ function ratingsGuardados_() {
 
 /* ─── Corrida de las 6:00 pm — programa los próximos 3 días.
    Notifica SOLO el día siguiente; los otros dos quedan tentativos. */
-function cronProgramar18() {
+function cronProgramar18(e) {
+  if (typeof epiSaltarActivador_ === 'function' && epiSaltarActivador_(e)) return;   // traslado: otro proyecto atiende lo de fondo (trasladocorte.js)
   try {
     var sync = syncReservas(21);
     var cfg = getConfig();
@@ -2727,7 +2734,8 @@ function cancelarHuerfanas_(existentes, reservas, vendors, hoy) {
   return { lista: lista, canceladas: canceladas };
 }
 
-function cronRevisar06() {
+function cronRevisar06(e) {
+  if (typeof epiSaltarActivador_ === 'function' && epiSaltarActivador_(e)) return;   // traslado: otro proyecto atiende lo de fondo (trasladocorte.js)
   try {
     syncReservas(21);
     var cfg = getConfig();
@@ -2783,7 +2791,8 @@ function cronRevisar06() {
 /* ─── Sincronización automática de reservas (cada 3 horas).
    Así el administrador nunca tiene que presionar "Traer reservas": los checkouts
    del día siguiente ya están frescos cuando corre el motor. */
-function cronSyncReservas() {
+function cronSyncReservas(e) {
+  if (typeof epiSaltarActivador_ === 'function' && epiSaltarActivador_(e)) return;   // traslado: otro proyecto atiende lo de fondo (trasladocorte.js)
   try {
     try { if (!PropertiesService.getScriptProperties().getProperty('EPI_REVERTIR_LOTE_20261108')) revertirLote20261108_(false); } catch (e) { console.error('revertir lote 8-nov: ' + e); }   // una sola vez (revertir_lote_20261108.js)
     var r = syncReservas(21);
@@ -2973,7 +2982,8 @@ function formulariosDelDia_(f) {
    A media mañana un formulario faltante todavía es "va en camino". A la 1:00 pm
    ya no: o la limpieza no ocurrió, o nadie la está registrando. El administrador
    se entera con tiempo de mover a alguien, no en la noche. */
-function cronAlertaLimpiezas13() {
+function cronAlertaLimpiezas13(e) {
+  if (typeof epiSaltarActivador_ === 'function' && epiSaltarActivador_(e)) return;   // traslado: otro proyecto atiende lo de fondo (trasladocorte.js)
   try {
     var cfg = getConfig();
     var vendors   = Array.isArray(cfg.vendors)   ? cfg.vendors   : [];
@@ -3037,7 +3047,8 @@ function cronAlertaLimpiezas13() {
    para el técnico, y a las 7:00 pm todavía le da tiempo de subirlo el mismo
    día. Solo se le escribe a quien de verdad tiene algo pendiente, y una sola
    vez por día: un recordatorio que llega de más deja de leerse. */
-function cronRecordatorio19() {
+function cronRecordatorio19(e) {
+  if (typeof epiSaltarActivador_ === 'function' && epiSaltarActivador_(e)) return;   // traslado: otro proyecto atiende lo de fondo (trasladocorte.js)
   try {
     var cfg = getConfig();
     var vendors   = Array.isArray(cfg.vendors)   ? cfg.vendors   : [];
@@ -3096,7 +3107,8 @@ function cronRecordatorio19() {
   }
 }
 
-function cronVerificarCheckouts() {
+function cronVerificarCheckouts(e) {
+  if (typeof epiSaltarActivador_ === 'function' && epiSaltarActivador_(e)) return;   // traslado: otro proyecto atiende lo de fondo (trasladocorte.js)
   try {
     var cfg = getConfig();
     var vendors   = Array.isArray(cfg.vendors)   ? cfg.vendors   : [];
