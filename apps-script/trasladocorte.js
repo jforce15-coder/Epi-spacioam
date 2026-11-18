@@ -11,7 +11,7 @@
      solo si quedaron todos, se anota como dueño. Desde ahí lo de fondo lo hace alma@; el viejo queda de respaldo.
    · Volver atrás: robot { action: "__traslado", token, dueno: "yo" } al proyecto VIEJO (o poner su id en B1 a mano). */
 var EPI_TRASLADO_HOJA_ = 'TRASLADO';
-/* Los activadores de Epi: [función, cómo]. Los mismos que crean crearActivadoresProgramacion y crearActivadorReviews. */
+/* Los activadores de Epi: [función, cómo]. Los que tenía vivos el viejo el 18-nov-2026 (robot __traslado). */
 var EPI_ACTIVADORES_ = [
   ['cronProgramar18', function (b) { return b.atHour(18).everyDays(1); }],        // programa 3 días y avisa al técnico
   ['cronRevisar06', function (b) { return b.atHour(6).everyDays(1); }],           // reservas nuevas de la noche
@@ -19,8 +19,12 @@ var EPI_ACTIVADORES_ = [
   ['cronSyncReservas', function (b) { return b.everyHours(3); }],
   ['cronAlertaLimpiezas13', function (b) { return b.atHour(13).everyDays(1); }],
   ['cronRecordatorio19', function (b) { return b.atHour(19).everyDays(1); }],
-  ['cronSyncReviews', function (b) { return b.atHour(4).everyDays(1); }]
+  ['cronSyncReviews', function (b) { return b.atHour(4).everyDays(1); }],
+  ['cronSyncListings', function (b) { return b.atHour(3).everyDays(1); }],      // lista de propiedades (creado a mano en el viejo)
+  ['cronSyncProperties', function (b) { return b.atHour(3).everyDays(1); }]     // cuartos, baños y fotos del anuncio (a mano en el viejo)
 ];
+/* En el viejo hay además cronCodigos9am, cronCodigos5pm y cronCodigos8pm: esas funciones ya no existen en el código
+   (cada corrida falla sola), así que no se pasan. */
 
 function epiTrasladoHoja_(crear) {
   var ss = SpreadsheetApp.openById(SPREADSHEET_ID), sh = ss.getSheetByName(EPI_TRASLADO_HOJA_);
